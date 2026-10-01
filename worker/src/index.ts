@@ -1111,6 +1111,135 @@ async function dailymotion(page: number): Promise<any[]> {
     })).filter((v: any) => v.embed)
   } catch { return [] }
 }
+// Dailymotion trending Shorts (2 daqiqadan qisqa, ko'rish soni bo'yicha trend)
+async function dmShorts(): Promise<any[]> {
+  try {
+    const r = await fetch("https://api.dailymotion.com/videos?fields=id,title,duration,views_total,thumbnail_240_url,thumbnail_360_url,created_time&sort=trending&shorter_than=2&limit=22", { headers: TREND_UA, cf: { cacheTtl: 600 } } as any)
+    if (!r.ok) return []
+    const j: any = await r.json()
+    return (j.list || []).map((v: any) => ({
+      kind: "short", cat: "video", vid: "dm", embed: String(v.id || ""),
+      title: String(v.title || "Shorts"), url: "https://www.dailymotion.com/video/" + v.id,
+      image: String(v.thumbnail_240_url || v.thumbnail_360_url || ""), duration: +v.duration || 0,
+      views: +v.views_total || 0, time: v.created_time ? +v.created_time * 1000 : now(),
+    })).filter((v: any) => v.embed)
+  } catch { return [] }
+}
+
+// --- YouTube trending (dunyo bo'yicha eng ko'p ko'rilgan videolar va Shorts) ---
+// Ochiq Piped/Invidious API'lari orqali (API kalit kerak emas, kichik JSON). Manba nomi hech qanday javobda ko'rsatilmaydi.
+const PIPED_APIS = ["https://api.piped.private.coffee", "https://pipedapi.kavin.rocks", "https://pipedapi.adminforge.de"]
+const INVID_APIS = ["https://inv.nadeko.net", "https://invidious.nerdvpn.de"]
+async function fT(url: string, ms: number, cacheTtl = 600): Promise<Response | null> {
+  try {
+    const r = await fetch(url, { headers: TREND_UA, signal: AbortSignal.timeout(ms), cf: { cacheTtl, cacheEverything: true } } as any)
+    return r.ok ? r : null
+  } catch { return null }
+}
+async function youtubeTrending(): Promise<any[]> {
+  // 1) Piped instance'lar
+  for (const base of PIPED_APIS) {
+    const r = await fT(base + "/trending?region=US", 5000)
+    if (!r) continue
+    try {
+      const j: any = await r.json()
+      const list = Array.isArray(j) ? j : j.items || []
+      const out = (list || []).map((v: any) => {
+        const id = String(v.url || "").split("v=")[1]
+        if (!id) return null
+        return {
+          kind: "video", vid: "yt", yt: id.split("&")[0],
+          title: String(v.title || ""), image: String(v.thumbnail || ""),
+          views: +v.views || 0, duration: +v.duration || 0,
+          time: +v.uploaded > 0 ? +v.uploaded : now(),
+          url: "https://www.youtube.com/watch?v=" + id.split("&")[0], cat: "video",
+        }
+      }).filter((v: any) => v && v.title)
+      if (out.length >= 8) return out
+    } catch {}
+  }
+  // 2) Invidious instance'lar
+  for (const base of INVID_APIS) {
+    const r = await fT(base + "/api/v1/trending?region=US", 5000)
+    if (!r) continue
+    try {
+      const j: any = await r.json()
+      const out = (Array.isArray(j) ? j : []).map((v: any) => ({
+        kind: "video", vid: "yt", yt: String(v.videoId || ""),
+        title: String(v.title || ""), image: String(v.videoThumbnails?.[0]?.url || ""),
+        views: +v.viewCount || 0, duration: +v.lengthSeconds || 0,
+        time: +v.published > 0 ? +v.published * 1000 : now(),
+        url: "https://www.youtube.com/watch?v=" + v.videoId, cat: "video",
+      })).filter((v: any) => v.yt && v.title)
+      if (out.length >= 8) return out
+    } catch {}
+  }
+  console.log("trend yt bo'sh")
+  return []
+}
+// --- Reddit viral videolar: to'g'ridan-to'g'ri mp4 — muqovasiz, bevosita ijro etiladi (manba yashirin) ---
+const REDDIT_SR = ["Damnthatsinteresting", "interestingasfuck"]
+async function redditViral(): Promise<any[]> {
+  const out: any[] = []
+  for (const sr of REDDIT_SR) {
+    const r = await fT(`https://www.reddit.com/r/${sr}/hot.json?limit=30&raw_json=1`, 5000)
+    if (!r) continue
+    try {
+      const j: any = await r.json()
+      for (const ch of j?.data?.children || []) {
+        const d = ch?.data || {}
+        const title = String(d.title || "").trim()
+        const v = d?.secure_media?.reddit_video || d?.media?.reddit_video
+        const mp4 = String(v?.fallback_url || "")
+        if (!title || !mp4 || d.stickied || d.pinned || d.over_18 || (+d.score || 0) < 200) continue
+        out.push({
+          kind: "short", vid: "mp4", mp4, audio: mp4.replace(/DASH_[^/]*\.mp4$/, "DASH_AUDIO_128.mp4"),
+          title, views: +d.score || 0, duration: Math.round(+v?.duration || 0),
+          time: (+d.created_utc || 0) * 1000, image: /^https/.test(String(d.thumbnail)) ? String(d.thumbnail) : "",
+          url: "https://www.reddit.com" + String(d.permalink || ""), cat: "video",
+        })
+      }
+    } catch {}
+    if (out.length >= 20) break
+  }
+  return out
+}
+// --- TikTok trending (eng yaxshi urinish; blok bo'lsa jim o'tkaziladi — tizim buzilmaydi) ---
+async function tiktokTrending(): Promise<any[]> {
+  const r = await fT("https://www.tiktok.com/api/recommend/item_list/?aid=1988&count=20&region=UZ", 5000)
+  if (!r) return []
+  try {
+    const j: any = await r.json()
+    return (j?.itemList || []).map((it: any) => ({
+      kind: "short", vid: "tt", yt: String(it?.video?.video_id || ""),
+      title: String(it?.desc || "").trim() || "Shorts", image: String(it?.video?.cover || ""),
+      views: +it?.statistics?.play_count || 0, duration: Math.round(+it?.video?.duration || 0),
+      time: +it?.create_time ? +it.create_time * 1000 : now(),
+      url: "https://www.tiktok.com/@" + String(it?.author?.unique_id || "video") + "/video/" + it?.video?.video_id, cat: "video",
+    })).filter((v: any) => v.yt && v.title)
+  } catch { return [] }
+}
+// --- Yagona video hovuzi (edge-kesh 10 daq): Shorts + uzun videolar, ko'rish soni bo'yicha saralangan ---
+async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
+  const ck = "https://trend.50gram.internal/poolv2"
+  try {
+    const hit = await caches.default.match(ck)
+    if (hit) return await hit.json()
+  } catch {}
+  const [yt, rd, tt, dmLong, dmS] = await Promise.all([youtubeTrending(), redditViral(), tiktokTrending(), dailymotion(1), dmShorts()])
+  // Live streamlar (dur<0) chiqariladi; dur<=90 — Shorts, qolgani uzun videolar
+  const shorts = [...dmS, ...rd, ...yt.filter((v: any) => v.duration > 0 && v.duration <= 90), ...tt]
+  const vids = [...yt.filter((v: any) => v.duration > 90 || v.duration === 0), ...dmLong]
+  shorts.sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
+  vids.sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
+  const data = { shorts: shorts.slice(0, 44), vids: vids.slice(0, 44) }
+  if (data.shorts.length || data.vids.length) {
+    const resp = json(data)
+    resp.headers.set("cache-control", "public, s-maxage=600")
+    c.wait(caches.default.put(ck, resp.clone()).catch(() => {}))
+  }
+  return data
+}
 const tSleep = (ms: number) => new Promise((res) => setTimeout(res, ms))
 async function newsPool(c: C): Promise<any[]> {
   // Barcha manbalar bitta kategoriyalangan pool'da (edge-kesh 15 daq) — sahifalar arzon hisoblanadi
@@ -1137,27 +1266,91 @@ async function newsPool(c: C): Promise<any[]> {
   return out
 }
 const CAT_KEYS = ["uz", "world", "tech", "sport", "biznes", "shou", "fan", "salomatlik"]
+const TREND_CATS = new Set([...CAT_KEYS, "video"])
+// --- Analiz tizimi: global vaznlarni o'qish (qarorlar keshi 2 daq) ---
+// FAQAT agregat hisoblagichlar (kategoriya bo'yicha ko'rish/bosish/vaqt) — hech qanday yangilik kontenti saqlanmaydi.
+async function trendWeights(c: C): Promise<Record<string, number>> {
+  const ck = "https://trend.50gram.internal/tw2"
+  try {
+    const hit = await caches.default.match(ck)
+    if (hit) return await hit.json()
+  } catch {}
+  const w: Record<string, number> = {}
+  try {
+    const rows = await c.db.q("SELECT cat, imp, clk, wt FROM trend_stats")
+    for (const r of rows) {
+      const imp = +r.imp || 0, clk = +r.clk || 0, wt = +r.wt || 0
+      // Qaror formulasi: CTR (bosish/ko'rish) + ko'rish vaqti logarifmi — shu mavzu lentada oldinga suriladi
+      w[String(r.cat)] = Math.round(Math.min(6, (imp ? (clk / imp) * 20 : 0) + Math.log10(wt + 10) * 1.2))
+    }
+  } catch {}
+  const resp = json(w)
+  resp.headers.set("cache-control", "public, s-maxage=120")
+  c.wait(caches.default.put(ck, resp.clone()).catch(() => {}))
+  return w
+}
+async function trendEv(c: C) {
+  const b: any = await c.req.json().catch(() => ({}))
+  const cat = str(b?.cat, 20), ev = str(b?.ev, 6)
+  if (!TREND_CATS.has(cat)) fail("Noto‘g‘ri kategoriya")
+  const n = Math.max(1, Math.min(50, +b?.n || 1))
+  const t = now()
+  if (ev === "imp") await c.db.run("INSERT INTO trend_stats(cat,imp,clk,wt,upd) VALUES(?,?,0,0,?) ON DUPLICATE KEY UPDATE imp=imp+?,upd=?", [cat, n, t, n, t])
+  else if (ev === "clk") await c.db.run("INSERT INTO trend_stats(cat,imp,clk,wt,upd) VALUES(?,0,?,0,?) ON DUPLICATE KEY UPDATE clk=clk+?,upd=?", [cat, n, t, n, t])
+  else if (ev === "wt") {
+    const ms = Math.max(0, Math.min(3600000, +b?.ms || 0))
+    if (!ms) return json({ ok: true })
+    await c.db.run("INSERT INTO trend_stats(cat,imp,clk,wt,upd) VALUES(?,0,0,?,?) ON DUPLICATE KEY UPDATE wt=wt+?,upd=?", [cat, ms, t, ms, t])
+  } else fail("Noto‘g‘ri hodisa")
+  return json({ ok: true })
+}
+async function trendInsights(c: C) {
+  const rows = await c.db.q("SELECT cat, imp, clk, wt FROM trend_stats ORDER BY clk DESC").catch(() => [])
+  let imp = 0, clk = 0, wt = 0
+  for (const r of rows) { imp += +r.imp || 0; clk += +r.clk || 0; wt += +r.wt || 0 }
+  const scores = rows.map((r) => {
+    const i = +r.imp || 0, k = +r.clk || 0, w = +r.wt || 0
+    return {
+      cat: String(r.cat), imp: i, clk: k, wt: w,
+      ctr: i ? Math.round((k / i) * 1000) / 10 : 0,
+      score: Math.min(100, Math.round((i ? (k / i) * 400 : 0) + Math.log10(w + 10) * 18)),
+    }
+  }).sort((a, b) => b.score - a.score)
+  const max = scores[0]?.score || 1
+  for (const s of scores) (s as any).bar = Math.max(5, Math.round((s.score / max) * 100))
+  return json({
+    ok: true, total_imp: imp, total_clk: clk, total_wt: wt,
+    ctr: imp ? Math.round((clk / imp) * 1000) / 10 : 0,
+    cats: scores, top: scores[0]?.cat || "",
+  })
+}
 async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  const cacheKey = "https://trend.50gram.internal/t7?p=" + page + "&cat=" + onlyCat
+  const cacheKey = "https://trend.50gram.internal/t8?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
   } catch {}
   let items: any[] = []
   if (onlyCat === "video") {
-    items = await dailymotion(page)
+    // Video: Shorts (vertikal) + uzun videolar aralash, cheksiz (oxirida qaytadan boshlanadi)
+    const vp = await videoPool(c)
+    const all = [...vp.shorts, ...vp.vids]
+    const s0 = ((page - 1) * 12) % Math.max(1, all.length)
+    items = all.slice(s0, s0 + 12)
+    if (items.length < 12 && all.length) items.push(...all.slice(0, 12 - items.length))
   } else {
     const pool = await newsPool(c)
     if (onlyCat && CAT_KEYS.includes(onlyCat)) {
       items = pool.filter((x) => x.cat === onlyCat).slice((page - 1) * 12, page * 12)
     } else {
-      // Barchasi: kategoriyalar qiziqish vazniga qarab round-robin aralashtiriladi
+      // Barchasi: kategoriyalar FOYDALANUVCHI qiziqishi + ANALIZ TIZIMI qarorlari bo'yicha round-robin
       const w: Record<string, number> = {}
       for (const part of catsW.split(",")) { const [k, v] = part.split(":"); if (CAT_KEYS.includes(k)) w[k] = +v || 0 }
-      const keys = CAT_KEYS.slice().sort((a, b) => (w[b] || 0) - (w[a] || 0))
+      const gw = await trendWeights(c)
+      const keys = CAT_KEYS.slice().sort((a, b) => ((w[b] || 0) + (gw[b] || 0) * 1.5) - ((w[a] || 0) + (gw[a] || 0) * 1.5))
       const byCat = new Map(keys.map((k) => [k, pool.filter((x) => x.cat === k)] as [string, any[]]))
       const perPage = 4
       const picked: any[] = []
@@ -1172,15 +1365,18 @@ async function trend(c: C) {
         }
         if (!added) break
       }
-      // Har sahifaga trending video Shorts ham aralashtiriladi
-      const vids = await dailymotion(page)
-      for (let i = 2, vi = 0; i < picked.length && vi < vids.length; i += 7) picked.splice(i, 0, vids[vi++])
-      if (picked.length && vids.length && !picked.some((x) => x.kind === "video")) picked.push(vids[0])
+      // Har sahifaga dunyo trend Shorts/videolar aralashtiriladi (ko'rish soni bo'yicha eng yuqorilari)
+      const vp = await videoPool(c)
+      const vall = [...vp.shorts, ...vp.vids]
+      const v0 = ((page - 1) * 3) % Math.max(1, vall.length)
+      const picks = vall.slice(v0, v0 + 3)
+      for (let i = 3, vi = 0; i < picked.length && vi < picks.length; i += 7) picked.splice(i, 0, picks[vi++])
+      if (picked.length && picks.length && !picked.some((x) => x.kind === "video" || x.kind === "short")) picked.push(picks[0])
       items = picked
     }
   }
   // Tarjima: faqat SARLAVHALAR, ketma-ket, keskin byudjet (free plan 50 subrequest/invocation)
-  // Boshlanish: 5 feed + kesh ops + DM ≈ 10; tarjima ≤ 10 × (fetch+put) = 20. Jami ≈ 30 < 50 ✓
+  // Boshlanish: 5 feed + kesh ops + video hovuzi ≈ 15; tarjima ≤ 10 × (fetch+put) = 20. Jami ≈ 40 < 50 ✓
   let trLeft = 10
   for (const it of items) {
     if (trLeft <= 0) break
@@ -1768,6 +1964,8 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/feed", feed],
   ["GET", "/reels", reels],
   ["GET", "/trend", trend],
+  ["POST", "/trend/ev", trendEv],
+  ["GET", "/trend/insights", trendInsights],
   ["POST", "/posts", createPost],
   ["DELETE", "/posts/:id", deletePost],
   ["POST", "/posts/:id/like", likePost],

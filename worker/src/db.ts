@@ -11,6 +11,7 @@ const NUM = new Set([
   "is_public", "join_approval", "muted", "privacy_phone", "privacy_last_seen", "complete", "tries", "opt",
   "mid", "uid", "keep", "gone", "dropped", "next_check", "replicas", "pinned", "quota", "used", "views", "pinned_id",
   "online_ms", "score", "first_beat", "last_beat", "jobs", "free", "kids", "depth", "ready", "host_kids", "parent_id", "parent",
+  "imp", "clk", "wt", "upd",
 ])
 
 function fix(row: Record<string, unknown>) {

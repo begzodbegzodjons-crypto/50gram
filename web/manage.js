@@ -452,6 +452,7 @@ function trendInterestsSheet() {
   const t = tintGet()
   const sh = sheet(h3('🔥 Trend qiziqishlarim') + `<div class="hint">Ko‘proq qiziqtirgan mavzularingiz lentada ko‘proq chiqadi. Omadi qancha ko‘p bo‘lsa — shunchalik ko‘p chiqadi.</div>` +
     Object.entries(TCATS).filter(([k]) => k !== 'all').map(([k, [e, l]]) => `<div class="rows"><div><div class="rt">${e} ${l}</div><input type="range" data-ti="${k}" min="0" max="10" value="${t[k] || 0}" style="width:110px"></div></div>`).join('') +
+    `<div class="tins" id="tins"><div class="rt">🧠 Analiz tizimi yuklanmoqda...</div></div>` +
     `<button class="btn gh big" id="ti-r">Qiziqishlarni tozalash</button>`)
   qs('#ti-r', sh).onclick = () => { try { localStorage.setItem('g50_tint', '{}') } catch {}; toast('Tozalandi'); closeSheet(sh) }
   sh.onchange = (e) => {
@@ -461,5 +462,18 @@ function trendInterestsSheet() {
     try { localStorage.setItem('g50_tint', JSON.stringify(t2)) } catch {}
     toast('✅ Qiziqishlar saqlandi — Trend yangilanadi')
   }
+  // 🧠 Analiz tizimi: tizimning joriy qarorlari (faqat agregat statistika ko'rsatiladi)
+  api('/trend/insights').then((d) => {
+    const el = qs('#tins', sh); if (!el || !d?.ok) return
+    if (!d.cats?.length) { el.innerHTML = `<div class="rt">🧠 Analiz tizimi ma'lumot to'playapti — bir necha ko'rishdan keyin qarorlar shakllanadi.</div>`; return }
+    const top = d.cats[0]
+    const topL = TCATS[top.cat] ? TCATS[top.cat][0] + ' ' + TCATS[top.cat][1] : top.cat
+    el.innerHTML = `<div class="rt"><b>🧠 Analiz tizimi qarorlari</b></div>` +
+      d.cats.slice(0, 6).map((s) => {
+        const L = TCATS[s.cat] ? TCATS[s.cat][0] + ' ' + TCATS[s.cat][1] : s.cat
+        return `<div class="trow"><span class="tl">${L}</span><div class="tbar"><i style="width:${s.bar}%"></i></div><small>${s.ctr}% CTR</small></div>`
+      }).join('') +
+      `<small class="mut">Jami ${fmtN(d.total_imp)} ko‘rish · ${fmtN(d.total_clk)} bosish · Umumiy CTR ${d.ctr}%<br>Tizim qarori: «${topL}» eng katta qiziqish uyg‘otmoqda — lenta shu mavzuga ko‘proq joy beradi.</small>`
+  }).catch(() => {})
 }
 initChatView()

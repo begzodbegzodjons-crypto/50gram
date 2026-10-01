@@ -188,6 +188,7 @@ function renderTrendChips() {
   box.innerHTML = Object.entries(TCATS).map(([k, [e, l]]) => `<span class="tchip ${trendCat === k ? 'on' : ''}" data-tc="${k}">${e} ${l}</span>`).join('')
 }
 function trendCard(x) {
+  if (x.kind === 'short') return `<div class="tcard short vid" data-tv="${x.id}" style="${x.image ? `background-image:url('${esc(x.image)}')` : ''}"><span class="tch">⚡ Shorts</span><div class="pplay">▶</div><div class="tcb"><b>${esc(x.title)}</b><small>${x.views ? '👁 ' + fmtN(x.views) : ''}${x.duration ? ' · ' + fmtDur(x.duration) : ''}</small></div></div>`
   if (x.kind === 'video') return `<div class="tcard vid" data-tv="${x.id}" style="${x.image ? `background-image:url('${esc(x.image)}')` : ''}"><span class="tch">🎥 Video</span><div class="tcb"><b>${esc(x.title)}</b><small>${fmtAgo(x.time)}${x.views ? ' · 👁 ' + fmtN(x.views) : ''} · ${fmtDur(x.duration || 0)}</small></div></div>`
   const em = TCATS[x.cat] ? TCATS[x.cat][0] : '📰'
   const img = x.image ? `<img loading="lazy" src="${esc(x.image)}" alt="" referrerpolicy="no-referrer">` : `<div class="tnoimg">${em}</div>`
@@ -201,6 +202,44 @@ function renderTrend() {
     ? `<div class="tgrid">${trendItems.map(trendCard).join('')}</div>` +
       (trendEnd ? '<div class="hint" style="text-align:center;padding:12px">Yangiliklar tugamaydi — birozdan keyin yana yangilanadi ✨</div>' : '<div class="tload"><span class="spin"></span></div>')
     : `<div class="empty"><span class="big">🔥</span>Yangiliklar yuklanmadi. Qaytadan urinib ko‘ring.</div>`
+  obsTrend()
+}
+// --- Analiz tizimi beacon'lari: FAQAT agregat hisoblagichlar yuboriladi (sarlavha/URL/kanal saqlanmaydi) ---
+const tevQ = new Map()
+let tevT = null
+function tev(cat, ev, ms) {
+  if (!TCATS[cat] && cat !== 'video') return
+  const k = cat + '|' + ev
+  tevQ.set(k, (tevQ.get(k) || 0) + (ev === 'wt' ? (ms || 0) : 1))
+  if (!tevT) tevT = setTimeout(flushTev, 4000)
+}
+function flushTev() {
+  tevT = null
+  if (!tevQ.size) return
+  const items = [...tevQ.entries()].slice(0, 8)
+  tevQ.clear()
+  for (const [k, v] of items) {
+    const [cat, ev] = k.split('|')
+    api('/trend/ev', { method: 'POST', body: { cat, ev, ms: ev === 'wt' ? Math.min(v, 3600000) : undefined, n: ev === 'wt' ? 1 : Math.min(v, 50) } }).catch(() => {})
+  }
+}
+setInterval(flushTev, 15000)
+let tObs = null
+const tSeen = new Set()
+function obsTrend() {
+  if (!('IntersectionObserver' in window)) return
+  if (!tObs) tObs = new IntersectionObserver((es) => {
+    for (const en of es) {
+      const el = en.target
+      if (en.isIntersecting && en.intersectionRatio >= 0.55 && !tSeen.has(el)) {
+        tSeen.add(el)
+        tObs.unobserve(el)
+        const x = trendItems.find((v) => v.id === el.dataset.tv || v.id === el.dataset.tn)
+        if (x) tev(x.kind === 'video' || x.kind === 'short' ? 'video' : (x.cat || 'uz'), 'imp')
+      }
+    }
+  }, { threshold: [0.55] })
+  qsa('#feedlist .tcard[data-tn],#feedlist .tcard[data-tv]').forEach((el) => { if (!tSeen.has(el)) tObs.observe(el) })
 }
 function trendSkeleton() {
   return `<div class="tgrid">${Array(6).fill('<div class="tcard sk"><div class="skimg"></div><div class="tcb"><b>‎</b><small>‎</small></div></div>').join('')}</div>`
@@ -228,18 +267,46 @@ async function loadTrend(reset) {
 }
 function openTrendNews(x) {
   tintAdd(x.cat)
+  tev(x.cat || 'uz', 'clk')
   sheet(`<div class="tnews">${x.image ? `<img src="${esc(x.image)}" alt="" referrerpolicy="no-referrer">` : ''}<span class="tch">${TCATS[x.cat] ? TCATS[x.cat][0] + ' ' + TCATS[x.cat][1] : '📰 Yangilik'}</span><h2>${esc(x.title)}</h2><small class="mut">${fmtAgo(x.time)}</small>${x.snippet ? `<p>${esc(x.snippet)}</p>` : ''}<a class="btn big" href="${esc(x.url)}" target="_blank" rel="noopener">🌐 To‘liq o‘qish</a></div>`)
 }
 function openTrendVideo(x) {
+  tev('video', 'clk')
   tintAdd('video')
   const o = document.createElement('div')
   o.className = 'tvo'
-  o.innerHTML = `<button class="xb">✕</button><div class="tvb"><iframe src="https://geo.dailymotion.com/player.html?video=${esc(x.embed)}&autoplay=1" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe><div class="tvi"><b>${esc(x.title)}</b><small>${fmtAgo(x.time)}${x.views ? ' · 👁 ' + fmtN(x.views) : ''}</small><button class="btn gh" data-vsh>↗️ Ulashish</button></div></div>`
+  // Pleyer formati: mp4 (to'g'ridan-to'g'ri, muqovasiz) > YouTube > Dailymotion — manba nomi ko'rsatilmaydi
+  let pl = ''
+  if (x.mp4) pl = `<video class="tvp" src="${esc(x.mp4)}" playsinline autoplay controls preload="metadata"></video><audio class="tva" preload="none"></audio>`
+  else if (x.yt) pl = `<iframe class="tvp" src="https://www.youtube-nocookie.com/embed/${esc(x.yt)}?autoplay=1&playsinline=1&rel=0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>`
+  else pl = `<iframe class="tvp" src="https://geo.dailymotion.com/player.html?video=${esc(x.embed)}&autoplay=1" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>`
+  o.innerHTML = `<button class="xb">✕</button><div class="tvb">${pl}<div class="tvi"><b>${esc(x.title)}</b><small>${fmtAgo(x.time)}${x.views ? ' · 👁 ' + fmtN(x.views) : ''}</small><button class="btn gh" data-vsh>↗️ Ulashish</button></div></div>`
   document.body.appendChild(o)
   requestAnimationFrame(() => o.classList.add('on'))
-  qs('.xb', o).onclick = () => { o.classList.remove('on'); setTimeout(() => o.remove(), 200) }
+  // Ko'rish vaqti kuzatuvi (analiz tizimi) — har 5s beacon navbatiga qo'shiladi
+  const wt = setInterval(() => { if (document.contains(o)) tev('video', 'wt', 5000) }, 5000)
+  // mp4 + alohida audio sinxronizatsiyasi (Reddit/DASH mp4 audio treksi alohida faylda)
+  const v = qs('video', o), a = qs('audio', o)
+  if (v && a && x.audio) {
+    let audioTry = 0
+    const AURLS = [x.audio, x.audio.replace('AUDIO_128', 'AUDIO_64'), x.audio.replace(/DASH_AUDIO_\d+\.mp4/, 'DASH_audio.mp4')]
+    const setA = () => { if (audioTry < AURLS.length) { a.src = AURLS[audioTry++]; return true } a.removeAttribute('src'); return false }
+    setA()
+    a.onerror = () => { if (setA()) a.load() }
+    v.addEventListener('play', () => { if (a.src) { a.currentTime = v.currentTime; a.play().catch(() => {}) } })
+    v.addEventListener('pause', () => { try { a.pause() } catch {} })
+    v.addEventListener('seeked', () => { try { a.currentTime = v.currentTime } catch {} })
+    v.addEventListener('volumechange', () => { a.volume = v.volume; a.muted = v.muted })
+  }
+  const close = () => {
+    clearInterval(wt)
+    try { v && v.pause(); a && a.pause() } catch {}
+    flushTev()
+    o.classList.remove('on'); setTimeout(() => o.remove(), 200)
+  }
+  qs('.xb', o).onclick = close
   qs('[data-vsh]', o).onclick = () => share((x.title || 'Video').slice(0, 80), x.url)
-  o.onclick = (e) => { if (e.target === o) qs('.xb', o).click() }
+  o.onclick = (e) => { if (e.target === o) close() }
 }
 $('trendchips').addEventListener('click', (e) => {
   const c = e.target.closest('[data-tc]'); if (!c) return
