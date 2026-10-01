@@ -1290,7 +1290,7 @@ async function trendWeights(c: C): Promise<Record<string, number>> {
   return w
 }
 async function trendEv(c: C) {
-  const b: any = await c.req.json().catch(() => ({}))
+  const b: any = c.b || {} // router allaqachon JSON body'ni parse qilgan
   const cat = str(b?.cat, 20), ev = str(b?.ev, 6)
   if (!TREND_CATS.has(cat)) fail("Noto‘g‘ri kategoriya")
   const n = Math.max(1, Math.min(50, +b?.n || 1))
