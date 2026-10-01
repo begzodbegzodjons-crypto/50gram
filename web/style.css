@@ -99,8 +99,16 @@ body.dark .btn.red{background:#3A1A22}
 .avw.ring{padding:2.5px;background:var(--ring)}
 .avw.ring.seen{background:var(--chiziq)}
 .avw.ring>.av{border:2px solid var(--fon)}
+/* Jonli efir halqasi — qizil gradient, istoriga halqasidan kuchliroq */
+.avw.livew{padding:2.5px;background:linear-gradient(135deg,#FF4E6A,#E5333F 55%,#FF7A45);animation:liveglow 1.8s ease-in-out infinite}
+.avw.livew>.av{border:2px solid var(--fon)}
+@keyframes liveglow{0%,100%{box-shadow:0 0 0 0 rgba(229,51,63,.55)}50%{box-shadow:0 0 0 5px rgba(229,51,63,.12)}}
 .avw .on-dot{position:absolute;right:1px;bottom:1px;width:13px;height:13px;border-radius:50%;background:var(--yashil);border:2.5px solid var(--fon)}
-.avw .live-b{position:absolute;left:50%;bottom:-5px;transform:translateX(-50%);background:var(--qizil);color:#fff;font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;border:2px solid var(--fon)}
+.avw .live-b{position:absolute;left:50%;bottom:-5px;transform:translateX(-50%);background:var(--qizil);color:#fff;font-size:9px;font-weight:800;padding:1px 5px;border-radius:5px;border:2px solid var(--fon);letter-spacing:.5px;animation:liveblink 1.6s ease-in-out infinite;z-index:2}
+@keyframes liveblink{0%,100%{opacity:1}50%{opacity:.72}}
+/* Chat/kontakt qatoridagi «🔴 Efir» tegi */
+.lvt{font-size:10.5px;font-weight:800;color:var(--qizil);background:rgba(229,51,63,.12);padding:1px 6px;border-radius:6px;flex-shrink:0}
+.st small.onl{color:var(--qizil);font-weight:700}
 .av.saved{background:linear-gradient(135deg,#0A7CFF,#00B4FF)!important;font-size:22px}
 
 /* ---------- STORIES BAR ---------- */

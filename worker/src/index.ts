@@ -1054,6 +1054,12 @@ async function startLive(c: C) {
   const id = newId()
   await c.db.run("INSERT INTO lives(id,user_id,chat_id,title,started_at) VALUES(?,?,?,?,?)", [id, c.uid, chatId, str(c.b.title, 200), now()])
   if (chatId) await sysMsg(c, chatId, "🔴 Jonli efir boshlandi")
+  // Doiradagilarga (kontaktlar + to'g'ridan-to'g'ri chatdoshlar) real vaqt bildirishnomasi — avatarida LIVE belgisi ko'rinsin
+  try {
+    const u = await c.db.one("SELECT * FROM users WHERE id=?", [c.uid])
+    const ids = await circle(c)
+    c.wait(notify(c.env, ids, { type: "live_start", live_id: id, from: c.uid, user: pubUser(u, c.uid) }))
+  } catch (e) { console.log("live_start notify xato", String(e)) }
   return json({ id })
 }
 async function listLives(c: C) {
@@ -1161,7 +1167,14 @@ async function endLive(c: C) {
   const total = await liveCount(c, l)
   await c.db.run("UPDATE lives SET ended_at=? WHERE id=?", [now(), l.id])
   await c.db.run("DELETE FROM live_viewers WHERE live_id=?", [l.id])
-  c.wait(notify(c.env, top, { type: "live_end", live_id: l.id }))
+  // Doiradagilarga ham xabar — avatarlardagi LIVE belgisi darhol yo'qolsin
+  try {
+    const ids = await circle(c)
+    c.wait(Promise.all([
+      notify(c.env, top, { type: "live_end", live_id: l.id }),
+      notify(c.env, ids, { type: "live_end", live_id: l.id, from: l.user_id }),
+    ]))
+  } catch { c.wait(notify(c.env, top, { type: "live_end", live_id: l.id })) }
   return json({ ok: true, viewers: Math.max(total, l.viewers) })
 }
 

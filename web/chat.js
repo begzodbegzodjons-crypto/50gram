@@ -702,7 +702,7 @@ async function openUser(uid) {
   try { u = await api('/users/' + uid) } catch (e) { return toast('⚠️ ' + e.message) }
   S.users.set(u.id, u)
   const isC = (S.contacts || []).some((k) => k.user && k.user.id === u.id)
-  const sh = sheet(`<div class="prof">${bigAvatar(u, 116)}<h2>${esc(uname(u))}</h2><div class="mut">${esc(lastSeen(u))}</div></div>
+  const sh = sheet(`<div class="prof">${bigAvatar(u, 116, { live: !!u.live_id, liveId: u.live_id })}<h2>${esc(uname(u))}</h2><div class="mut">${esc(lastSeen(u))}${u.live_id ? ' · 🔴 hozir efirda' : ''}</div></div>
     <div class="pbtns" style="display:flex;gap:8px;margin-bottom:12px">
       <button class="btn" style="flex:1" data-a="msg">💬 Xabar</button>
       <button class="btn gh" style="flex:1" data-a="call">📞</button>

@@ -17,9 +17,10 @@ function renderStories() {
   if (!box || !S.me) return
   const mine = S.stories.find((g) => g.user.id === S.me.id)
   const others = S.stories.filter((g) => g.user.id !== S.me.id)
+  const liveMap = new Map((S.lives || []).map((l) => [l.user.id, l]))
   box.innerHTML = `<div class="st" data-mystory>${avHTML(S.me, 58)}${mine ? '' : '<span class="plus">+</span>'}<small>Mening</small></div>` +
-    others.map((g) => `<div class="st" data-sto="${g.user.id}">${avHTML(g.user, 58)}<small>${esc(g.user.first_name || '')}</small></div>`).join('') +
-    (S.lives || []).map((l) => `<div class="st" data-live="${l.id}">${avHTML(l.user, 58, { live: true, noStory: true })}<small>🔴 Efir</small></div>`).join('')
+    others.map((g) => { const lv = liveMap.get(g.user.id); return `<div class="st" data-sto="${g.user.id}">${avHTML(g.user, 58, lv ? { live: true, liveId: lv.id } : {})}<small${lv ? ' class="onl"' : ''}>${esc(g.user.first_name || '')}</small></div>` }).join('') +
+    (S.lives || []).map((l) => `<div class="st" data-live="${l.id}">${avHTML(l.user, 58, { live: true, noStory: true, liveId: l.id })}<small class="onl">🔴 Efir</small></div>`).join('')
   hydrate(box)
 }
 $('stories').addEventListener('click', (e) => {
@@ -32,7 +33,18 @@ $('stories').addEventListener('click', (e) => {
     sh.onclick = (ev) => { const it = ev.target.closest('[data-a]'); if (!it) return; closeSheet(sh); it.dataset.a === 'view' ? openStoryOf(S.me.id) : createStory() }
   }
 }, true)
-async function loadLives() { try { S.lives = await api('/lives'); renderStories() } catch {} }
+async function loadLives() { try { S.lives = await api('/lives'); renderStories(); renderChats() } catch {} }
+// Efir boshlandi/tugadi — real vaqtda (WS) belgilarni yangilash
+on('live_start', (ev) => {
+  loadLives()
+  if (S.tab === 't-contacts') renderContacts()
+  const u = ev.user || S.users.get(ev.from)
+  toast('🔴 ' + (u ? uname(u) : 'Biror kim') + ' efirga chiqdi — profil rasmini bosing')
+  vibrate(20)
+})
+on('live_end', (ev) => {
+  if ((S.lives || []).some((l) => l.id === ev.live_id)) { loadLives(); if (S.tab === 't-contacts') renderContacts() }
+})
 
 let svState = null
 function openStoryOf(uid) {
@@ -249,7 +261,8 @@ function renderContacts() {
   const q = ($('cq').value || '').trim().toLowerCase()
   const list = S.contacts.filter((k) => !q || ((k.first_name || '') + ' ' + (k.last_name || '')).toLowerCase().includes(q) || (k.phone || '').includes(q.replace(/\D/g, '') || '~'))
   const on = list.filter((k) => k.user), off = list.filter((k) => !k.user)
-  const it = (k) => `<div class="item" data-k="${esc(k.phone)}">${avHTML(k.user || { id: 0, first_name: k.first_name, last_name: k.last_name }, 46, { dot: true })}<div class="mid"><div class="t1"><b>${esc(((k.first_name || '') + ' ' + (k.last_name || '')).trim())}</b></div><div class="t2"><span>${k.user ? esc(lastSeen(k.user)) : esc(k.phone) + ' · 50 Gram’da emas'}</span></div></div></div>`
+  const liveMap = new Map((S.lives || []).map((l) => [l.user.id, l]))
+  const it = (k) => { const lv = k.user ? liveMap.get(k.user.id) : null; return `<div class="item" data-k="${esc(k.phone)}">${avHTML(k.user || { id: 0, first_name: k.first_name, last_name: k.last_name }, 46, { dot: true, live: !!lv, liveId: lv?.id })}<div class="mid"><div class="t1"><b>${esc(((k.first_name || '') + ' ' + (k.last_name || '')).trim())}</b>${lv ? '<span class="lvt">🔴 Efir</span>' : ''}</div><div class="t2"><span>${k.user ? esc(lastSeen(k.user)) : esc(k.phone) + ' · 50 Gram’da emas'}</span></div></div></div>` }
   $('contactlist').innerHTML = (on.length ? `<div class="sec">50 Gram’dagilar (${on.length})</div>${on.map(it).join('')}` : '') + (off.length ? `<div class="sec">Taklif qiling</div>${off.map(it).join('')}` : '') +
     (!list.length ? `<div class="empty"><span class="big">👥</span>${q ? 'Topilmadi' : 'Kontaktlar yo‘q. ➕ tugmasi bilan raqam qo‘shing yoki telefon kontaktlarini import qiling.'}</div>` : '')
   hydrate($('contactlist'))

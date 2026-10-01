@@ -283,8 +283,9 @@ function avHTML(o, size = 52, opt = {}) {
     : `<div class="av" style="width:${size}px;height:${size}px;font-size:${fs}px;background:${src ? 'var(--sirt2)' : colorFor(o.id || 0)}">${src ? `<img src="${src}" loading="lazy" alt="">` : esc(initials(name))}</div>`
   const st = !isChat && o.story && o.story.count ? (o.story.unseen ? 'ring' : 'ring seen') : ''
   const live = opt.live ? '<span class="live-b">LIVE</span>' : ''
-  const dot = opt.dot && o.online && !st ? '<span class="on-dot"></span>' : ''
-  return `<div class="avw ${st} ${opt.live ? 'ring' : ''}" ${st && !opt.noStory ? `data-story="${o.id}"` : ''} style="width:${size + (st || opt.live ? 5 : 0)}px">${inner}${dot}${live}</div>`
+  const dot = opt.dot && o.online && !st && !opt.live ? '<span class="on-dot"></span>' : ''
+  const attrs = (st && !opt.noStory ? ` data-story="${o.id}"` : '') + (opt.live && (opt.liveId || o.live_id) ? ` data-liveav="${opt.liveId || o.live_id}"` : '')
+  return `<div class="avw ${st} ${opt.live ? 'livew' : ''}"${attrs} style="width:${size + (st || opt.live ? 5 : 0)}px">${inner}${dot}${live}</div>`
 }
 // Katta avatar: istoriya bo'lsa — rasm o'rnida istoriya ko'rinadi
 function bigAvatar(u, size = 120, opt = {}) {
@@ -303,6 +304,9 @@ function bigAvatar(u, size = 120, opt = {}) {
   return `<div class="bigav" style="width:${size}px;height:${size}px">${inner}${opt.cam ? '<span class="cam" data-cam="1">📷</span>' : ''}</div>`
 }
 document.addEventListener('click', (e) => {
+  // Efirdagi foydalanuvchi avatariga bosilsa — efirga ulanish (chat/istoriya/kontakt qayerida bo'lsa ham)
+  const la = e.target.closest('[data-liveav]')
+  if (la && la.dataset.liveav) { e.stopPropagation(); e.preventDefault(); watchLive(+la.dataset.liveav); return }
   const s = e.target.closest('[data-story]')
   if (s && !e.target.closest('[data-cam]')) { e.stopPropagation(); e.preventDefault(); openStoryOf(+s.dataset.story) }
 }, true)
@@ -487,8 +491,9 @@ function renderChats() {
     const mine = lm && lm.sender_id === S.me.id && c.type !== 'channel' && !['system', 'call'].includes(lm.kind)
     const tick = mine ? `<span class="tick">${c.type === 'direct' && c.peer_last_read >= lm.id ? '✓✓' : '✓'}</span>` : ''
     const icon = c.type === 'channel' ? '📢 ' : c.type === 'group' ? '👥 ' : ''
-    const av = c.type === 'direct' ? avHTML(c.peer, 54, { dot: true, saved: c.saved, live: c.peer && live.has(c.peer.id) }) : avHTML(c, 54, { chat: true })
-    return `<div class="item ${S.cur === c.id ? 'act' : ''}" data-chat="${c.id}">${av}<div class="mid"><div class="t1"><b>${icon}${esc(chatName(c))}</b>${c.muted ? '<span class="mut">🔕</span>' : ''}<span class="tm">${tick} ${fmtShort(lm?.created_at || c.last_msg_at)}</span></div>
+    const lv = c.peer ? live.get(c.peer.id) : null
+    const av = c.type === 'direct' ? avHTML(c.peer, 54, { dot: true, saved: c.saved, live: !!lv, liveId: lv?.id }) : avHTML(c, 54, { chat: true })
+    return `<div class="item ${S.cur === c.id ? 'act' : ''}" data-chat="${c.id}">${av}<div class="mid"><div class="t1"><b>${icon}${esc(chatName(c))}</b>${lv ? '<span class="lvt">🔴 Efir</span>' : ''}${c.muted ? '<span class="mut">🔕</span>' : ''}<span class="tm">${tick} ${fmtShort(lm?.created_at || c.last_msg_at)}</span></div>
       <div class="t2"><span class="${ty ? 'typ' : ''}">${esc(ty || msgPreview(lm, c) || (c.type === 'direct' ? 'Salom deb yozing 👋' : ''))}</span>${c.unread ? `<b class="cnt ${c.muted ? 'm' : ''}">${c.unread > 99 ? '99+' : c.unread}</b>` : ''}</div></div></div>`
   }).join('') : `<div class="empty"><span class="big">💬</span>Hali chatlar yo‘q.<br>Yuqoridagi qidiruvda ism, @username yoki telefon raqam yozing<br>yoki <a href="#" onclick="tabGo('t-contacts');return false">kontakt qo‘shing</a>.</div>`
   const bd = $('badge'); bd.textContent = total > 99 ? '99+' : total; bd.classList.toggle('hide', !total)
@@ -541,11 +546,11 @@ async function startApp() {
   try { setMe(await api('/me')) } catch (e) { if (!S.token) return }
   if (!S.me.first_name) { $('auth').classList.remove('hide'); $('main').classList.add('hide'); step('a-prof'); return }
   post('/ping').catch(() => {})
-  await Promise.all([loadChats().catch((e) => toast(e.message)), loadStories().catch(() => {}), loadContactsQuiet()])
+  await Promise.all([loadChats().catch((e) => toast(e.message)), loadStories().catch(() => {}), loadContactsQuiet(), loadLives()])
   wsConnect()
   setInterval(poll, 4000)
   setInterval(() => { if (!document.hidden) post('/ping').catch(() => {}) }, 45000)
-  setInterval(() => { loadStories().catch(() => {}) }, 60000)
+  setInterval(() => { if (!document.hidden) { loadStories().catch(() => {}); loadLives() } }, 60000)
   setInterval(() => { for (const [k, t] of S.typing) if (t.until < Date.now()) { S.typing.delete(k); renderChats(); if (S.cur === k) renderHeader() } }, 1500)
   handleHash()
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {})
