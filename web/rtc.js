@@ -20,28 +20,46 @@ async function newPC(onIce) {
 
 // ---------------- Qo'ng'iroqlar ----------------
 let CALL = null
+// SVG ikonkalar — har bir qurilmada aniq ko'rinadi (emoji o'rniga)
+const IC = {
+  phone: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>',
+  end: '<svg viewBox="0 0 24 24" fill="currentColor" style="transform:rotate(135deg)"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>',
+  mic: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>',
+  micOff: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5a3 3 0 0 0-6 0v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11a3 3 0 0 0 3 3c.23 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52a5 5 0 0 1-5-5H5a7 7 0 0 0 6 6.92V21h2v-3.08c.96-.14 1.86-.49 2.65-.98L19.73 21 21 19.73 4.27 3z"/></svg>',
+  cam: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z"/></svg>',
+  camOff: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 6.5l-4 4V7a1 1 0 0 0-1-1H9.82L21 17.18V6.5zM3.27 2L2 3.27 4.73 6H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12c.21 0 .39-.08.54-.18L19.73 21 21 19.73 3.27 2z"/></svg>',
+  spk: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05A4.47 4.47 0 0 0 16.5 12zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>',
+  flip: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 5h-3.17L15 3H9L7.17 5H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm-8 13a5 5 0 1 1 5-5c0 .72-.16 1.4-.43 2.02L18 13.5v5h-5l1.48-1.48c-.62.27-1.3.43-2.02.43z" transform="scale(0.9) translate(1.3,1.3)"/><path d="M12 8.5a4.5 4.5 0 1 0 4.5 4.5H12V8.5z" opacity="0"/></svg>'
+}
 function callUI(peer, video, state) {
   const el = document.createElement('div')
   el.className = 'over call' + (video ? ' vid' : '')
   el.innerHTML = `<video class="remote" autoplay playsinline></video><video class="local" autoplay playsinline muted></video><audio class="ra" autoplay></audio>
-    <div class="cinfo">${avHTML(peer, 110, { noStory: true })}<h2>${esc(uname(peer))}</h2><div class="cst">${state}</div></div>
+    <div class="cinfo">${avHTML(peer, 120, { noStory: true })}<h2>${esc(uname(peer))}</h2><div class="cst">${state}</div></div>
     <div class="cbar"></div>`
   document.body.appendChild(el)
   return el
 }
 function callButtons(kind) {
   const b = qs('.cbar', CALL.el)
-  if (kind === 'incoming') b.innerHTML = `<button class="cb end" data-c="decline">📵</button><button class="cb ok" data-c="accept">${CALL.video ? '📹' : '📞'}</button>`
-  else b.innerHTML = `<button class="cb" data-c="mic">🎙</button>${CALL.video ? '<button class="cb" data-c="cam">📷</button><button class="cb" data-c="flip">🔄</button>' : '<button class="cb" data-c="spk">🔊</button>'}<button class="cb end" data-c="hang">📵</button>`
+  const wrap = (cls, icon, label, act) => `<div class="cbtn ${cls}"><button class="cb ${cls}" data-c="${act}">${icon}</button><span>${label}</span></div>`
+  if (kind === 'incoming') {
+    b.innerHTML = wrap('end', IC.end, 'Rad etish', 'decline') + wrap('ok', CALL.video ? IC.cam : IC.phone, 'Javob berish', 'accept')
+  } else {
+    b.innerHTML = `<div class="cbtn mic"><button class="cb" data-c="mic">${IC.mic}</button><span>Mikrofon</span></div>`
+      + (CALL.video ? `<div class="cbtn cam"><button class="cb" data-c="cam">${IC.cam}</button><span>Kamera</span></div><div class="cbtn"><button class="cb" data-c="flip">${IC.flip}</button><span>Almashtirish</span></div>` : `<div class="cbtn spk"><button class="cb" data-c="spk">${IC.spk}</button><span>Dinamik</span></div>`)
+      + wrap('end', IC.end, 'Tugatish', 'hang')
+  }
   b.onclick = (e) => {
-    const k = e.target.closest('[data-c]')?.dataset.c; if (!k) return
+    const t = e.target.closest('[data-c]')
+    const k = t?.dataset.c; if (!k) return
     if (k === 'accept') acceptCall()
     if (k === 'decline') endCall('declined', true)
     if (k === 'hang') endCall('ended', true)
-    if (k === 'mic') { const t = CALL.local?.getAudioTracks()[0]; if (t) { t.enabled = !t.enabled; e.target.closest('.cb').classList.toggle('off', !t.enabled) } }
-    if (k === 'cam') { const t = CALL.local?.getVideoTracks()[0]; if (t) { t.enabled = !t.enabled; e.target.closest('.cb').classList.toggle('off', !t.enabled) } }
+    if (k === 'mic') { const tr = CALL.local?.getAudioTracks()[0]; if (tr) { tr.enabled = !tr.enabled; t.classList.toggle('off', !tr.enabled); t.innerHTML = tr.enabled ? IC.mic : IC.micOff } }
+    if (k === 'cam') { const tr = CALL.local?.getVideoTracks()[0]; if (tr) { tr.enabled = !tr.enabled; t.classList.toggle('off', !tr.enabled); t.innerHTML = tr.enabled ? IC.cam : IC.camOff } }
     if (k === 'flip') flipCam()
-    if (k === 'spk') { const a = qs('.ra', CALL.el); a.muted = !a.muted; e.target.closest('.cb').classList.toggle('off', a.muted) }
+    if (k === 'spk') { const a = qs('.ra', CALL.el); a.muted = !a.muted; t.classList.toggle('off', a.muted) }
   }
 }
 const setCallState = (t) => CALL && (qs('.cst', CALL.el).textContent = t)
@@ -68,6 +86,7 @@ on('call', (ev) => {
   S.users.set(ev.from.id, { ...(S.users.get(ev.from.id) || {}), ...ev.from })
   const peer = S.users.get(ev.from.id)
   CALL = { id: ev.call_id, peer, video: !!ev.video, outgoing: false, ice: [], el: callUI(peer, ev.video, ev.video ? 'Video qo‘ng‘iroq…' : 'Qo‘ng‘iroq…') }
+  CALL.el.classList.add('incoming')
   callButtons('incoming')
   ringTone(true)
   vibrate([400, 200, 400, 200, 400])

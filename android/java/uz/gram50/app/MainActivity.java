@@ -1,7 +1,9 @@
 package uz.gram50.app;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -19,6 +21,7 @@ public class MainActivity extends Activity {
   static final String URL = "https://50gram.begzodbegzodjons.workers.dev/";
   static final String HOST = "50gram.begzodbegzodjons.workers.dev";
   static final int FILE_REQ = 1001;
+  static final int MEDIA_REQ = 1002;
 
   WebView web;
   FrameLayout root;
@@ -39,13 +42,15 @@ public class MainActivity extends Activity {
     s.setDomStorageEnabled(true);
     s.setDatabaseEnabled(true);
     s.setMediaPlaybackRequiresUserGesture(false);
-    s.setLoadWithOverviewMode(true);
-    s.setUseWideViewPort(true);
+    // MUHIM: wide viewport o'chiriladi — sahifa aynan ekran kengligida (meta viewport
+    // bo'yicha) render bo'ladi, aks holda ba'zi telefonlarda kontent chapga suriladi.
+    s.setUseWideViewPort(false);
+    s.setLoadWithOverviewMode(false);
     s.setSupportZoom(false);
     s.setBuiltInZoomControls(false);
     s.setCacheMode(WebSettings.LOAD_DEFAULT);
     s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/1.0");
+    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/1.1");
 
     web.setWebViewClient(new WebViewClient() {
       @Override
@@ -81,8 +86,16 @@ public class MainActivity extends Activity {
       }
     });
 
+    // Bildirishnomalar (Android 13+)
     if (Build.VERSION.SDK_INT >= 33) {
       requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
+    }
+    // Kamera va mikrofon — qo'ng'iroqlar birinchi ochilishdan ishlashi uchun
+    if (Build.VERSION.SDK_INT >= 23) {
+      if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
+          || checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        requestPermissions(new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO}, MEDIA_REQ);
+      }
     }
 
     if (savedInstanceState == null) {
@@ -95,6 +108,14 @@ public class MainActivity extends Activity {
     // Fon xizmati: fonda ham ulanish tirik turadi
     Intent svc = new Intent(this, KeepAliveService.class);
     if (Build.VERSION.SDK_INT >= 26) startForegroundService(svc); else startService(svc);
+  }
+
+  @Override
+  public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    if (requestCode == MEDIA_REQ) {
+      // Rad etilsa ham ilova ishlaydi — keyin qo'ng'iroqda WebView o'zi qayta so'radi
+    }
   }
 
   @Override
@@ -123,5 +144,7 @@ public class MainActivity extends Activity {
   protected void onResume() {
     super.onResume();
     web.resumeTimers();
+    // Ilovaga qaytganda WebSocket qayta ulanishi (core.js ichida)
+    try { web.evaluateJavascript("window.__appResume&&window.__appResume()", null); } catch (Exception e) { }
   }
 }

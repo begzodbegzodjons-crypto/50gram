@@ -426,7 +426,7 @@ async function recount(c: C, id: number) {
 async function sysMsg(c: C, chatId: number, text: string) {
   const id = newId(), t = now()
   await c.db.run("INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES(?,?,?,'system',?,NULL,?,?,?)",
-    [id, chatId, c.uid, text, t, t, t + 30 * DAY])
+    [id, chatId, c.uid, text, t, t, t + 100 * 365 * DAY])
   await c.db.run("UPDATE chats SET last_msg_at=? WHERE id=?", [t, chatId])
   const m = msgOut(await c.db.one("SELECT * FROM messages WHERE id=?", [id]))
   notifyChat(c, chatId, { type: "message", chat_id: chatId, message: m })
@@ -705,7 +705,7 @@ async function sendMessage(c: C) {
     if (peerId && (await blockedBetween(c, c.uid, peerId))) fail("Bu foydalanuvchi bilan yozishib bo‘lmaydi", 403)
   }
   const mid = newId(), t = now()
-  const exp = t + (ch.type === "direct" ? 14 : 30) * DAY
+  const exp = t + 100 * 365 * DAY // o'chmas tarix: faqat foydalanuvchi o'chira oladi
   await c.db.run("INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)",
     [mid, id, c.uid, kind, body || null, meta, t, t, exp])
   await c.db.run("UPDATE chats SET last_msg_at=? WHERE id=?", [t, id])
@@ -940,7 +940,7 @@ async function createPost(c: C) {
   await c.db.run("INSERT INTO posts(id,author_id,chat_id,text_body,media_id,media_kind,created_at) VALUES(?,?,?,?,?,?,?)",
     [id, c.uid, chatId, text || null, c.b.media_id || null, c.b.media_id ? (c.b.media_kind === "video" ? "video" : "photo") : null, now()])
   if (c.b.media_id) {
-    await c.db.run("UPDATE media SET expires_at=?, keep=1, chat_id=0, next_check=0 WHERE id=? AND owner_id=?", [now() + 60 * DAY, String(c.b.media_id), c.uid])
+    await c.db.run("UPDATE media SET expires_at=?, keep=1, chat_id=0, next_check=0 WHERE id=? AND owner_id=?", [now() + 100 * 365 * DAY, String(c.b.media_id), c.uid])
     c.wait(planReplicas(c.db, 1, String(c.b.media_id)))
   }
   return json((await postsOut(c, [await c.db.one("SELECT * FROM posts WHERE id=?", [id])]))[0])
@@ -1039,7 +1039,7 @@ async function callStatus(c: C) {
   }
   const mid = newId()
   const meta = JSON.stringify({ video: call.video, status: final, duration: Math.max(0, Math.round(+c.b.duration || 0)) })
-  await c.db.run("INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES(?,?,?,'call',NULL,?,?,?,?)", [mid, ch.id, call.caller_id, meta, t, t, t + 14 * DAY])
+  await c.db.run("INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES(?,?,?,'call',NULL,?,?,?,?)", [mid, ch.id, call.caller_id, meta, t, t, t + 100 * 365 * DAY])
   await c.db.run("UPDATE chats SET last_msg_at=? WHERE id=?", [t, ch.id])
   const out = (await enrich(c, [await c.db.one("SELECT * FROM messages WHERE id=?", [mid])]))[0]
   c.wait(notify(c.env, [call.caller_id, call.callee_id], { type: "message", chat_id: ch.id, message: out }))
@@ -1454,16 +1454,13 @@ function match(method: string, path: string) {
 async function cleanup(env: Env) {
   const db = env.__db || makeDb(env.DATABASE_URL)
   const t = now()
-  await db.run("DELETE FROM messages WHERE expires_at<?", [t])
-  // Serverdagi nusxa muddati tugadi: bo'laklar o'chadi, fayl qurilmalar tarmog'ida yashashda davom etadi
+  // O'CHMAS TARIX: xabarlar, fayllar va istoriyalar faqat foydalanuvchi o'zi o'chirmaguncha saqlanadi.
+  // Cron faqat texnik chiqindilarni tozalaydi (kodlar, pin joblar, P2P reyestri) — hech qanday yozishmani o'chirmaydi.
   await db.run("DELETE FROM media_chunks WHERE media_id IN (SELECT id FROM media WHERE ((expires_at>0 AND expires_at<?) OR dropped=1) AND gone=0)", [t])
-  await db.run("UPDATE media SET gone=1 WHERE ((expires_at>0 AND expires_at<?) OR dropped=1) AND keep=1", [t])
   await db.run("DELETE FROM media WHERE expires_at>0 AND expires_at<? AND keep=0", [t])
   await db.run("DELETE FROM media WHERE dropped=1 AND created_at<? AND id NOT IN (SELECT media_id FROM peer_have)", [t - 30 * DAY])
   await db.run("DELETE FROM pin_jobs WHERE created_at<?", [t - 2 * DAY])
   await planReplicas(db, 300)
-  await db.run("DELETE FROM story_views WHERE story_id IN (SELECT id FROM stories WHERE expires_at<?)", [t])
-  await db.run("DELETE FROM stories WHERE expires_at<?", [t])
   await db.run("DELETE FROM otp WHERE expires_at<?", [t])
   await db.run("DELETE FROM peer_have WHERE updated_at<?", [t - 120 * DAY])
   await db.run("UPDATE lives SET ended_at=? WHERE ended_at=0 AND started_at<?", [t, t - 12 * 3600000])

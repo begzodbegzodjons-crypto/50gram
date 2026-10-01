@@ -553,6 +553,8 @@ async function startApp() {
 window.addEventListener('online', () => { setConn(); if (!S.wsOk) wsConnect() })
 window.addEventListener('offline', setConn)
 document.addEventListener('visibilitychange', () => { if (!document.hidden && S.token) { poll(); if (S.cur) markRead(S.cur) } })
+// APK ilovadan qaytganda: darhol sinxronlash va uzilgan WS'ni tiklash (MainActivity.onResume chaqiradi)
+window.__appResume = () => { try { if (!S.token) return; poll(); if (S.cur) markRead(S.cur); if (!S.ws || S.ws.readyState === 3) wsConnect() } catch {} }
 window.addEventListener('hashchange', handleHash)
 async function handleHash() {
   const h = decodeURIComponent(location.hash.slice(1))
