@@ -1316,6 +1316,28 @@ async function trendEv(c: C) {
   } else fail("Noto‘g‘ri hodisa")
   return json({ ok: true })
 }
+// Tarjima zanjiri diagnostikasi (auth talab qiladi): har bosqichning holati
+async function trendTrDbg(c: C) {
+  const q = str(c.url.searchParams.get("q") || "Princess Kate surprises Sussex residents today", 300)
+  const st: any = { q }
+  try {
+    const r = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=uz&dt=t&q=" + encodeURIComponent(q), { headers: TREND_UA })
+    const txt = await r.text()
+    st.gtx = { status: r.status, isJson: txt.trim().startsWith("["), result: txt.trim().startsWith("[") ? String(JSON.parse(txt)?.[0]?.map((x: any[]) => x?.[0]).join("") || "").slice(0, 80) : txt.slice(0, 60) }
+  } catch (e: any) { st.gtx = { err: String(e?.message || e).slice(0, 80) } }
+  try {
+    const r2 = await fetch("https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=uz&q=" + encodeURIComponent(q), { headers: TREND_UA })
+    const t2 = await r2.text()
+    st.c5 = { status: r2.status, isJson: t2.trim().startsWith("["), result: t2.trim().startsWith("[") ? String(JSON.parse(t2)?.[0]?.[0] || "").slice(0, 80) : t2.slice(0, 60) }
+  } catch (e: any) { st.c5 = { err: String(e?.message || e).slice(0, 80) } }
+  try {
+    if (c.env.AI) {
+      const r3: any = await c.env.AI.run("@cf/meta/m2m100_1.2B", { text: q.slice(0, 400), source_lang: "en", target_lang: "uz" })
+      st.ai = { result: String(r3?.translated_text || JSON.stringify(r3).slice(0, 80)).slice(0, 80) }
+    } else st.ai = { err: "AI binding yo'q" }
+  } catch (e: any) { st.ai = { err: String(e?.message || e).slice(0, 120) } }
+  return json(st)
+}
 async function trendInsights(c: C) {
   const rows = await c.db.q("SELECT cat, imp, clk, wt FROM trend_stats ORDER BY clk DESC").catch(() => [])
   let imp = 0, clk = 0, wt = 0
@@ -1979,6 +2001,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/trend", trend],
   ["POST", "/trend/ev", trendEv],
   ["GET", "/trend/insights", trendInsights],
+  ["GET", "/trend/trdbg", trendTrDbg],
   ["POST", "/posts", createPost],
   ["DELETE", "/posts/:id", deletePost],
   ["POST", "/posts/:id/like", likePost],
