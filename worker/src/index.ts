@@ -1048,22 +1048,21 @@ function needsTr(s: string): boolean {
 }
 async function trToUz(s: string): Promise<string> {
   // DIQQAT: free plan 50 subrequest/invocation — retry YO'Q, kesh konvergatsiyani ta'minlaydi.
-  // Zanjir: gtx -> clients5 (dict-chrome-ex) -> Workers AI -> kirill transliteratsiya
-  try {
-    const r = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=uz&dt=t&q=" + encodeURIComponent(s.slice(0, 900)), { headers: TREND_UA })
-    if (r.ok) {
-      const j: any = await r.json()
-      const out = (j?.[0] || []).map((x: any[]) => String(x?.[0] || "")).join("").trim()
-      if (out && out !== s) return out
-    }
-  } catch {}
-  // 2-urinish: clients5 dict-chrome-ex — gtx bloklangan IP'larda ham ko'pincha ishlaydi
+  // Zanjir: clients5 (tez, ishonchli) -> gtx (429 bloklari ko'p) — WF AI oxirgi zaxira
   try {
     const r2 = await fetch("https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=uz&q=" + encodeURIComponent(s.slice(0, 900)), { headers: TREND_UA })
     if (r2.ok) {
       const j2: any = await r2.json()
       const out2 = Array.isArray(j2) ? String(j2?.[0]?.[0] || "").trim() : String(j2?.sentences?.[0]?.trans || "").trim()
       if (out2 && out2 !== s) return out2
+    }
+  } catch {}
+  try {
+    const r = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=uz&dt=t&q=" + encodeURIComponent(s.slice(0, 900)), { headers: TREND_UA })
+    if (r.ok) {
+      const j: any = await r.json()
+      const out = (j?.[0] || []).map((x: any[]) => String(x?.[0] || "")).join("").trim()
+      if (out && out !== s) return out
     }
   } catch {}
   return s
@@ -1424,15 +1423,14 @@ async function trend(c: C) {
       items = picked
     }
   }
-  // Tarjima: avval Shorts/video sarlavhalari (kam sonli, lekin foydalanuvchi birinchi ko'radi), so'ng yangiliklar.
-  // Boshlanish: 5 feed + kesh ops + video hovuzi ≈ 15; tarjima ≤ 10 × (fetch+put) = 20. Jami ≈ 40 < 50 ✓
-  let trLeft = 10
+  // Tarjima: avval Shorts/video sarlavhalari (foydalanuvchi birinchi ko'radi), so'ng yangiliklar.
+  // PARALLEL tarjima — sovuq sahifa 1-2s ichida tayyor (kesh 6 soat, takroriy so'rov bepul).
   const trList = [...items.filter((x) => x.kind === "short" || x.kind === "video"), ...items.filter((x) => x.kind !== "short" && x.kind !== "video")]
-  for (const it of trList) {
-    if (trLeft <= 0) break
-    if (!needsTr(it.title)) continue
-    trLeft--
-    it.title = await trToUzCached(c, it.title)
+    .filter((x) => x && x.title && needsTr(x.title))
+    .slice(0, 10)
+  if (trList.length) {
+    const results = await Promise.all(trList.map(async (it) => ({ it, t: await trToUzCached(c, it.title) })))
+    for (const { it, t } of results) if (t && t !== it.title) it.title = t
   }
   items = items.filter((x) => x && x.title)
   for (const x of items) x.id = (await sha256(x.url)).slice(0, 12)
