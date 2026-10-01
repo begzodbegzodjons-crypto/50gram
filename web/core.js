@@ -171,18 +171,24 @@ async function upload(plain, name, onProg) {
   const blob = enc.blob
   const n = Math.max(1, Math.ceil(blob.size / CHUNK))
   const { id } = await post('/media', { mime: plain.type || 'application/octet-stream', name: name || 'fayl', size: blob.size || 1, chunks: n })
-  for (let i = 0; i < n; i++) {
-    const b64 = await blobToB64(blob.slice(i * CHUNK, (i + 1) * CHUNK))
+  // OPTIMIZATSIYA: bo'laklar endi binary (base64 emas — 33% kam trafik, CPU yuklamasi yo'q) + 2 tasi parallel
+  let done = 0
+  const putChunk = async (i) => {
+    const part = blob.slice(i * CHUNK, (i + 1) * CHUNK)
     let ok = false
-    for (let a = 0; a < 3 && !ok; a++) {
+    for (let a = 0; a < 4 && !ok; a++) {
       try {
-        const r = await fetch(API + '/media/' + id + '/' + i, { method: 'PUT', headers: { Authorization: 'Bearer ' + S.token, 'content-type': 'text/plain' }, body: b64 })
+        const r = await fetch(API + '/media/' + id + '/' + i, { method: 'PUT', headers: { Authorization: 'Bearer ' + S.token, 'content-type': 'application/octet-stream' }, body: part })
         ok = r.ok
-      } catch { await sleep(800) }
+        if (!ok && r.status >= 500) await sleep(700 * (a + 1)); else if (!ok) break
+      } catch { await sleep(700 * (a + 1)) }
     }
-    if (!ok) throw new Error('Yuklashda xato')
-    onProg && onProg((i + 1) / n)
+    if (!ok) throw new Error('Yuklashda xato — internetni tekshiring')
+    done++; onProg && onProg(done / n)
   }
+  let next = 0
+  const wr = async () => { while (next < n) { const i = next++; await putChunk(i) } }
+  await Promise.all([wr(), wr()])
   const sha = await P2P.sha256Hex(blob)
   await post('/media/' + id + '/done', { sha })
   const info = { sha, size: blob.size, key: enc.key, iv: enc.iv, mime: plain.type || 'application/octet-stream' }
@@ -194,6 +200,22 @@ async function upload(plain, name, onProg) {
   return id
 }
 const mediaCache = new Map()
+// Chunkni olish: yangi server binary qaytaradi, eski javob base64 text — ikkalasi ham qo'llanadi
+async function fetchChunk(id, i) {
+  for (let a = 0; a < 4; a++) {
+    try {
+      const r = await fetch(API + '/media/' + id + '/' + i, { headers: { Authorization: 'Bearer ' + S.token, Accept: 'application/octet-stream, text/plain' } })
+      if (r.ok) {
+        if ((r.headers.get('content-type') || '').includes('octet-stream')) return new Uint8Array(await r.arrayBuffer())
+        const txt = await r.text()
+        return Uint8Array.from(atob(txt), (ch) => ch.charCodeAt(0))
+      }
+      if (r.status < 500) return null
+    } catch {}
+    await sleep(500 * (a + 1))
+  }
+  return null
+}
 // Shifrlangan faylni olish: 1) qurilmadan 2) serverdan 3) tarmoqdagi boshqa qurilmalardan
 async function getCipher(id) {
   const local = await IDB.get('media', id)
@@ -201,16 +223,18 @@ async function getCipher(id) {
   let meta = null
   try { meta = await api('/media/' + id) } catch {}
   if (meta) {
-    const parts = []
-    for (let i = 0; i < meta.chunks; i++) {
-      let r = null
-      for (let a = 0; a < 3 && !(r && r.ok); a++) { try { r = await fetch(API + '/media/' + id + '/' + i, { headers: { Authorization: 'Bearer ' + S.token } }) } catch { await sleep(600) } }
-      if (!r || !r.ok) { meta = null; break }
-      const bin = atob(await r.text()), u = new Uint8Array(bin.length)
-      for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k)
-      parts.push(u)
+    // OPTIMIZATSIYA: bo'laklar binary + 2 tasi parallel (teskari tartibda yig'iladi)
+    const parts = new Array(meta.chunks), failed = []
+    let got = 0, next = 0
+    const wr = async () => {
+      while (next < meta.chunks) {
+        const i = next++
+        const u = await fetchChunk(id, i)
+        if (u) { parts[i] = u; got++; if (onMediaProg) onMediaProg(id, got, meta.chunks) } else failed.push(i)
+      }
     }
-    if (meta) {
+    await Promise.all([wr(), wr()])
+    if (!failed.length && got === meta.chunks) {
       const blob = new Blob(parts, { type: 'application/octet-stream' })
       P2P.note(id, { sha: meta.sha, size: meta.size, mime: meta.mime })
       await IDB.put('media', id, blob)
@@ -218,10 +242,13 @@ async function getCipher(id) {
       P2P.touch(id)
       return blob
     }
+    meta = null
   }
   // Serverda o'chgan — nusxasi bor onlayn qurilmadan olamiz
   return P2P.fetchMedia(id)
 }
+const mediaProgs = new Map()
+function onMediaProg(id, done, total) { const f = mediaProgs.get(id); if (f) f(done / total) }
 function mediaUrl(id) {
   if (!id) return Promise.reject(new Error('yo‘q'))
   if (!mediaCache.has(id)) {
@@ -478,13 +505,47 @@ function typingText(chatId) {
   const c = S.chats.get(chatId)
   return (c && c.type !== 'direct' ? (S.users.get(t.uid)?.first_name || '') + ' ' : '') + a + '…'
 }
+// OPTIMIZATSIYA: faqat o'zgargan qatorlarni DOM'da almashtirish — to'liq innerHTML qayta chizish yo'q.
+// Bu messengerning asosiy tezlik g'alabasi: har xabar/typing/o'qish hodisasida ro'yxat qayta qurilmaydi.
+function diffInto(box, keys, htmls) {
+  const oK = box._dk, oH = box._dh, oE = box._de
+  // Kesh faqat hozirgi DOM bilan aynan mos kelganda ishlaydi (qidiruv va boshqalar innerHTML'ni to'g'ridan-to'g'ri yozishi mumkin)
+  const okCache = oK && oH && oE && oE.length === oK.length && oK.length === oH.length && box.children.length === oK.length && (oK.length === 0 || oE[0].parentNode === box)
+  if (okCache && oK.length === keys.length) {
+    let same = true
+    for (let i = 0; i < keys.length; i++) if (oK[i] !== keys[i] || oH[i] !== htmls[i]) { same = false; break }
+    if (same) return false
+  }
+  if (!okCache) { box.innerHTML = htmls.join(''); box._dk = keys.slice(); box._dh = htmls.slice(); box._de = Array.from(box.children); return true }
+  const oLen = oK.length, nLen = keys.length
+  let p = 0
+  while (p < oLen && p < nLen && oK[p] === keys[p] && oH[p] === htmls[p]) p++
+  let s = 0
+  while (s < oLen - p && s < nLen - p && oK[oLen - 1 - s] === keys[nLen - 1 - s] && oH[oLen - 1 - s] === htmls[nLen - 1 - s]) s++
+  const delA = p, delB = oLen - s, insA = p, insB = nLen - s
+  const anchor = delB < oE.length ? oE[delB] : null
+  for (let i = delA; i < delB; i++) { const el = oE[i]; el && el.remove() }
+  if (insA < insB) {
+    const t = document.createElement('template')
+    t.innerHTML = htmls.slice(insA, insB).join('')
+    box.insertBefore(t.content, anchor)
+  }
+  box._dk = keys.slice(); box._dh = htmls.slice(); box._de = Array.from(box.children)
+  return true
+}
+// rAF birlashtirish: bir kadrda kelgan bir nechta render so'rovi — bitta chizish
+let chQ = false
+function scheduleChats() { if (chQ) return; chQ = true; requestAnimationFrame(() => { chQ = false; try { renderChats() } catch (e) {} }) }
+let msQ = false, msF = false
+function scheduleMsgs(force) { if (force) msF = true; if (msQ) return; msQ = true; requestAnimationFrame(() => { msQ = false; const f = msF; msF = false; try { renderMsgs(f) } catch (e) {} }) }
 function renderChats() {
   const list = [...S.chats.values()].filter((c) => c.joined).sort((a, b) => (b.last_message?.created_at || b.last_msg_at) - (a.last_message?.created_at || a.last_msg_at))
   const q = $('q').value.trim()
   if (q) return
   let total = 0
   const live = new Map(S.lives.map((l) => [l.user.id, l]))
-  $('chatlist').innerHTML = list.length ? list.map((c) => {
+  const keys = [], rows = []
+  for (const c of list) {
     if (!c.muted) total += c.unread
     const lm = c.last_message
     const ty = typingText(c.id)
@@ -493,9 +554,12 @@ function renderChats() {
     const icon = c.type === 'channel' ? '📢 ' : c.type === 'group' ? '👥 ' : ''
     const lv = c.peer ? live.get(c.peer.id) : null
     const av = c.type === 'direct' ? avHTML(c.peer, 54, { dot: true, saved: c.saved, live: !!lv, liveId: lv?.id }) : avHTML(c, 54, { chat: true })
-    return `<div class="item ${S.cur === c.id ? 'act' : ''}" data-chat="${c.id}">${av}<div class="mid"><div class="t1"><b>${icon}${esc(chatName(c))}</b>${lv ? '<span class="lvt">🔴 Efir</span>' : ''}${c.muted ? '<span class="mut">🔕</span>' : ''}<span class="tm">${tick} ${fmtShort(lm?.created_at || c.last_msg_at)}</span></div>
-      <div class="t2"><span class="${ty ? 'typ' : ''}">${esc(ty || msgPreview(lm, c) || (c.type === 'direct' ? 'Salom deb yozing 👋' : ''))}</span>${c.unread ? `<b class="cnt ${c.muted ? 'm' : ''}">${c.unread > 99 ? '99+' : c.unread}</b>` : ''}</div></div></div>`
-  }).join('') : `<div class="empty"><span class="big">💬</span>Hali chatlar yo‘q.<br>Yuqoridagi qidiruvda ism, @username yoki telefon raqam yozing<br>yoki <a href="#" onclick="tabGo('t-contacts');return false">kontakt qo‘shing</a>.</div>`
+    keys.push('c' + c.id)
+    rows.push(`<div class="item ${S.cur === c.id ? 'act' : ''}" data-chat="${c.id}">${av}<div class="mid"><div class="t1"><b>${icon}${esc(chatName(c))}</b>${lv ? '<span class="lvt">🔴 Efir</span>' : ''}${c.muted ? '<span class="mut">🔕</span>' : ''}<span class="tm">${tick} ${fmtShort(lm?.created_at || c.last_msg_at)}</span></div>
+      <div class="t2"><span class="${ty ? 'typ' : ''}">${esc(ty || msgPreview(lm, c) || (c.type === 'direct' ? 'Salom deb yozing 👋' : ''))}</span>${c.unread ? `<b class="cnt ${c.muted ? 'm' : ''}">${c.unread > 99 ? '99+' : c.unread}</b>` : ''}</div></div></div>`)
+  }
+  if (!rows.length) { keys.push('empty'); rows.push(`<div class="empty"><span class="big">💬</span>Hali chatlar yo‘q.<br>Yuqoridagi qidiruvda ism, @username yoki telefon raqam yozing<br>yoki <a href="#" onclick="tabGo('t-contacts');return false">kontakt qo‘shing</a>.</div>`) }
+  diffInto($('chatlist'), keys, rows)
   const bd = $('badge'); bd.textContent = total > 99 ? '99+' : total; bd.classList.toggle('hide', !total)
   document.title = total ? `(${total}) 50 Gram` : '50 Gram'
 }
@@ -551,7 +615,7 @@ async function startApp() {
   setInterval(poll, 4000)
   setInterval(() => { if (!document.hidden) post('/ping').catch(() => {}) }, 45000)
   setInterval(() => { if (!document.hidden) { loadStories().catch(() => {}); loadLives() } }, 60000)
-  setInterval(() => { for (const [k, t] of S.typing) if (t.until < Date.now()) { S.typing.delete(k); renderChats(); if (S.cur === k) renderHeader() } }, 1500)
+  setInterval(() => { for (const [k, t] of S.typing) if (t.until < Date.now()) { S.typing.delete(k); scheduleChats(); if (S.cur === k) renderHeader() } }, 1500)
   handleHash()
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {})
 }

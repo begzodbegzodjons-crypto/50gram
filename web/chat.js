@@ -169,32 +169,34 @@ function markRead(id) {
   const last = (S.msgs.get(id) || []).reduce((a, m) => (m.id > 0 && !m.p2p && m.id > a ? m.id : a), 0)
   if (!last || (c.last_read >= last && !c.unread)) return
   c.last_read = last; c.unread = 0
-  renderChats()
+  scheduleChats()
   post(`/chats/${id}/read`, { last_id: last }).catch(() => {})
 }
 
 // ---------------- Xabarlarni chizish ----------------
+// OPTIMIZATSIYA: to'liq innerHTML o'rniga faqat o'zgargan qatorlar DOM'da almashtiriladi
 function renderMsgs(force) {
   const box = $('msgs'), c = S.chats.get(S.cur)
   if (!c) return
   const list = S.msgs.get(S.cur) || []
   const atBottom = force || box.scrollHeight - box.scrollTop - box.clientHeight < 140
-  let html = ''
-  if (c.joined !== false && P2P.enabled()) html += '<div class="sys" data-older style="cursor:pointer">⬆️ Avvalgi xabarlarni a’zolar qurilmalaridan yuklash</div>'
+  const keys = [], rows = []
+  if (c.joined !== false && P2P.enabled()) { keys.push('older'); rows.push('<div class="sys" data-older style="cursor:pointer">⬆️ Avvalgi xabarlarni a’zolar qurilmalaridan yuklash</div>') }
   let lastDay = '', prev = null
   for (let i = 0; i < list.length; i++) {
     const m = list[i]
     const d = fmtDay(m.created_at)
-    if (d !== lastDay) { html += `<div class="day">${esc(d)}</div>`; lastDay = d; prev = null }
+    if (d !== lastDay) { keys.push('day:' + d); rows.push(`<div class="day">${esc(d)}</div>`); lastDay = d; prev = null }
     if (m.kind === 'system') {
       const who = m.body && !/yaratildi/.test(m.body) ? esc(uname(S.users.get(m.sender_id))) + ' ' : ''
-      html += `<div class="sys">${who}${esc(m.body || '')}</div>`; prev = null; continue
+      keys.push('s' + m.id); rows.push(`<div class="sys">${who}${esc(m.body || '')}</div>`); prev = null; continue
     }
-    html += msgHTML(m, c, prev, list[i + 1])
+    keys.push(m.id > 0 ? 'm' + m.id : 'p' + (m.client_id || m.id))
+    rows.push(msgHTML(m, c, prev, list[i + 1]))
     prev = m
   }
-  if (!list.length) html += `<div class="empty"><span class="big">${c.type === 'channel' ? '📢' : '👋'}</span>${c.type === 'direct' ? 'Hali xabar yo‘q. Salom deb yozing!' : 'Hali xabarlar yo‘q'}</div>`
-  box.innerHTML = html
+  if (!list.length) { keys.push('empty'); rows.push(`<div class="empty"><span class="big">${c.type === 'channel' ? '📢' : '👋'}</span>${c.type === 'direct' ? 'Hali xabar yo‘q. Salom deb yozing!' : 'Hali xabarlar yo‘q'}</div>`) }
+  diffInto(box, keys, rows)
   hydrate(box)
   if (atBottom) box.scrollTop = box.scrollHeight
 }
@@ -457,8 +459,8 @@ async function sendText() {
   localStorage.removeItem('g50_draft_' + chatId)
   for (let i = 0; i < text.length; i += 4000) await sendRaw(chatId, { kind: 'text', body: text.slice(i, i + 4000), meta: i === 0 ? withReply({}) : {} }).catch(() => {})
 }
-async function sendFile(file, kind, extra = {}) {
-  const chatId = S.cur
+async function sendFile(file, kind, extra = {}, chatId0) {
+  const chatId = chatId0 || S.cur
   if (!chatId || !file) return
   if (file.size > 30 * 1024 * 1024) return toast('⚠️ Fayl 30 MB dan katta bo‘lmasin')
   const local = ['photo', 'video', 'voice', 'round'].includes(kind) ? URL.createObjectURL(file) : null
@@ -498,58 +500,80 @@ $('msgs').addEventListener('dragover', (e) => e.preventDefault())
 $('msgs').addEventListener('drop', (e) => { e.preventDefault(); [...e.dataTransfer.files].forEach((f) => sendFile(f, f.type.startsWith('image/') ? 'photo' : f.type.startsWith('video/') ? 'video' : 'file')) })
 
 // ---------------- Ovozli va dumaloq video xabar ----------------
-let rec = null, holdT = 0, downX = 0
-const pickMime = (list) => list.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || ''
+let rec = null, holdT = 0, downX = 0, recPending = null
+// MediaRecorder.isTypeSupported ba'zan yolg'aydi (WebView) — konstruktorda sinab ko'ramiz
+function pickRecorder(stream, mimes, extra = {}) {
+  if (!window.MediaRecorder) throw new Error('yozib olish qo‘llanmaydi')
+  for (const t of mimes) {
+    if (MediaRecorder.isTypeSupported && !MediaRecorder.isTypeSupported(t)) continue
+    try { return new MediaRecorder(stream, { ...extra, mimeType: t }) } catch {}
+  }
+  try { return new MediaRecorder(stream, extra) } catch (e) { throw new Error('bu qurilma yozib ololmadi') }
+}
 $('b-send').addEventListener('mousedown', (e) => e.preventDefault())
 $('b-send').addEventListener('pointerdown', (e) => {
   if ($('inp').value.trim() || editId) return
   downX = e.clientX
   try { $('b-send').setPointerCapture(e.pointerId) } catch {}
+  recPending = { kind: recMode, stop: false }
   holdT = setTimeout(() => { holdT = 0; recMode === 'round' ? startRound() : startVoice() }, 230)
 })
 $('b-send').addEventListener('pointermove', (e) => { if (rec && rec.kind === 'voice' && e.clientX - downX < -90) stopRec(true) })
 $('b-send').addEventListener('pointerup', () => {
   if ($('inp').value.trim() || editId) return sendText()
-  if (holdT) { clearTimeout(holdT); holdT = 0; recMode = recMode === 'voice' ? 'round' : 'voice'; localStorage.setItem('g50_rec', recMode); setSendIcon(); toast(recMode === 'round' ? '⭕ Video xabar: bosib turing' : '🎤 Ovozli xabar: bosib turing', 1500); return }
+  if (holdT) { clearTimeout(holdT); holdT = 0; recPending = null; recMode = recMode === 'voice' ? 'round' : 'voice'; localStorage.setItem('g50_rec', recMode); setSendIcon(); toast(recMode === 'round' ? '⭕ Video xabar: bosib turing' : '🎤 Ovozli xabar: bosib turing', 1500); return }
   if (rec) stopRec(false)
+  else if (recPending) recPending.stop = true // barmoq qo‘yib yubordi — mikrofon ochilishi tugagach darhol yuboriladi
 })
-$('b-send').addEventListener('pointercancel', () => { clearTimeout(holdT); holdT = 0; if (rec) stopRec(true) })
+$('b-send').addEventListener('pointercancel', () => { clearTimeout(holdT); holdT = 0; recPending = null; if (rec) stopRec(true) })
 
 async function startVoice() {
-  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast('Bu brauzer ovoz yozishni qo‘llamaydi')
-  let stream
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }) } catch { return toast('🎤 Mikrofonga ruxsat bering') }
-  const mime = pickMime(['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/webm'])
-  const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
-  const chunks = [], wave = []
-  let an = null, ac = null, waveT = 0
+  const chatId = S.cur, pend = recPending
+  if (!chatId) { recPending = null; return }
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { recPending = null; return toast('Bu brauzer ovoz yozishni qo‘llamaydi') }
+  let stream = null
   try {
-    ac = new (window.AudioContext || window.webkitAudioContext)()
-    an = ac.createAnalyser(); an.fftSize = 256
-    ac.createMediaStreamSource(stream).connect(an)
-    const buf = new Uint8Array(an.frequencyBinCount)
-    waveT = setInterval(() => { an.getByteTimeDomainData(buf); let mx = 0; for (const v of buf) mx = Math.max(mx, Math.abs(v - 128)); wave.push(mx) }, 100)
-  } catch {}
-  mr.ondataavailable = (e) => e.data.size && chunks.push(e.data)
-  const t0 = Date.now()
-  rec = { kind: 'voice', mr, stream, chunks, t0, cancel: false, timer: setInterval(() => { $('rec-t').textContent = fmtDur((Date.now() - t0) / 1000); if (Date.now() - t0 > 300000) stopRec(false) }, 250) }
-  mr.onstop = () => {
-    clearInterval(waveT); try { ac && ac.close() } catch {}
-    stream.getTracks().forEach((t) => t.stop())
-    const dur = Math.round((Date.now() - t0) / 1000)
-    if (rec?.cancel || dur < 1) { rec = null; return }
-    rec = null
-    const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' })
-    const bars = 36, w = []
-    for (let i = 0; i < bars; i++) { const s = wave.slice(Math.floor((i * wave.length) / bars), Math.floor(((i + 1) * wave.length) / bars) || 1); w.push(Math.round(3 + Math.min(27, (Math.max(0, ...s) / 64) * 27))) }
-    sendFile(new File([blob], 'ovoz.' + (blob.type.includes('mp4') ? 'm4a' : 'webm'), { type: blob.type }), 'voice', { meta: { dur, wave: w } })
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }) } catch { recPending = null; return toast('🎤 Mikrofonga ruxsat bering') }
+    const mr = pickRecorder(stream, ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/webm'])
+    const chunks = [], wave = []
+    let an = null, ac = null, waveT = 0
+    try {
+      ac = new (window.AudioContext || window.webkitAudioContext)()
+      an = ac.createAnalyser(); an.fftSize = 256
+      ac.createMediaStreamSource(stream).connect(an)
+      const buf = new Uint8Array(an.frequencyBinCount)
+      waveT = setInterval(() => { an.getByteTimeDomainData(buf); let mx = 0; for (const v of buf) mx = Math.max(mx, Math.abs(v - 128)); wave.push(mx) }, 100)
+    } catch {}
+    mr.ondataavailable = (e) => e.data.size && chunks.push(e.data)
+    const t0 = Date.now()
+    rec = { kind: 'voice', chatId, mr, stream, chunks, t0, cancel: false, timer: setInterval(() => { $('rec-t').textContent = fmtDur((Date.now() - t0) / 1000); if (Date.now() - t0 > 300000) stopRec(false) }, 250) }
+    mr.onstop = () => {
+      clearInterval(waveT); try { ac && ac.close() } catch {}
+      stream.getTracks().forEach((t) => t.stop())
+      const dur = Math.round((Date.now() - t0) / 1000)
+      const chat = rec ? rec.chatId : chatId
+      if (rec?.cancel || dur < 1) { rec = null; return }
+      rec = null
+      if (!chunks.length) return toast('⚠️ Ovoz yozib olinmadi — qaytadan bosib turing')
+      const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' })
+      const bars = 36, w = []
+      for (let i = 0; i < bars; i++) { const s = wave.slice(Math.floor((i * wave.length) / bars), Math.floor(((i + 1) * wave.length) / bars) || 1); w.push(Math.round(3 + Math.min(27, (Math.max(0, ...s) / 64) * 27))) }
+      sendFile(new File([blob], 'ovoz.' + (blob.type.includes('mp4') ? 'm4a' : 'webm'), { type: blob.type }), 'voice', { meta: { dur, wave: w } }, chat)
+    }
+    mr.start(250)
+    vibrate(20)
+    $('recbar').classList.remove('hide'); $('b-send').classList.add('rec'); $('rec-t').textContent = '0:00'
+    post(`/chats/${chatId}/typing`, { action: 'voice' }).catch(() => {})
+    recPending = null
+    if (pend && pend.stop) stopRec(false)
+  } catch (e) {
+    recPending = null; rec = null
+    try { stream && stream.getTracks().forEach((t) => t.stop()) } catch {}
+    toast('⚠️ Ovoz yozish ishlamadi: ' + (e.message || 'noma’lum xato'))
   }
-  mr.start(250)
-  vibrate(20)
-  $('recbar').classList.remove('hide'); $('b-send').classList.add('rec'); $('rec-t').textContent = '0:00'
-  if (S.cur) post(`/chats/${S.cur}/typing`, { action: 'voice' }).catch(() => {})
 }
 function stopRec(cancel) {
+  recPending = null
   if (!rec) return
   rec.cancel = cancel
   clearInterval(rec.timer)
@@ -559,40 +583,52 @@ function stopRec(cancel) {
   if (cancel) toast('Bekor qilindi', 1200)
 }
 async function startRound() {
-  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast('Bu brauzer video yozishni qo‘llamaydi')
-  let stream
-  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 480 } }, audio: true }) } catch { return toast('📷 Kamera va mikrofonga ruxsat bering') }
-  const o = document.createElement('div')
-  o.className = 'over roundrec'
-  o.innerHTML = `<div class="rr"><video autoplay muted playsinline></video><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="2"/><circle id="rr-c" cx="50" cy="50" r="48" fill="none" stroke="#0A7CFF" stroke-width="2.5" stroke-dasharray="301.6" stroke-dashoffset="301.6" stroke-linecap="round"/></svg></div><div class="rt" id="rr-t">0:00</div><div class="rbar"><button class="cb end" data-x>✕</button><button class="cb ok" data-s>➤</button></div><p class="mut" style="color:#ccc">Qo‘yib yuborsangiz — yuboriladi (60 soniyagacha)</p>`
-  document.body.appendChild(o)
-  qs('video', o).srcObject = stream
-  const mime = pickMime(['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/mp4', 'video/webm'])
-  const mr = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: 900000 })
-  const chunks = [], t0 = Date.now()
-  mr.ondataavailable = (e) => e.data.size && chunks.push(e.data)
-  rec = {
-    kind: 'round', mr, stream, chunks, t0, over: o, cancel: false,
-    timer: setInterval(() => {
-      const s = (Date.now() - t0) / 1000
-      const t = qs('#rr-t', o); if (t) t.textContent = fmtDur(s)
-      const cc = qs('#rr-c', o); if (cc) cc.setAttribute('stroke-dashoffset', String(301.6 * (1 - Math.min(1, s / 60))))
-      if (s >= 60) stopRec(false)
-    }, 200),
+  const chatId = S.cur, pend = recPending
+  if (!chatId) { recPending = null; return }
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { recPending = null; return toast('Bu brauzer video yozishni qo‘llamaydi') }
+  let stream = null, o = null
+  try {
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 480 } }, audio: true }) } catch { recPending = null; return toast('📷 Kamera va mikrofonga ruxsat bering') }
+    o = document.createElement('div')
+    o.className = 'over roundrec'
+    o.innerHTML = `<div class="rr"><video autoplay muted playsinline></video><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="2"/><circle id="rr-c" cx="50" cy="50" r="48" fill="none" stroke="#0A7CFF" stroke-width="2.5" stroke-dasharray="301.6" stroke-dashoffset="301.6" stroke-linecap="round"/></svg></div><div class="rt" id="rr-t">0:00</div><div class="rbar"><button class="cb end" data-x>✕</button><button class="cb ok" data-s>➤</button></div><p class="mut" style="color:#ccc">Qo‘yib yuborsangiz — yuboriladi (60 soniyagacha)</p>`
+    document.body.appendChild(o)
+    qs('video', o).srcObject = stream
+    const mr = pickRecorder(stream, ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/mp4', 'video/webm'], { videoBitsPerSecond: 900000 })
+    const chunks = [], t0 = Date.now()
+    mr.ondataavailable = (e) => e.data.size && chunks.push(e.data)
+    rec = {
+      kind: 'round', chatId, mr, stream, chunks, t0, over: o, cancel: false,
+      timer: setInterval(() => {
+        const s = (Date.now() - t0) / 1000
+        const t = qs('#rr-t', o); if (t) t.textContent = fmtDur(s)
+        const cc = qs('#rr-c', o); if (cc) cc.setAttribute('stroke-dashoffset', String(301.6 * (1 - Math.min(1, s / 60))))
+        if (s >= 60) stopRec(false)
+      }, 200),
+    }
+    qs('[data-x]', o).onclick = () => stopRec(true)
+    qs('[data-s]', o).onclick = () => stopRec(false)
+    mr.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop())
+      const dur = Math.round((Date.now() - t0) / 1000)
+      const chat = rec ? rec.chatId : chatId
+      const r = rec; rec = null
+      if (!r || r.cancel || dur < 1) return
+      if (!chunks.length) return toast('⚠️ Video yozib olinmadi — qaytadan bosib turing')
+      const blob = new Blob(chunks, { type: mr.mimeType || 'video/webm' })
+      sendFile(new File([blob], 'video.' + (blob.type.includes('mp4') ? 'mp4' : 'webm'), { type: blob.type }), 'round', { meta: { dur } }, chat)
+    }
+    mr.start(500)
+    vibrate(20)
+    post(`/chats/${chatId}/typing`, { action: 'round' }).catch(() => {})
+    recPending = null
+    if (pend && pend.stop) stopRec(false)
+  } catch (e) {
+    recPending = null; rec = null
+    try { stream && stream.getTracks().forEach((t) => t.stop()) } catch {}
+    if (o) o.remove()
+    toast('⚠️ Video yozish ishlamadi: ' + (e.message || 'noma’lum xato'))
   }
-  qs('[data-x]', o).onclick = () => stopRec(true)
-  qs('[data-s]', o).onclick = () => stopRec(false)
-  mr.onstop = () => {
-    stream.getTracks().forEach((t) => t.stop())
-    const dur = Math.round((Date.now() - t0) / 1000)
-    const r = rec; rec = null
-    if (!r || r.cancel || dur < 1) return
-    const blob = new Blob(chunks, { type: mr.mimeType || 'video/webm' })
-    sendFile(new File([blob], 'video.' + (blob.type.includes('mp4') ? 'mp4' : 'webm'), { type: blob.type }), 'round', { meta: { dur } })
-  }
-  mr.start(500)
-  vibrate(20)
-  if (S.cur) post(`/chats/${S.cur}/typing`, { action: 'round' }).catch(() => {})
 }
 
 // ---------------- Biriktirish ----------------
@@ -766,28 +802,28 @@ on('message', async (ev) => {
       }
     }
   }
-  if (S.cur === id) { renderMsgs(m.sender_id === S.me.id); renderHeader() }
-  renderChats()
+  if (S.cur === id) { scheduleMsgs(m.sender_id === S.me.id); renderHeader() }
+  scheduleChats()
 })
 on('message_update', async (ev) => {
   await loadChatLocal(ev.chat_id)
   merge(ev.chat_id, [ev.message])
   saveChatLocal(ev.chat_id)
-  if (S.cur === ev.chat_id) renderMsgs()
+  if (S.cur === ev.chat_id) scheduleMsgs()
   const c = S.chats.get(ev.chat_id)
-  if (c && c.last_message && c.last_message.id === ev.message.id) { c.last_message = ev.message; renderChats() }
+  if (c && c.last_message && c.last_message.id === ev.message.id) { c.last_message = ev.message; scheduleChats() }
 })
 on('read', (ev) => {
   const c = S.chats.get(ev.chat_id)
   if (!c || ev.user_id === S.me.id) return
   c.peer_last_read = Math.max(c.peer_last_read || 0, ev.last_id)
-  if (S.cur === ev.chat_id) renderMsgs()
-  renderChats()
+  if (S.cur === ev.chat_id) scheduleMsgs()
+  scheduleChats()
 })
 on('typing', (ev) => {
   if (ev.user_id === S.me.id) return
   S.typing.set(ev.chat_id, { uid: ev.user_id, action: ev.action, until: Date.now() + 5000 })
-  renderChats()
+  scheduleChats()
   if (S.cur === ev.chat_id) renderHeader()
 })
 on('chat_update', () => { loadChats().catch(() => {}) })

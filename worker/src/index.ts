@@ -797,6 +797,16 @@ async function typing(c: C) {
 
 // ------------------------- Media (bo'laklab) -------------------------
 const MAX_SIZE = 30 * 1024 * 1024
+function abToB64(u: Uint8Array): string {
+  let s = "", CH = 0x8000
+  for (let i = 0; i < u.length; i += CH) s += String.fromCharCode(...u.subarray(i, i + CH))
+  return btoa(s)
+}
+function b64ToU8(s: string): Uint8Array {
+  const bin = atob(s), u = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i)
+  return u
+}
 async function mediaCreate(c: C) {
   const size = +c.b.size || 0, chunks = +c.b.chunks || 1
   if (size <= 0 || size > MAX_SIZE) fail("Fayl hajmi 30 MB dan oshmasin")
@@ -811,8 +821,17 @@ async function mediaPut(c: C) {
   if (!m || m.owner_id !== c.uid) fail("Topilmadi", 404)
   const idx = +c.p.idx
   if (!(idx >= 0 && idx < m.chunks)) fail("Bo‘lak raqami noto‘g‘ri")
-  const data = await c.req.text()
-  if (data.length > 1_100_000 || !/^[A-Za-z0-9+/=]*$/.test(data.slice(0, 200))) fail("Bo‘lak noto‘g‘ri")
+  // Yangi mijozlar binary (33% kam trafik, tezroq), eski mijozlar base64 text — ikkalasi ham qo‘llanadi
+  let data: string
+  const ct = c.req.headers.get("content-type") || ""
+  if (ct.includes("octet-stream")) {
+    const ab = await c.req.arrayBuffer()
+    if (ab.byteLength > 1_200_000) fail("Bo‘lak juda katta")
+    data = abToB64(new Uint8Array(ab))
+  } else {
+    data = await c.req.text()
+    if (data.length > 1_100_000 || !/^[A-Za-z0-9+/=]*$/.test(data.slice(0, 200))) fail("Bo‘lak noto‘g‘ri")
+  }
   await c.db.run("REPLACE INTO media_chunks(media_id,idx,data) VALUES(?,?,?)", [c.p.id, idx, data])
   return json({ ok: true })
 }
@@ -833,7 +852,11 @@ async function mediaMeta(c: C) {
 async function mediaChunk(c: C) {
   const r = await c.db.one("SELECT data FROM media_chunks WHERE media_id=? AND idx=?", [c.p.id, +c.p.idx])
   if (!r) fail("Topilmadi", 404)
-  return new Response(r.data, { headers: { "content-type": "text/plain", "cache-control": "private, max-age=31536000, immutable", ...CORS } })
+  const cc = { "cache-control": "private, max-age=31536000, immutable", ...CORS }
+  if ((c.req.headers.get("accept") || "").includes("octet-stream")) {
+    return new Response(b64ToU8(String(r.data)), { headers: { "content-type": "application/octet-stream", ...cc } })
+  }
+  return new Response(r.data, { headers: { "content-type": "text/plain", ...cc } })
 }
 
 // ------------------------- Istoriyalar -------------------------
