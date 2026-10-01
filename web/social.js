@@ -215,6 +215,12 @@ async function loadTrend(reset) {
     const q = `?page=${trendPage}` + (trendCat !== 'all' ? '&cat=' + trendCat : '') + (trendCat === 'all' && trendPage === 1 ? '&cats=' + encodeURIComponent(catsParam()) : '')
     const r = await api('/trend' + q)
     const list = r.items || []
+    if (!list.length && trendPage === 1 && !trendCat) {
+      // Vaqtinchalik bo'sh — 1.5s dan keyin avtomatik qayta urinish
+      trendPage = 0
+      setTimeout(() => { if (feedMode === 'trend' && !trendItems.length) loadTrend() }, 1500)
+      return
+    }
     trendItems.push(...list)
     if (!list.length) trendEnd = true
     renderTrend()
