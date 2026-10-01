@@ -1047,11 +1047,11 @@ function needsTr(s: string): boolean {
 async function trToUz(s: string): Promise<string> {
   try {
     const r = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=uz&dt=t&q=" + encodeURIComponent(s.slice(0, 900)), { headers: TREND_UA })
-    if (!r.ok) return s
+    if (!r.ok) { console.log("tr HTTP", r.status); return s }
     const j: any = await r.json()
     const out = (j?.[0] || []).map((x: any[]) => String(x?.[0] || "")).join("")
     return out.trim() || s
-  } catch { return s }
+  } catch (e: any) { console.log("trerr", String(e?.message || e).slice(0, 100)); return s }
 }
 async function dailymotion(page: number): Promise<any[]> {
   try {
