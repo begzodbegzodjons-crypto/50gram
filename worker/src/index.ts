@@ -1047,14 +1047,26 @@ function needsTr(s: string): boolean {
   return EN_STOP.test(low)
 }
 async function trToUz(s: string): Promise<string> {
-  // DIQQAT: free plan 50 subrequest/invocation — retry YO'Q, kesh konvergatsiyani ta'minlaydi
+  // DIQQAT: free plan 50 subrequest/invocation — retry YO'Q, kesh konvergatsiyani ta'minlaydi.
+  // Zanjir: gtx -> clients5 (dict-chrome-ex) -> Workers AI -> kirill transliteratsiya
   try {
     const r = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=uz&dt=t&q=" + encodeURIComponent(s.slice(0, 900)), { headers: TREND_UA })
-    if (!r.ok) { console.log("tr HTTP", r.status); return s }
-    const j: any = await r.json()
-    const out = (j?.[0] || []).map((x: any[]) => String(x?.[0] || "")).join("")
-    return out.trim() || s
-  } catch (e: any) { console.log("trerr", String(e?.message || e).slice(0, 100)); return s }
+    if (r.ok) {
+      const j: any = await r.json()
+      const out = (j?.[0] || []).map((x: any[]) => String(x?.[0] || "")).join("").trim()
+      if (out && out !== s) return out
+    }
+  } catch {}
+  // 2-urinish: clients5 dict-chrome-ex — gtx bloklangan IP'larda ham ko'pincha ishlaydi
+  try {
+    const r2 = await fetch("https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=uz&q=" + encodeURIComponent(s.slice(0, 900)), { headers: TREND_UA })
+    if (r2.ok) {
+      const j2: any = await r2.json()
+      const out2 = Array.isArray(j2) ? String(j2?.[0]?.[0] || "").trim() : String(j2?.sentences?.[0]?.trans || "").trim()
+      if (out2 && out2 !== s) return out2
+    }
+  } catch {}
+  return s
 }
 // Kirill (o'zbek) -> lotin transliteratsiya: subrequest KERAK EMAS, 100% ishlaydi
 const CYR_MAP: Record<string, string> = { а: "a", б: "b", в: "v", г: "g", ғ: "g‘", д: "d", е: "e", ж: "j", з: "z", и: "i", й: "y", к: "k", қ: "q", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ў: "o‘", ф: "f", х: "x", ҳ: "h", ц: "ts", ч: "ch", ш: "sh", ъ: "‘", ь: "", ы: "i", э: "e", ю: "yu", я: "ya", ё: "yo", щ: "sh" }
