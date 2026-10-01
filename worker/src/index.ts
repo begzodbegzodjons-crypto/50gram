@@ -964,18 +964,34 @@ async function deleteStory(c: C) {
 }
 
 // ------------------------- 🔥 Trend lenta (internetdan jonli, UMUMAN saqlanmaydi) -------------------------
-// Google News RSS (o'zbek nashri) + Dailymotion trending videolar; tarjima gtx orqali; 10 daq edge-cache.
-// Hech qanday DB yozuvi yo'q — so'rov to'g'ridan-to'g'ri internetdan olinadi va uzatiladi. Manba nomi ko'rsatilmaydi.
+// O'zbekcha RSS manbalar (kun.uz, daryo, gazeta, BBC Uzbek, spot) + Dailymotion trending videolar.
+// Kategoriyalar kalit-so'z bo'yicha; kirill/inliz sarlavhalar avtomatik o'zbekchaga tarjima qilinadi.
+// Hech qanday DB yozuvi yo'q — so'rov to'g'ridan-to'g'ri internetdan olinadi. Manba nomi ko'rsatilmaydi.
 const TREND_UA = { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" }
-const TREND_CATS: Record<string, string> = {
-  uz: "https://news.google.com/rss?hl=uz&gl=UZ&ceid=UZ:uz",
-  world: "https://news.google.com/rss/headlines/section/topic/WORLD?hl=uz&gl=UZ&ceid=UZ:uz",
-  tech: "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=uz&gl=UZ&ceid=UZ:uz",
-  sport: "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=uz&gl=UZ&ceid=UZ:uz",
-  biznes: "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=uz&gl=UZ&ceid=UZ:uz",
-  shou: "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=uz&gl=UZ&ceid=UZ:uz",
-  fan: "https://news.google.com/rss/headlines/section/topic/SCIENCE?hl=uz&gl=UZ&ceid=UZ:uz",
-  salomatlik: "https://news.google.com/rss/headlines/section/topic/HEALTH?hl=uz&gl=UZ&ceid=UZ:uz",
+// Ishonchli RSS manbalar (Cloudflare Worker'dan 200 qaytaradi; Google News DC IP'larga 503 beradi)
+const TREND_FEEDS: Array<[string, string]> = [
+  ["kun", "https://kun.uz/news/rss"],
+  ["daryo", "https://daryo.uz/rss/"],
+  ["gazeta", "https://www.gazeta.uz/oz/rss/"],
+  ["bbc", "https://feeds.bbci.co.uk/uzbek/latin/rss.xml"],
+  ["spot", "https://www.spot.uz/ru/rss/"],
+]
+// Kategoriyalash: kalit-so'zlar bo'yicha (manba ikkinchi darajali maslahatchi)
+const CAT_RE: Record<string, RegExp> = {
+  tech: /(texnologiya|sun['ʻ]iy intellekt|sun'iy intellekt|iphone|ipad|android|samsung|xiaomi|google|youtube|telegram|instagram|tiktok|ilova|dastur|kompyuter|noutbuk|robot|internet|kiber|gadget|chatgpt|openai|apple|smartfon|protsessor|videoo['ʻ]yin|kriptovalyut|bitcoin|elektron)/i,
+  sport: /(futbol|futbolchi|jamoa|\bgol\b|o['ʻ]yinch[ii]|turnir|chempion|chempionat|kubok|\bliga\b|tennis|boks|shaxmat|olimpiada|sportchi|sport\b|darvozabon|mavsum|transfer|trener|\bmatch\b|musobaqa|\bcup\b|\bleague\b|fifa|uefa|governor|dzudo|kurash|bokschi|g['ʻ]alaba\s*qozondi)/i,
+  salomatlik: /(so['ʻ]g['ʻ]liq|sog'liq|tibbiyot|virus|kasallik|vaksina|shifokor|dori|epidemiya|saraton|covid|infeksiya|psixolog|kaloriya|tibbiy)/i,
+  fan: /(kosmos|\bnasa\b|tadqiqot|olim\b|ilmiy|kashfiyot|fizika|kimyo|biologiya|astronom|planet|yo['ʻ]ldosh|raketa|genetika|arxeolog)/i,
+  shou: /(kino|film|multfilm|musiq|qo['ʻ]shiq|aktyor|aktrisa|serial|shou\b|premiya|koncert|yulduz\b|rejissyor|oskar|festival|grammy|estrada|chart)/i,
+  biznes: /(iqtisod|dollar|yevro|so['ʻ]m\b|investitsiya|bank|bozor|narx\b|neft|biznes|eksport|import|soliq|tadbirkor|aksiya|kapital|byudjet|tarif|savdo|kontrakt| narxi|javobgarlik)/i,
+}
+const UZ_HINT = /(o['ʻ]zbekiston|uzbekiston|toshkent|mirziyoyev|samarqand|buxoro|andijon|namangan|farg['ʻ]ona|nukus|qarshi|jizzax|termiz|urganch|navoiy|kokand)/i
+function classify(text: string, src: string): string {
+  for (const k of ["tech", "sport", "salomatlik", "fan", "shou", "biznes"]) if (CAT_RE[k].test(text)) return k
+  if (UZ_HINT.test(text)) return "uz"
+  if (src === "spot") return "biznes"
+  if (src === "bbc") return "world"
+  return "uz"
 }
 const decodeEnt = (s: string) => s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;|&rsquo;/g, "'").replace(/&nbsp;/g, " ").replace(/&hellip;/g, "…").replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(+n) } catch { return "" } })
 const stripHtml = (s: string) => decodeEnt(s.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ")).trim()
@@ -983,7 +999,7 @@ function tagGet(block: string, tag: string): string {
   const m = block.match(new RegExp("<" + tag + ">(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</" + tag + ">"))
   return m ? m[1].trim() : ""
 }
-async function gnewsFetch(cat: string, url: string, n: number): Promise<any[]> {
+async function gnewsFetch(src: string, url: string, n: number): Promise<any[]> {
   const UA = { headers: TREND_UA, cf: { cacheTtl: 900, cacheEverything: true } } as any
   try {
     let r = await fetch(url, UA)
@@ -992,7 +1008,7 @@ async function gnewsFetch(cat: string, url: string, n: number): Promise<any[]> {
       await new Promise((res) => setTimeout(res, 350))
       r = await fetch(url, UA)
     }
-    if (!r.ok) { console.log("trend", cat, "HTTP", r.status); return [] }
+    if (!r.ok) { console.log("trend", src, "HTTP", r.status); return [] }
     const xml = await r.text()
     const out: any[] = []
     for (const block of xml.split("<item>").slice(1)) {
@@ -1008,15 +1024,15 @@ async function gnewsFetch(cat: string, url: string, n: number): Promise<any[]> {
       // Manba nomini yashirish: "Sarlavha - Manba nomi" -> "Sarlavha"
       const title = rawTitle.replace(/\s+[-–—]\s+[^-–—]{2,42}$/, "").trim() || rawTitle
       out.push({
-        kind: "news", cat, title, url: link,
+        kind: "news", src, title, url: link,
         snippet: stripHtml(desc).slice(0, 300),
         image: imgM ? imgM[1] : mcM ? mcM[1] : "",
         time: isNaN(ts) ? now() : ts,
       })
     }
-    if (!out.length) console.log("trendempty", cat, r.status, xml.length, xml.slice(0, 150).replace(/\s+/g, " "))
+    if (!out.length) console.log("trendempty", src, r.status, xml.length, xml.slice(0, 150).replace(/\s+/g, " "))
     return out
-  } catch (e: any) { console.log("trenderr", cat, String(e?.message || e).slice(0, 120)); return [] }
+  } catch (e: any) { console.log("trenderr", src, String(e?.message || e).slice(0, 120)); return [] }
 }
 const EN_STOP = /\b(the|and|of|in|for|with|to|on|at|from|by|after|before|over|into|about|new|how|why|what|who|top|best|first|vs|amid|amId|says|will)\b/i
 const UZ_MARK = /[oʻ‘’gʻʼ]|o‘|g‘|ning|bilan|uchun|yangi|haqida|bo‘yicha|yili|keldi|berdi|ayti|deya|qilmoq|bo'ldi|o'rtas|birinchi|katta|yana|ham\b/i
@@ -1050,27 +1066,37 @@ async function dailymotion(page: number): Promise<any[]> {
     })).filter((v: any) => v.embed)
   } catch { return [] }
 }
-async function feedFor(c: C, cat: string): Promise<any[]> {
-  // Har kategoriya o'z alohida edge-keshida (15 daq) — sahifalar arzon hisoblanadi
-  const ck = "https://trend.50gram.internal/f2/" + cat
+const tSleep = (ms: number) => new Promise((res) => setTimeout(res, ms))
+async function newsPool(c: C): Promise<any[]> {
+  // Barcha manbalar bitta kategoriyalangan pool'da (edge-kesh 15 daq) — sahifalar arzon hisoblanadi
+  const ck = "https://trend.50gram.internal/pool3"
   try {
     const hit = await caches.default.match(ck)
     if (hit) return await hit.json()
   } catch {}
-  const items = await gnewsFetch(cat, TREND_CATS[cat], 40)
-  if (items.length) {
-    const resp = json(items)
+  const out: any[] = []
+  for (let i = 0; i < TREND_FEEDS.length; i++) {
+    const [src, url] = TREND_FEEDS[i]
+    const items = await gnewsFetch(src, url, 45)
+    for (const it of items) { it.cat = classify((it.title || "") + " " + (it.snippet || ""), src); delete it.src; out.push(it) }
+    if (!items.length && i < TREND_FEEDS.length - 1) await tSleep(500)
+    else if (i < TREND_FEEDS.length - 1) await tSleep(300)
+  }
+  // Eng yangilari oldinda
+  out.sort((a, b) => (b.time || 0) - (a.time || 0))
+  if (out.length) {
+    const resp = json(out)
     resp.headers.set("cache-control", "public, s-maxage=900")
     c.wait(caches.default.put(ck, resp.clone()).catch(() => {}))
   }
-  return items
+  return out
 }
-const tSleep = (ms: number) => new Promise((res) => setTimeout(res, ms))
+const CAT_KEYS = ["uz", "world", "tech", "sport", "biznes", "shou", "fan", "salomatlik"]
 async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  const cacheKey = "https://trend.50gram.internal/t2?p=" + page + "&cat=" + onlyCat
+  const cacheKey = "https://trend.50gram.internal/t3?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
@@ -1078,41 +1104,35 @@ async function trend(c: C) {
   let items: any[] = []
   if (onlyCat === "video") {
     items = await dailymotion(page)
-  } else if (onlyCat && TREND_CATS[onlyCat]) {
-    const raw = await feedFor(c, onlyCat)
-    items = raw.slice((page - 1) * 10, page * 10)
   } else {
-    // Barcha kategoriyalar: ketma-ket (Google parallel burst'ni 503 bilan ushlaydi),
-    // har biri o'z edge-keshidan — ko'p hollarda shunchaki o'qish
-    const keys0 = Object.keys(TREND_CATS)
-    const w: Record<string, number> = {}
-    for (const part of catsW.split(",")) { const [k, v] = part.split(":"); if (TREND_CATS[k]) w[k] = +v || 0 }
-    const keys = keys0.slice().sort((a, b) => (w[b] || 0) - (w[a] || 0))
-    const byCat = new Map<string, any[]>()
-    for (let i = 0; i < keys.length; i++) {
-      const k = keys[i]
-      let arr = await feedFor(c, k)
-      if (!arr.length && i < keys.length - 1) { await tSleep(700); arr = await feedFor(c, k) }
-      byCat.set(k, arr)
-      if (i < keys.length - 1) await tSleep(450)
-    }
-    const perPage = 5 // har kategoriyadan sahifada shunchaki olinadi
-    const picked: any[] = []
-    const cursors = new Map(keys.map((k) => [k, (page - 1) * perPage] as [string, number]))
-    let left = keys.length * perPage
-    while (left > 0) {
-      let added = false
-      for (const k of keys) {
-        const arr = byCat.get(k) || [], cur = cursors.get(k)!
-        if (cur >= arr.length || picked.length >= 44) continue
-        picked.push(arr[cur]); cursors.set(k, cur + 1); left--; added = true
+    const pool = await newsPool(c)
+    if (onlyCat && CAT_KEYS.includes(onlyCat)) {
+      items = pool.filter((x) => x.cat === onlyCat).slice((page - 1) * 12, page * 12)
+    } else {
+      // Barchasi: kategoriyalar qiziqish vazniga qarab round-robin aralashtiriladi
+      const w: Record<string, number> = {}
+      for (const part of catsW.split(",")) { const [k, v] = part.split(":"); if (CAT_KEYS.includes(k)) w[k] = +v || 0 }
+      const keys = CAT_KEYS.slice().sort((a, b) => (w[b] || 0) - (w[a] || 0))
+      const byCat = new Map(keys.map((k) => [k, pool.filter((x) => x.cat === k)] as [string, any[]]))
+      const perPage = 4
+      const picked: any[] = []
+      const cursors = new Map(keys.map((k) => [k, (page - 1) * perPage] as [string, number]))
+      let left = keys.length * perPage
+      while (left > 0) {
+        let added = false
+        for (const k of keys) {
+          const arr = byCat.get(k) || [], cur = cursors.get(k)!
+          if (cur >= arr.length || picked.length >= 44) continue
+          picked.push(arr[cur]); cursors.set(k, cur + 1); left--; added = true
+        }
+        if (!added) break
       }
-      if (!added) break
+      // Har sahifaga trending video Shorts ham aralashtiriladi
+      const vids = await dailymotion(page)
+      for (let i = 2, vi = 0; i < picked.length && vi < vids.length; i += 7) picked.splice(i, 0, vids[vi++])
+      if (picked.length && vids.length && !picked.some((x) => x.kind === "video")) picked.push(vids[0])
+      items = picked
     }
-    // Har sahifaga trending video Shorts ham aralashtiriladi
-    const vids = await dailymotion(page)
-    for (let i = 0, vi = 0; i < picked.length && vi < vids.length; i += 7) picked.splice(i, 0, vids[vi++])
-    items = picked
   }
   // Tarjima: o'zbekcha bo'lmagan sarlavhalar o'zbek tiliga (parallel, limit bilan)
   let trLeft = 16
