@@ -715,7 +715,7 @@ async function getMessages(c: C) {
   const messages = await enrich(c, all)
   const um = await usersByIds(c, [...new Set(all.map((x) => x.sender_id))])
   const peer = ch.type === "direct" ? await c.db.one("SELECT last_read FROM chat_members WHERE chat_id=? AND user_id<>?", [id, c.uid]) : null
-  return json({ messages, users: Object.fromEntries(um), now: t, peer_last_read: peer?.last_read ?? null, more })
+  return json({ messages, users: Object.fromEntries(um), now: t, peer_last_read: peer?.last_read ?? null, more, dbg: { latest, before, after, rawBefore: c.url.searchParams.get("before") } })
 }
 async function sendMessage(c: C) {
   const id = +c.p.id
