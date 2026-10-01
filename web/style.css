@@ -413,3 +413,73 @@ body.dark .btn.red{background:#3A1A22}
   .shbg{align-items:center}
   .sheet{border-radius:24px;max-height:86vh}
 }
+
+/* ============ 1.1: Qadalgan xabar, Reels, logotiplar, animatsiyalar (faqat qo'shimcha) ============ */
+
+/* ---- Qadalgan xabar paneli (chat ichida, tepada) ---- */
+.pinbar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--sirt2);border-bottom:1px solid var(--chiziq);cursor:pointer;animation:slidein .25s ease}
+.pinbar .pi{font-size:17px}
+.pinbar .pb-t{flex:1;min-width:0;display:flex;flex-direction:column}
+.pinbar b{font-size:13px;color:var(--asos)}
+.pinbar span{font-size:12.5px;color:var(--xira);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pinbar .ic{width:30px;height:30px}
+/* Qadalgan chat — ro'yxatda */
+.pin-i{font-size:12px;margin-left:2px}
+/* Xabarga o'tganda sariq porlash */
+.mrow.hl{animation:hlflash 1.6s ease}
+@keyframes hlflash{0%,60%{background:rgba(245,166,35,.22)}100%{background:transparent}}
+
+/* ---- Kanal/guruh logotip presetlari ---- */
+.logos{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:10px 0}
+.logos span{width:100%;aspect-ratio:1;border-radius:14px;background-size:cover;cursor:pointer;transition:transform .15s ease,box-shadow .15s ease;border:2.5px solid transparent;display:block}
+.logos span:active{transform:scale(.9)}
+.logos span.on{border-color:var(--asos);box-shadow:0 0 0 3px var(--asos-och)}
+
+/* ---- Reels: vertikal video lenta ---- */
+#feedlist.feed:has(.reels){padding:0}
+.reels{height:calc(100% - 48px);overflow-y:auto;scroll-snap-type:y mandatory;overscroll-behavior:contain}
+.reel{position:relative;scroll-snap-align:start;scroll-snap-stop:always;height:100%;background:#000;overflow:hidden}
+.reel video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.reel .rshade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.35),transparent 22%,transparent 55%,rgba(0,0,0,.72));pointer-events:none}
+.reel .rbot{position:absolute;left:12px;right:76px;bottom:16px;color:#fff;display:flex;flex-direction:column;gap:6px;z-index:2}
+.reel .rw{display:flex;align-items:center;gap:8px;font-size:15px;text-shadow:0 1px 6px rgba(0,0,0,.5)}
+.reel .rviews{font-size:12.5px;opacity:.85}
+.reel .rtx{font-size:14px;line-height:1.35;max-height:72px;overflow:hidden;text-shadow:0 1px 5px rgba(0,0,0,.55)}
+.reel .rtx a{color:#8EC5FF}
+.reel .racts{position:absolute;right:8px;bottom:20px;display:flex;flex-direction:column;gap:16px;z-index:2}
+.reel .racts button{display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:0;color:#fff;font-size:26px;text-shadow:0 1px 6px rgba(0,0,0,.5)}
+.reel .racts button i{font-style:normal;font-size:12.5px;font-weight:600}
+.reel .racts button.on{animation:pop .3s ease}
+.reel .racts button:active{transform:scale(.86)}
+.reel .rtap{position:absolute;inset:0;z-index:1}
+body.dark .reel{background:#000}
+
+/* ---- Animatsiyalar ---- */
+@keyframes pop{0%{transform:scale(.6)}60%{transform:scale(1.18)}100%{transform:scale(1)}}
+@keyframes slidein{from{transform:translateY(-12px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes sheetup{from{transform:translateY(60%);opacity:.4}to{transform:translateY(0);opacity:1}}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+@keyframes msgin{from{transform:translateY(8px) scale(.985);opacity:0}to{transform:translateY(0) scale(1);opacity:1}}
+@keyframes tabin{from{opacity:.45;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@keyframes ctxin{from{transform:scale(.86);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes flin{from{opacity:.7}to{opacity:1}}
+/* Pastki oyna (sheet) — mayin ko'tariladi */
+.shbg{animation:fadein .18s ease}
+.shbg .sheet{animation:sheetup .3s cubic-bezier(.2,.9,.3,1.02)}
+/* Yangi xabar/node DOM'ga qo'shilmagandagina animatsiya ishlaydi (diffInto faqat yangi node'larni qo'shadi) */
+.msgs .mrow,.msgs .day,.msgs .sys{animation:msgin .2s ease}
+.cnt{animation:pop .25s ease}
+.ctx{animation:ctxin .16s cubic-bezier(.2,.9,.3,1.2)}
+.item{transition:background .15s ease}
+.item:active{background:var(--asos-och)}
+.dock button{transition:transform .12s ease}
+.dock button:active{transform:scale(.88)}
+.tab.on{animation:tabin .22s ease}
+.picker{animation:slidein .2s ease}
+/* Reels'da ovoz o'chirilgan boshlanish */
+.reel video::-webkit-media-controls{display:none!important}
+/* Tejamkor rejim: mediani avtomatik yuklamaslik */
+body.noauto video[data-media]{background:#0b1524 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Ctext x='20' y='26' font-size='20' text-anchor='middle'%3E▶️%3C/text%3E%3C/svg%3E") center/36px no-repeat}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+}

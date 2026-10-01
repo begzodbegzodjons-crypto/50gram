@@ -12,6 +12,13 @@ const S = {
   chats: new Map(), contacts: [], stories: [], lives: [], users: new Map(),
   cur: null, msgs: new Map(), since: new Map(), typing: new Map(),
   ws: null, wsOk: false, serverNow: 0, handlers: {}, tab: 't-chats', sha: new Map(), mk: new Map(),
+  prefs: { sounds: 1, vibrate: 1, preview: 1, autoload: 1, ...JSON.parse(localStorage.getItem('g50_prefs') || '{}') },
+}
+// Sozlamalar: lokal + serverga sinxron (barcha qurilmalarda bir xil)
+function savePrefs(patch, sync = true) {
+  S.prefs = { ...S.prefs, ...patch }
+  localStorage.setItem('g50_prefs', JSON.stringify(S.prefs))
+  if (sync && S.token) patch('/me', { prefs: S.prefs }).catch(() => {})
 }
 const on = (type, fn) => ((S.handlers[type] ||= []).push(fn))
 
@@ -59,7 +66,7 @@ function initials(n) { return (String(n || '?').trim().split(/\s+/).slice(0, 2).
 const uname = (u) => (u ? ((u.first_name || '') + ' ' + (u.last_name || '')).trim() || 'Foydalanuvchi' : 'Foydalanuvchi')
 const linkify = (s) => esc(s).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>').replace(/(^|\s)@([a-zA-Z][\w]{4,31})/g, '$1<a href="#@$2">@$2</a>')
 const isEmojiOnly = (s) => s && s.length <= 12 && /^(\p{Extended_Pictographic}|\p{Emoji_Component}|\u200d|\ufe0f|\s)+$/u.test(s) && !/^[\d#*\s]+$/.test(s)
-function vibrate(p = 15) { try { navigator.vibrate && navigator.vibrate(p) } catch {} }
+function vibrate(p = 15) { if (!S.prefs.vibrate) return; try { navigator.vibrate && navigator.vibrate(p) } catch {} }
 
 // ---------------- API ----------------
 async function api(path, opt = {}) {
@@ -357,6 +364,48 @@ function closeSheet(el) {
 }
 const closeAllSheets = () => qsa('.shbg').forEach((b) => b.remove())
 const h3 = (t) => `<h3>${t}<button class="x">✕</button></h3>`
+
+// ---------------- Kanal/guruh logotiplari (tayyor presetlar) ----------------
+const LOGOS = [
+  ['📢', '#0A7CFF', '#00C2FF'], ['🔥', '#FF6A3D', '#C8102E'], ['⭐', '#F5A623', '#FF6A3D'],
+  ['🎵', '#7048E8', '#E64980'], ['⚽', '#11998e', '#38ef7d'], ['📰', '#232526', '#414345'],
+  ['🎬', '#7B2FF7', '#0A7CFF'], ['💎', '#1FAA59', '#0CA678'], ['🚀', '#0A7CFF', '#7048E8'],
+  ['🎁', '#ee9ca7', '#C8102E'], ['🌍', '#0062D6', '#11998e'], ['💪', '#f7971e', '#C8102E'],
+]
+function logoDataURL(emoji, c1, c2, size = 320) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = size
+  const x = cv.getContext('2d')
+  const g = x.createLinearGradient(0, 0, size, size)
+  g.addColorStop(0, c1); g.addColorStop(1, c2)
+  x.fillStyle = g
+  const r = size * 0.225
+  x.beginPath(); x.moveTo(r, 0); x.arcTo(size, 0, size, size, r); x.arcTo(size, size, 0, size, r); x.arcTo(0, size, 0, 0, r); x.arcTo(0, 0, size, 0, r); x.closePath(); x.fill()
+  x.font = Math.round(size * 0.52) + 'px serif'; x.textAlign = 'center'; x.textBaseline = 'middle'
+  x.fillText(emoji, size / 2, size * 0.54)
+  return cv.toDataURL('image/png')
+}
+const logoPresets = (cur) => `<div class="logos">${LOGOS.map(([e, c1, c2], i) => `<span data-logo="${i}" style="background:${logoDataURL(e, c1, c2)}" class="${cur === i ? 'on' : ''}"></span>`).join('')}</div>`
+
+// ---------------- Tarixni zaxiralash (hech narsa yo'qolmasin) ----------------
+function download(name, text, type = 'text/plain;charset=utf-8') {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove() }, 400)
+}
+async function exportChat(id) {
+  const c = S.chats.get(id); if (!c) return
+  toast('⏳ Tarix tayyorlanmoqda…')
+  await loadChatLocal(id)
+  try { await fetchMessages(id) } catch {}
+  const list = (S.msgs.get(id) || []).filter((m) => !m.pending)
+  const lines = [`50 Gram — ${chatName(c)} — ${list.length} xabar`, '']
+  for (const m of list) {
+    const who = m.kind === 'system' ? '' : (m.sender_id === S.me.id ? 'Siz' : uname(S.users.get(m.sender_id)))
+    lines.push(`[${fmtDay(m.created_at)} ${fmtTime(m.created_at)}] ${who}: ${msgPreview(m, c)}`)
+  }
+  download(`50gram-${chatName(c).replace(/[^\w\- ]/g, '').slice(0, 30) || 'chat'}.txt`, lines.join('\n'))
+  toast('✅ Zaxira yuklab olindi (' + list.length + ' xabar)')
+}
 function confirmBox(text, okText = 'Ha', danger = true) {
   return new Promise((res) => {
     const sh = sheet(`<h3>${esc(text)}</h3><div style="display:flex;gap:8px"><button class="btn gh big" data-n>Bekor</button><button class="btn big ${danger ? 'red' : ''}" data-y>${esc(okText)}</button></div>`, { onClose: () => res(false) })
@@ -539,7 +588,7 @@ function scheduleChats() { if (chQ) return; chQ = true; requestAnimationFrame(()
 let msQ = false, msF = false
 function scheduleMsgs(force) { if (force) msF = true; if (msQ) return; msQ = true; requestAnimationFrame(() => { msQ = false; const f = msF; msF = false; try { renderMsgs(f) } catch (e) {} }) }
 function renderChats() {
-  const list = [...S.chats.values()].filter((c) => c.joined).sort((a, b) => (b.last_message?.created_at || b.last_msg_at) - (a.last_message?.created_at || a.last_msg_at))
+  const list = [...S.chats.values()].filter((c) => c.joined).sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.last_message?.created_at || b.last_msg_at) - (a.last_message?.created_at || a.last_msg_at))
   const q = $('q').value.trim()
   if (q) return
   let total = 0
@@ -552,10 +601,11 @@ function renderChats() {
     const mine = lm && lm.sender_id === S.me.id && c.type !== 'channel' && !['system', 'call'].includes(lm.kind)
     const tick = mine ? `<span class="tick">${c.type === 'direct' && c.peer_last_read >= lm.id ? '✓✓' : '✓'}</span>` : ''
     const icon = c.type === 'channel' ? '📢 ' : c.type === 'group' ? '👥 ' : ''
+    const pinI = c.pinned ? '<span class="pin-i" title="Qadalgan">📌</span>' : ''
     const lv = c.peer ? live.get(c.peer.id) : null
     const av = c.type === 'direct' ? avHTML(c.peer, 54, { dot: true, saved: c.saved, live: !!lv, liveId: lv?.id }) : avHTML(c, 54, { chat: true })
     keys.push('c' + c.id)
-    rows.push(`<div class="item ${S.cur === c.id ? 'act' : ''}" data-chat="${c.id}">${av}<div class="mid"><div class="t1"><b>${icon}${esc(chatName(c))}</b>${lv ? '<span class="lvt">🔴 Efir</span>' : ''}${c.muted ? '<span class="mut">🔕</span>' : ''}<span class="tm">${tick} ${fmtShort(lm?.created_at || c.last_msg_at)}</span></div>
+    rows.push(`<div class="item ${S.cur === c.id ? 'act' : ''}" data-chat="${c.id}">${av}<div class="mid"><div class="t1"><b>${icon}${esc(chatName(c))}</b>${pinI}${lv ? '<span class="lvt">🔴 Efir</span>' : ''}${c.muted ? '<span class="mut">🔕</span>' : ''}<span class="tm">${tick} ${fmtShort(lm?.created_at || c.last_msg_at)}</span></div>
       <div class="t2"><span class="${ty ? 'typ' : ''}">${esc(ty || msgPreview(lm, c) || (c.type === 'direct' ? 'Salom deb yozing 👋' : ''))}</span>${c.unread ? `<b class="cnt ${c.muted ? 'm' : ''}">${c.unread > 99 ? '99+' : c.unread}</b>` : ''}</div></div></div>`)
   }
   if (!rows.length) { keys.push('empty'); rows.push(`<div class="empty"><span class="big">💬</span>Hali chatlar yo‘q.<br>Yuqoridagi qidiruvda ism, @username yoki telefon raqam yozing<br>yoki <a href="#" onclick="tabGo('t-contacts');return false">kontakt qo‘shing</a>.</div>`) }
@@ -643,11 +693,12 @@ async function handleHash() {
 }
 function notifyLocal(title, body, chatId) {
   if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-    try { const n = new Notification(title, { body, icon: 'icon-192.png', tag: 'c' + chatId }); n.onclick = () => { window.focus(); openChat(chatId); n.close() } } catch {}
+    try { const n = new Notification(title, { body: S.prefs.preview ? body : 'Yangi xabar', icon: 'icon-192.png', tag: 'c' + chatId }); n.onclick = () => { window.focus(); openChat(chatId); n.close() } } catch {}
   }
 }
 let audioCtx = null
 function beep(freq = 880, dur = 0.12, vol = 0.05) {
+  if (!S.prefs.sounds) return
   try {
     audioCtx ||= new (window.AudioContext || window.webkitAudioContext)()
     const o = audioCtx.createOscillator(), g = audioCtx.createGain()

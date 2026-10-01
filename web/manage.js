@@ -18,11 +18,13 @@ async function openChatInfo(id) {
     ${rowsHTML([
       c.username || c.invite_hash ? row('link', '🔗', esc(inviteLink(c)), 'Havola — bosib nusxa oling') : '',
       joined ? row('mute', c.muted ? '🔔' : '🔕', c.muted ? 'Bildirishnomani yoqish' : 'Ovozsiz qilish') : '',
+      joined ? row('pinchat', '📌', c.pinned ? 'Chatni qadashdan olish' : 'Chatni ro‘yxat boshiga qadash') : '',
       (!ch || adm) && joined ? row('members', '👥', ch ? 'Obunachilar' : 'A‘zolar', String(c.member_count || 0)) : '',
       adm && c.join_approval ? row('requests', '📬', 'Qo‘shilish so‘rovlari', c.requests ? String(c.requests.length || c.requests) : '') : '',
       (adm || (!ch && c.permissions?.invite)) && joined ? row('add', '➕', 'A‘zo qo‘shish') : '',
     ])}
     ${adm ? rowsHTML([row('edit', '✏️', 'Tahrirlash', 'Nom, tavsif, rasm, username'), row('type', c.is_public ? '🌐' : '🔒', ch ? 'Kanal turi' : 'Guruh turi', c.is_public ? 'Ochiq — qidiruvda ko‘rinadi' : 'Yopiq — faqat havola orqali'), !ch ? row('perms', '🛡', 'Ruxsatlar', 'A‘zolar nima qila oladi') : '', row('settings', '⚙️', 'Sozlamalar', ch ? 'Imzo, reaksiyalar, himoya' : 'Sekin rejim, reaksiyalar, himoya'), row('revoke', '♻️', 'Havolani yangilash', 'Eski havola ishlamay qoladi')]) : ''}
+    ${rowsHTML([joined ? row('export', '📥', 'Tarixni zaxiralash', 'Chat tarixini .txt faylga yuklab olish') : ''])}
     ${rowsHTML([
       !joined ? row('join', '✅', ch ? 'Obuna bo‘lish' : 'Qo‘shilish') : '',
       joined && !owner ? row('leave', '🚪', ch ? 'Obunani bekor qilish' : 'Guruhdan chiqish', '', 'red') : '',
@@ -35,8 +37,10 @@ async function openChatInfo(id) {
     const a = it.dataset.a
     if (a === 'link') { copy(inviteLink(c)); share(c.title, inviteLink(c)) }
     if (a === 'mute') { closeSheet(sh); toggleMute(S.chats.get(id) || c) }
+    if (a === 'pinchat') tryDo(async () => { const r2 = await post(`/chats/${id}/pin`, { on: !c.pinned }); S.chats.set(id, { ...S.chats.get(id), pinned: r2.pinned }); closeSheet(sh); renderChats(); toast(r2.pinned ? '📌 Qadaldi — endi ro‘yxat boshida' : 'Qadash olindi') })
     if (a === 'members') membersSheet(c)
     if (a === 'requests') requestsSheet(c)
+    if (a === 'export') { closeSheet(sh); exportChat(id) }
     if (a === 'add') pickUsers('A‘zo qo‘shish', async (ids) => { await post(`/chats/${id}/members`, { user_ids: ids }); toast('✅ Qo‘shildi'); loadChats() })
     if (a === 'edit') editChatSheet(c)
     if (a === 'type') typeSheet(c)
@@ -62,12 +66,18 @@ async function patchChat(c, body, msg = '✅ Saqlandi') {
   try { const r = await patch('/chats/' + c.id, body); S.chats.set(c.id, { ...S.chats.get(c.id), ...r }); Object.assign(c, r); renderChats(); if (S.cur === c.id) renderHeader(); toast(msg); return true } catch (e) { toast('⚠️ ' + e.message); return false }
 }
 function editChatSheet(c) {
+  let avNew = null
   const sh = sheet(h3('Tahrirlash') + `<label class="mut">Nom</label><input class="inp" id="ec-t" maxlength="128" value="${esc(c.title)}">
+    ${logoPresets(-1)}
     <label class="mut">Tavsif</label><textarea class="inp" id="ec-d" maxlength="500" rows="3">${esc(c.description || '')}</textarea>
     <label class="mut">Username (ochiq havola uchun)</label><input class="inp" id="ec-u" maxlength="32" placeholder="masalan: mening_kanalim" value="${esc(c.username || '')}">
     <div class="hint">Username: lotin harfi bilan boshlanadi, 5–32 belgi (harf, raqam, _).</div>
     <button class="btn big" id="ec-s">Saqlash</button>${c.avatar_ver ? '<button class="btn gh big red" id="ec-av">Rasmni olib tashlash</button>' : ''}`)
-  qs('#ec-s', sh).onclick = async () => { if (await patchChat(c, { title: qs('#ec-t', sh).value, description: qs('#ec-d', sh).value, username: qs('#ec-u', sh).value.trim() })) closeAllSheets() }
+  qs('#ec-s', sh).onclick = async () => { const body = { title: qs('#ec-t', sh).value, description: qs('#ec-d', sh).value, username: qs('#ec-u', sh).value.trim() }; if (avNew) body.avatar = avNew; if (await patchChat(c, body)) closeAllSheets() }
+  sh.addEventListener('click', (e) => {
+    const lg = e.target.closest('[data-logo]')
+    if (lg) { const [em, c1, c2] = LOGOS[+lg.dataset.logo]; avNew = logoDataURL(em, c1, c2); qsa('[data-logo]', sh).forEach((x) => x.classList.toggle('on', x === lg)) }
+  })
   const r = qs('#ec-av', sh); if (r) r.onclick = async () => { if (await patchChat(c, { avatar: null })) closeAllSheets() }
 }
 function typeSheet(c) {
@@ -186,6 +196,7 @@ function createSheet(type) {
   let av = null
   const ch = type === 'channel'
   const sh = sheet(h3(ch ? '📢 Yangi kanal' : '👥 Yangi guruh') + `<div class="prof"><div class="bigav" id="cr-av" style="width:90px;height:90px;cursor:pointer"><div class="av" style="width:90px;height:90px;font-size:32px;background:var(--sirt2)">📷</div></div></div>
+    ${logoPresets(-1)}
     <input class="inp" id="cr-t" maxlength="128" placeholder="${ch ? 'Kanal nomi' : 'Guruh nomi'}">
     <textarea class="inp" id="cr-d" maxlength="500" rows="2" placeholder="Tavsif (ixtiyoriy)"></textarea>
     <div class="rows">
@@ -198,6 +209,8 @@ function createSheet(type) {
   let pub = 1, ja = 0
   qs('#cr-av', sh).onclick = async () => { const f = await pickFile('image/*'); if (!f) return; av = await avatarDataUrl(f); qs('#cr-av', sh).innerHTML = `<img src="${av}" style="width:90px;height:90px;border-radius:50%;object-fit:cover">` }
   sh.addEventListener('click', (e) => {
+    const lg = e.target.closest('[data-logo]')
+    if (lg) { const [em, c1, c2] = LOGOS[+lg.dataset.logo]; av = logoDataURL(em, c1, c2); qs('#cr-av', sh).innerHTML = `<img src="${av}" style="width:90px;height:90px;border-radius:22%;object-fit:cover">`; qsa('[data-logo]', sh).forEach((x) => x.classList.toggle('on', x === lg)); return }
     const p = e.target.closest('[data-p]'); if (p) { pub = +p.dataset.p; qsa('[data-p] .chk', sh).forEach((x) => x.classList.toggle('on', x.closest('[data-p]') === p)) }
     const s = e.target.closest('[data-sw]'); if (s) { ja = ja ? 0 : 1; qs('.sw', s).classList.toggle('on', !!ja) }
   })
@@ -278,19 +291,27 @@ async function renderMe() {
   ${rowsHTML([row('edit', '✏️', 'Profilni tahrirlash', 'Ism, familiya, bio, username'), row('story', '➕', 'Istoriya joylash', '24 soatda o‘chadi; profil rasmingiz atrofida ko‘rinadi'), row('live', '🔴', 'Jonli efir boshlash'), row('saved', '🔖', 'Saqlangan xabarlar'), row('share', '🔗', 'Profilni ulashish')])}
   <div class="sec">Maxfiylik</div>
   ${rowsHTML([row('pphone', '📱', 'Telefon raqamim', PR[u.privacy_phone ?? 1]), row('pseen', '🕒', 'Oxirgi faollik', PR[u.privacy_last_seen ?? 0]), row('blocks', '🚫', 'Bloklanganlar')])}
+  <div class="sec">⚙️ Ilova sozlamalari</div>
+  <div class="rows">
+    ${swRow('p-sounds', '🔊 Ovozli signallar', !!S.prefs.sounds, 'Xabar va qo‘ng‘iroq tovushlari')}
+    ${swRow('p-vibrate', '📳 Tebranish', !!S.prefs.vibrate, 'Bosishlarda va yangi xabarda')}
+    ${swRow('p-preview', '👀 Xabar matni bildirishnomada', !!S.prefs.preview, 'O‘chiq bo‘lsa faqat «Yangi xabar» ko‘rinadi')}
+    ${swRow('p-autoload', '⬇️ Medianini avtomatik yuklash', !!S.prefs.autoload, 'Rasm/video oldindan yuklanadi')}
+  </div>
   <div class="sec">🕸 Qurilmalar tarmog‘i (P2P)</div>
   <div class="rows">
     ${swRow('share', 'Tarmoqqa hissa qo‘shish', localStorage.getItem('g50_share') !== '0', 'Ma’lumotlaringiz shifrlangan holda boshqa a’zolarga yetkaziladi')}
     <div style="display:block"><div class="rt">Qurilmada ajratilgan joy: <b id="gb-v">${gb} GB</b><small>Maksimum 30 GB. Joy tugasa eski fayllar avtomatik bo‘shatiladi.</small></div><input type="range" id="gb-r" min="1" max="30" value="${gb}" style="width:100%"></div>
-    <div><div class="rt">Hozir band<small>${st ? `${fmtSize(st.used || 0)} / ${st.limitGB} GB · boshqalar uchun ${st.pinned || 0} ta nusxa (${fmtSize(st.pinnedBytes || 0)})` : '—'}</small></div></div>
+    <div><div class="rt">Hozir band<small>${st ? `${fmtSize(st.used || 0)} / ${st.limitGB} GB · boshqalar uchun ${st.pinned || 0} ta nusxa (${fmtSize(st.pinnedBytes || 0)})` : '—'}</small></div><div class="rt" id="net-st"><small>Tarmoq tekshirilmoqda…</small></div></div>
   </div>
-  ${rowsHTML([row('clear', '🧹', 'Keshni tozalash', 'Qurilmadagi media fayllar o‘chiriladi', 'red')])}
+  ${rowsHTML([row('backup', '🗜', 'Butun tarixni zaxiralash', 'Barcha chatlar bitta faylga saqlanadi'), row('clear', '🧹', 'Keshni tozalash', 'Qurilmadagi media fayllar o‘chiriladi', 'red')])}
   <div class="sec">Ilova</div>
   <div class="rows">${swRow('dark', 'Tungi rejim', document.documentElement.classList.contains('dark'))}${swRow('notif', 'Bildirishnomalar', typeof Notification !== 'undefined' && Notification.permission === 'granted')}</div>
-  ${rowsHTML([row('about', 'ℹ️', '50 Gram haqida', 'Versiya 1.0'), row('logout', '🚪', 'Chiqish', '', 'red')])}`
+  ${rowsHTML([row('about', 'ℹ️', '50 Gram haqida', 'Versiya 1.1'), row('logout', '🚪', 'Chiqish', '', 'red')])}`
   const r = $('gb-r')
   r.oninput = () => ($('gb-v').textContent = r.value + ' GB')
   r.onchange = () => { Store.setLimit(+r.value); toast('✅ ' + r.value + ' GB ajratildi') }
+  api('/storage/stats').then((s2) => { const el = $('net-st'); if (el) el.innerHTML = `<small>Tarmoqda <b>${s2.nodes || 0}</b> qurilma · ${s2.files || 0} fayl · sog‘lom: ${s2.healthy || 0}</small>` }).catch(() => {})
 }
 $('melist').addEventListener('click', async (e) => {
   if (e.target.closest('[data-cam]')) { e.stopPropagation(); return changeMyAvatar() }
@@ -300,6 +321,7 @@ $('melist').addEventListener('click', async (e) => {
     if (k === 'share') { const on = localStorage.getItem('g50_share') === '0'; localStorage.setItem('g50_share', on ? '1' : '0'); w.classList.toggle('on', on) }
     if (k === 'dark') { const on = !document.documentElement.classList.contains('dark'); document.documentElement.classList.toggle('dark', on); localStorage.setItem('g50_dark', on ? '1' : '0'); w.classList.toggle('on', on) }
     if (k === 'notif') { if (typeof Notification === 'undefined') return toast('Brauzer qo‘llamaydi'); const p = await Notification.requestPermission(); w.classList.toggle('on', p === 'granted'); if (p !== 'granted') toast('Brauzer sozlamalaridan ruxsat bering') }
+    if (k.startsWith('p-')) { const key = k.slice(2); savePrefs({ [key]: S.prefs[key] ? 0 : 1 }); w.classList.toggle('on', !!S.prefs[key]); if (key === 'autoload') document.body.classList.toggle('noauto', !S.prefs.autoload) }
     return
   }
   const it = e.target.closest('[data-a]'); if (!it) return
@@ -312,7 +334,23 @@ $('melist').addEventListener('click', async (e) => {
   if (a === 'pphone' || a === 'pseen') privacySheet(a === 'pphone' ? 'privacy_phone' : 'privacy_last_seen')
   if (a === 'blocks') blocksSheet()
   if (a === 'clear') { if (await confirmBox('Qurilmadagi barcha media fayllar o‘chirilsinmi? Xabarlar matni saqlanib qoladi.', 'Tozalash')) tryDo(async () => { await Store.clearAll(); mediaCache.clear(); renderMe() }, '🧹 Tozalandi') }
-  if (a === 'about') sheet(`<div class="prof"><img src="logo.png" style="width:160px" alt="50 Gram"><h2>50 Gram</h2><div class="mut">Versiya 1.0</div></div><div class="hint">Xabarlar qurilmangizda saqlanadi. Server faqat yetkazib berish uchun vaqtincha ishlatiladi. Media fayllar shifrlangan holda a’zolar qurilmalari orqali tarqatiladi.</div>`)
+  if (a === 'backup') {
+    if (!(await confirmBox('Barcha chatlar tarixi bitta faylga yuklab olinadi. Davom etamizmi?', 'Zaxiralash', false))) return
+    toast('⏳ Zaxira tayyorlanmoqda…')
+    try {
+      await loadChats()
+      const out = { app: '50 Gram', exported_at: new Date().toISOString(), me: S.me.username || S.me.phone, chats: [] }
+      for (const c of S.chats.values()) {
+        if (c.joined === false) continue
+        await loadChatLocal(c.id)
+        const list = (S.msgs.get(c.id) || []).filter((m) => !m.pending).map((m) => ({ t: m.created_at, who: m.sender_id === S.me.id ? 'siz' : uname(S.users.get(m.sender_id)), kind: m.kind, body: m.body }))
+        out.chats.push({ name: chatName(c), type: c.type, messages: list })
+      }
+      download('50gram-backup-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(out), 'application/json')
+      toast('✅ Zaxira tayyor (' + out.chats.length + ' chat)')
+    } catch (er) { toast('⚠️ ' + er.message) }
+  }
+  if (a === 'about') sheet(`<div class="prof"><img src="logo.png" style="width:160px" alt="50 Gram"><h2>50 Gram</h2><div class="mut">Versiya 1.1</div></div><div class="hint">Xabarlar qurilmangizda saqlanadi. Server faqat yetkazib berish uchun vaqtincha ishlatiladi. Media fayllar shifrlangan holda a’zolar qurilmalari orqali tarqatiladi.</div>`)
   if (a === 'logout') { if (await confirmBox('Hisobdan chiqasizmi?', 'Chiqish')) logout() }
 })
 async function changeMyAvatar() {

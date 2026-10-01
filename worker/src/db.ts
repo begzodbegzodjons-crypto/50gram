@@ -9,7 +9,7 @@ const NUM = new Set([
   "ended_at", "viewed_at", "sent_at", "avatar_ver", "size", "chunks", "idx", "member_count", "unread",
   "like_count", "comment_count", "viewers", "cnt", "unseen", "liked", "video", "edited", "deleted",
   "is_public", "join_approval", "muted", "privacy_phone", "privacy_last_seen", "complete", "tries", "opt",
-  "mid", "uid", "keep", "gone", "dropped", "next_check", "replicas", "pinned", "quota", "used",
+  "mid", "uid", "keep", "gone", "dropped", "next_check", "replicas", "pinned", "quota", "used", "views", "pinned_id",
   "online_ms", "score", "first_beat", "last_beat", "jobs", "free", "kids", "depth", "ready", "host_kids", "parent_id", "parent",
 ])
 

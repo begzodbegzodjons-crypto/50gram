@@ -162,8 +162,9 @@ function textStory() {
 }
 on('story_reaction', (ev) => { const u = S.users.get(ev.user_id); toast(`${ev.reaction} ${u ? uname(u) : 'Kimdir'} istoriyangizga munosabat bildirdi`) })
 
-// ---------------- Lenta: yangiliklar, e'lonlar, reklama ----------------
+// ---------------- Lenta: yangiliklar, e'lonlar, reels ----------------
 let feedMode = 'all', feedPosts = [], feedEnd = false, feedBusy = false
+let reelsObserver = null
 async function loadFeed(reset) {
   if (feedBusy) return
   if (reset) { feedPosts = []; feedEnd = false; $('feedlist').innerHTML = '<div class="spin"></div>' }
@@ -171,13 +172,54 @@ async function loadFeed(reset) {
   feedBusy = true
   try {
     const before = feedPosts.length ? feedPosts[feedPosts.length - 1].id : 0
-    const r = await api(`/feed?mode=${feedMode}${before ? '&before=' + before : ''}`)
+    const r = feedMode === 'reels'
+      ? await api('/reels' + (before ? '?before=' + before : ''))
+      : await api(`/feed?mode=${feedMode}${before ? '&before=' + before : ''}`)
     const list = Array.isArray(r) ? r : r.posts || []
     for (const p of list) if (p.media_id && p.meta) P2P.note(String(p.media_id), { chat: 0, ...p.meta })
     feedPosts.push(...list)
     if (list.length < 20) feedEnd = true
-    renderFeed()
+    feedMode === 'reels' ? renderReels() : renderFeed()
   } catch (e) { $('feedlist').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>` } finally { feedBusy = false }
+}
+// ---------------- Reels: vertikal video lenta ----------------
+function reelHTML(p) {
+  const who = p.chat ? `<div class="rw" data-who="c${p.chat.id}">${avHTML(p.chat, 38, { chat: true })}<b>${esc(p.chat.title)}</b></div>`
+    : `<div class="rw" data-who="u${p.author?.id || 0}">${avHTML(p.author, 38)}<b>${esc(uname(p.author))}</b></div>`
+  return `<div class="reel" data-reel="${p.id}">
+    <video data-media="${p.media_id}" loop playsinline preload="metadata" muted></video>
+    <div class="rshade"></div>
+    <div class="rbot">
+      ${who}${p.views ? `<small class="rviews">👁 ${p.views}</small>` : ''}
+      ${p.text_body ? `<div class="rtx">${linkify(p.text_body)}</div>` : ''}
+    </div>
+    <div class="racts">
+      <button data-like class="${p.liked ? 'on' : ''}">${p.liked ? '❤️' : '🤍'}<i>${p.like_count || 0}</i></button>
+      <button data-cmt>💬<i>${p.comment_count || 0}</i></button>
+      <button data-psh>↗️<i>Ulashish</i></button>
+      ${p.can_delete ? '<button data-pdel>🗑<i>O‘chirish</i></button>' : ''}
+    </div>
+    <div class="rtap"></div>
+  </div>`
+}
+function renderReels() {
+  const box = $('feedlist')
+  box.innerHTML = feedPosts.length
+    ? `<div class="reels">${feedPosts.map(reelHTML).join('')}</div>${feedEnd ? '' : '<div class="hint" style="text-align:center;padding:12px">Pastga suring — yana videolar 🎬</div>'}`
+    : `<div class="empty"><span class="big">🎬</span>Hali video yo‘q. Lenta tabida 🎬 Reels ni tanlab video post joylang!</div>`
+  hydrate(box)
+  if (reelsObserver) reelsObserver.disconnect()
+  const rd = qs('.reels', box)
+  if (rd && 'IntersectionObserver' in window) {
+    reelsObserver = new IntersectionObserver((es) => {
+      for (const en of es) {
+        const v = en.target
+        if (en.isIntersecting && en.intersectionRatio > 0.6) { v.play().catch(() => {}); v.muted = false }
+        else v.pause()
+      }
+    }, { root: rd, threshold: [0, 0.6, 1] })
+    qsa('.reel video', box).forEach((v) => reelsObserver.observe(v))
+  }
 }
 function postHTML(p) {
   const who = p.chat ? `${avHTML(p.chat, 40, { chat: true })}<div><b>${p.chat.type === 'channel' ? '📢 ' : ''}${esc(p.chat.title)}</b><small>${fmtAgo(p.created_at)}</small></div>` : `${avHTML(p.author, 40)}<div><b>${esc(uname(p.author))}</b><small>${fmtAgo(p.created_at)}</small></div>`
@@ -190,13 +232,38 @@ function renderFeed() {
     : `<div class="empty"><span class="big">📰</span>${feedMode === 'subs' ? 'Obuna bo‘lgan kanallaringizda hali post yo‘q' : 'Hali postlar yo‘q. Birinchi bo‘lib yangilik yoki e’lon joylang!'}</div>`
   hydrate(box)
 }
-$('feedseg').onclick = (e) => { const d = e.target.closest('[data-m]'); if (!d) return; feedMode = d.dataset.m; qsa('#feedseg div').forEach((x) => x.classList.toggle('on', x === d)); loadFeed(true) }
+$('feedseg').onclick = (e) => { const d = e.target.closest('[data-m]'); if (!d) return; feedMode = d.dataset.m; qsa('#feedseg div').forEach((x) => x.classList.toggle('on', x === d)); $('b-post').classList.toggle('hide', feedMode === 'reels'); loadFeed(true) }
 $('feedlist').addEventListener('click', async (e) => {
+  if (feedMode === 'reels') {
+    const reel = e.target.closest('[data-reel]')
+    if (!reel) return
+    const p = feedPosts.find((x) => x.id === +reel.dataset.reel); if (!p) return
+    if (e.target.closest('[data-like]')) {
+      try {
+        const r = await post(`/posts/${p.id}/like`); p.liked = r.liked; p.like_count = r.like_count
+        const b = qs('[data-like]', reel); b.className = p.liked ? 'on' : ''; b.innerHTML = `${p.liked ? '❤️' : '🤍'}<i>${p.like_count || 0}</i>`
+        if (p.liked) { const f = document.createElement('span'); f.className = 'fly'; f.textContent = '❤️'; reel.appendChild(f); setTimeout(() => f.remove(), 1200); vibrate(10) }
+      } catch (er) { toast('⚠️ ' + er.message) }
+      return
+    }
+    if (e.target.closest('[data-cmt]')) return commentsSheet(p, null)
+    if (e.target.closest('[data-psh]')) return share((p.text_body || '50 Gram Reels').slice(0, 100), location.origin + location.pathname)
+    if (e.target.closest('[data-pdel]')) {
+      if (!(await confirmBox('Video o‘chirilsinmi?', 'O‘chirish'))) return
+      try { await del('/posts/' + p.id); if (p.media_id) Store.remove([String(p.media_id)]); feedPosts = feedPosts.filter((x) => x !== p); renderReels() } catch (er) { toast('⚠️ ' + er.message) }
+      return
+    }
+    const w = e.target.closest('[data-who]')
+    if (w) { const v = w.dataset.who; if (v[0] === 'u') openUser(+v.slice(1)); else { const c = S.chats.get(+v.slice(1)); c && c.joined !== false ? openChat(c.id) : chatPreview(p.chat) } ; return }
+    const v = qs('video', reel)
+    if (v) v.paused ? v.play().catch(() => {}) : v.pause()
+    return
+  }
   if (e.target.closest('[data-more]')) return loadFeed()
   const el = e.target.closest('[data-post]'); if (!el) return
   const p = feedPosts.find((x) => x.id === +el.dataset.post); if (!p) return
   if (e.target.closest('[data-like]')) {
-    try { const r = await post(`/posts/${p.id}/like`); p.liked = r.liked; p.like_count = r.like_count; el.outerHTML = postHTML(p); hydrate($('feedlist')); if (r.liked) vibrate(10) } catch (er) { toast('⚠️ ' + er.message) }
+    try { const r = await post(`/posts/${p.id}/like`); p.liked = r.liked; p.like_count = r.like_count; el.outerHTML = postHTML(p); hydrate($('feedlist')); if (r.liked) { const f = document.createElement('span'); f.className = 'fly'; f.textContent = '❤️'; el.appendChild(f); setTimeout(() => f.remove(), 1200); vibrate(10) } } catch (er) { toast('⚠️ ' + er.message) }
     return
   }
   if (e.target.closest('[data-cmt]')) return commentsSheet(p, el)
@@ -218,7 +285,7 @@ async function commentsSheet(p, el) {
   const sh = sheet(h3('Izohlar') + `<div id="cm-l" style="max-height:55vh;overflow:auto">${draw()}</div><div class="inrow"><input class="inp" id="cm-i" maxlength="1000" placeholder="Izoh yozing…"><button class="btn" id="cm-s" style="width:auto">➤</button></div>`)
   const send = async () => {
     const i = qs('#cm-i', sh), t = i.value.trim(); if (!t) return
-    try { const k = await post(`/posts/${p.id}/comments`, { text_body: t }); i.value = ''; list.push(k.user ? k : { ...k, user: S.me, text_body: t, created_at: Date.now() }); p.comment_count = (p.comment_count || 0) + 1; qs('#cm-l', sh).innerHTML = draw(); if (el.isConnected) { el.outerHTML = postHTML(p); hydrate($('feedlist')) } } catch (er) { toast('⚠️ ' + er.message) }
+    try { const k = await post(`/posts/${p.id}/comments`, { text_body: t }); i.value = ''; list.push(k.user ? k : { ...k, user: S.me, text_body: t, created_at: Date.now() }); p.comment_count = (p.comment_count || 0) + 1; qs('#cm-l', sh).innerHTML = draw(); if (el && el.isConnected) { el.outerHTML = postHTML(p); hydrate($('feedlist')) } else if (feedMode === 'reels') renderReels() } catch (er) { toast('⚠️ ' + er.message) }
   }
   qs('#cm-s', sh).onclick = send
   qs('#cm-i', sh).onkeydown = (e) => e.key === 'Enter' && send()
@@ -243,7 +310,7 @@ $('b-post').onclick = () => {
       if (file) { const video = file.type.startsWith('video/'); const blob = video ? file : await resizeImage(file, 1600, 0.85); media_id = await upload(blob, file.name); media_kind = video ? 'video' : 'photo'; meta = mediaInfo(media_id) }
       const p = await post('/posts', { text_body: text, media_id, media_kind, meta, chat_id: +qs('#np-w', sh).value })
       closeSheet(sh)
-      feedPosts.unshift(p); renderFeed(); toast('✅ Joylandi')
+      feedPosts.unshift(p); renderFeed(); toast('✅ Joylandi — video bo‘lsa Reels’da ko‘rinadi 🎬')
     } catch (e) { toast('⚠️ ' + e.message); btn.disabled = false; btn.textContent = 'Joylash' }
   }
 }

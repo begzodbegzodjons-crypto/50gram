@@ -55,8 +55,9 @@ const normPhone = (p: unknown) => {
   return "+" + d
 }
 const USERNAME_RE = /^[a-zA-Z][a-zA-Z0-9_]{4,31}$/
-const USER_COLS = "id,phone,first_name,last_name,username,bio,avatar_ver,privacy_phone,privacy_last_seen,last_seen"
-const CHAT_COLS = "id,type,title,description,username,avatar_ver,owner_id,is_public,invite_hash,join_approval,permissions,settings,member_count,last_msg_at,created_at"
+const USER_COLS = "id,phone,first_name,last_name,username,bio,avatar_ver,privacy_phone,privacy_last_seen,last_seen,prefs"
+const CHAT_COLS = "id,type,title,description,username,avatar_ver,owner_id,is_public,invite_hash,join_approval,permissions,settings,member_count,last_msg_at,created_at,pinned_id"
+const PREF_KEYS = new Set(["sounds", "vibrate", "preview", "autoload"])
 const DEF_PERMS = { send: 1, media: 1, stickers: 1, links: 1, polls: 1, invite: 1 }
 const DEF_SET = { signatures: 0, comments: 1, reactions: 1, protect: 0, slow: 0 }
 const MSG_KINDS = new Set(["text", "sticker", "gif", "photo", "video", "voice", "round", "file", "contact", "poll", "location"])
@@ -74,8 +75,9 @@ async function notify(env: Env, uids: number[], ev: unknown) {
   }))
 }
 async function memberIds(c: C, chatId: number) {
-  const rows = await c.db.q("SELECT user_id FROM chat_members WHERE chat_id=? AND status='active' LIMIT " + (NOTIFY_CAP + 1), [chatId])
-  return rows.length > NOTIFY_CAP ? [] : rows.map((r) => r.user_id as number)
+  // Katta kanallarda ham birinchi NOTIFY_CAP faol a'zoga real vaqt hodisasi boradi (qolganlari 4s poll bilan ushlaydi)
+  const rows = await c.db.q("SELECT user_id FROM chat_members WHERE chat_id=? AND status='active' LIMIT " + NOTIFY_CAP, [chatId])
+  return rows.map((r) => r.user_id as number)
 }
 function notifyChat(c: C, chatId: number, ev: unknown, extra: number[] = []) {
   c.wait(memberIds(c, chatId).then((ids) => notify(c.env, [...ids, ...extra], ev)))
@@ -132,8 +134,8 @@ function chatOut(r: any) {
     id: r.id, type: r.type, title: r.title, description: r.description, username: r.username || null,
     avatar_ver: r.avatar_ver || 0, owner_id: r.owner_id, is_public: r.is_public, join_approval: r.join_approval,
     permissions: parse(r.permissions, DEF_PERMS), settings: parse(r.settings, DEF_SET),
-    member_count: r.member_count, last_msg_at: r.last_msg_at, created_at: r.created_at,
-    role: r.role || null, last_read: r.last_read || 0, muted: r.muted || 0, unread: Number(r.unread || 0),
+    member_count: r.member_count, last_msg_at: r.last_msg_at, created_at: r.created_at, pinned_id: r.pinned_id || 0,
+    role: r.role || null, last_read: r.last_read || 0, muted: r.muted || 0, pinned: r.pinned || 0, unread: Number(r.unread || 0),
   }
 }
 function msgOut(m: any) {
@@ -232,7 +234,7 @@ async function getMe(c: C) {
   const u = await c.db.one(`SELECT ${USER_COLS} FROM users WHERE id=?`, [c.uid])
   if (!u) fail("Hisob topilmadi", 401)
   const f = await storyFlags(c, [c.uid])
-  return json({ ...pubUser(u, c.uid), privacy_phone: u.privacy_phone, privacy_last_seen: u.privacy_last_seen, story: f.get(c.uid) || null })
+  return json({ ...pubUser(u, c.uid), privacy_phone: u.privacy_phone, privacy_last_seen: u.privacy_last_seen, prefs: parse((u as any).prefs, { sounds: 1, vibrate: 1, preview: 1, autoload: 1 }), story: f.get(c.uid) || null })
 }
 async function patchMe(c: C) {
   const b = c.b, sets: string[] = [], vals: unknown[] = []
@@ -248,6 +250,13 @@ async function patchMe(c: C) {
   if ("privacy_phone" in b) put("privacy_phone", [0, 1, 2].includes(+b.privacy_phone) ? +b.privacy_phone : 1)
   if ("privacy_last_seen" in b) put("privacy_last_seen", [0, 1, 2].includes(+b.privacy_last_seen) ? +b.privacy_last_seen : 0)
   if ("avatar" in b) { const a = avatarOk(b.avatar); put("avatar", a); put("avatar_ver", a ? now() : 0) }
+  if (b.prefs && typeof b.prefs === "object") {
+    const u0 = await c.db.one("SELECT prefs FROM users WHERE id=?", [c.uid])
+    const cur = parse(u0?.prefs, {})
+    const np: Record<string, number> = {}
+    for (const k of Object.keys(b.prefs)) if (PREF_KEYS.has(k)) np[k] = b.prefs[k] === 0 || b.prefs[k] === false ? 0 : 1
+    put("prefs", JSON.stringify({ ...cur, ...np }))
+  }
   if (sets.length) await c.db.run(`UPDATE users SET ${sets.join(",")} WHERE id=?`, [...vals, c.uid])
   return getMe(c)
 }
@@ -344,7 +353,7 @@ async function block(c: C, on: boolean) {
 // ------------------------- Chatlar -------------------------
 async function chatSummaries(c: C, onlyId?: number) {
   const rows = await c.db.q(
-    `SELECT ${CHAT_COLS.split(",").map((x) => "c." + x).join(",")}, m.role, m.last_read, m.muted,
+    `SELECT ${CHAT_COLS.split(",").map((x) => "c." + x).join(",")}, m.role, m.last_read, m.muted, m.pinned,
       (SELECT COUNT(*) FROM messages x WHERE x.chat_id=c.id AND x.id>m.last_read AND x.sender_id<>? AND x.deleted=0) AS unread
      FROM chat_members m JOIN chats c ON c.id=m.chat_id
      WHERE m.user_id=? AND m.status='active' ${onlyId ? "AND c.id=?" : ""} ORDER BY c.last_msg_at DESC LIMIT 300`,
@@ -630,6 +639,25 @@ async function muteChat(c: C) {
   await c.db.run("UPDATE chat_members SET muted=? WHERE chat_id=? AND user_id=?", [c.b.muted ? 1 : 0, +c.p.id, c.uid])
   return json({ ok: true })
 }
+// Chatni ro'yxat boshiga qadash (faqat o'zi uchun)
+async function pinChat(c: C) {
+  const id = +c.p.id
+  const m = await member(c, id)
+  if (!m || m.status !== "active") fail("Avval qo‘shiling", 403)
+  await c.db.run("UPDATE chat_members SET pinned=? WHERE chat_id=? AND user_id=?", [c.b.on ? 1 : 0, id, c.uid])
+  return json({ ok: true, pinned: c.b.on ? 1 : 0 })
+}
+// Xabarni yuqoriga qadash (e'lon kuni) — guruh/kanalda admin, shaxsiy chatda o'zi
+async function pinMessage(c: C) {
+  const m = await ownMsg(c, false)
+  const ch = await needChat(c, m.chat_id)
+  if (ch.type !== "direct" && !isAdm(await member(c, m.chat_id))) fail("Qadash faqat adminlarda", 403)
+  const on = !!c.b.on
+  await c.db.run("UPDATE chats SET pinned_id=? WHERE id=?", [on ? m.id : 0, m.chat_id])
+  const out = on ? (await enrich(c, [m]))[0] : null
+  notifyChat(c, m.chat_id, { type: "pinned", chat_id: m.chat_id, message: out })
+  return json({ ok: true, pinned_id: on ? m.id : 0, message: out })
+}
 
 // ------------------------- Xabarlar -------------------------
 async function enrich(c: C, msgs: any[]) {
@@ -875,7 +903,8 @@ async function listStories(c: C) {
   for (const r of rows) {
     if (!groups.has(r.user_id)) groups.set(r.user_id, { user: um.get(r.user_id), stories: [] })
     groups.get(r.user_id).stories.push({
-      id: r.id, kind: r.kind, media_id: r.media_id, text_body: r.text_body, bg: r.bg, created_at: r.created_at,
+      id: r.id, kind: r.kind, media_id: r.media_id, text_body: r.text_body, bg: r.bg,
+      meta: r.meta ? parse(r.meta, null) : null, created_at: r.created_at,
       seen: r.user_id === c.uid || !!r.seen_by, views: r.user_id === c.uid ? vcm.get(r.id) || 0 : undefined,
     })
   }
@@ -889,8 +918,10 @@ async function createStory(c: C) {
   if (kind !== "text" && !c.b.media_id) fail("Rasm yoki video kerak")
   if (kind === "text" && !str(c.b.text_body, 500)) fail("Matn kiriting")
   const id = newId(), t = now(), exp = t + DAY
-  await c.db.run("INSERT INTO stories(id,user_id,kind,media_id,text_body,bg,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?)",
-    [id, c.uid, kind, c.b.media_id || null, str(c.b.text_body, 500) || null, str(c.b.bg, 200) || null, t, exp])
+  const smeta = c.b.meta && typeof c.b.meta === "object" ? JSON.stringify(c.b.meta) : null
+  if (smeta && smeta.length > 6000) fail("Istoriya juda katta")
+  await c.db.run("INSERT INTO stories(id,user_id,kind,media_id,text_body,bg,meta,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)",
+    [id, c.uid, kind, c.b.media_id || null, str(c.b.text_body, 500) || null, str(c.b.bg, 200) || null, smeta, t, exp])
   if (c.b.media_id) await c.db.run("UPDATE media SET expires_at=? WHERE id=? AND owner_id=?", [exp, String(c.b.media_id), c.uid])
   return json({ id })
 }
@@ -949,7 +980,8 @@ async function postsOut(c: C, rows: any[]) {
   const chm = new Map(chs.map((r) => [r.id, chatOut(r)]))
   return rows.map((r) => ({
     id: r.id, text_body: r.text_body, media_id: r.media_id, media_kind: r.media_kind, like_count: r.like_count,
-    comment_count: r.comment_count, created_at: r.created_at, liked: liked.has(r.id),
+    comment_count: r.comment_count, views: Number(r.views || 0), created_at: r.created_at, liked: liked.has(r.id),
+    meta: r.meta ? parse(r.meta, null) : null,
     author: um.get(r.author_id) || null, chat: r.chat_id ? chm.get(r.chat_id) || null : null,
     can_delete: r.author_id === c.uid,
   }))
@@ -960,8 +992,10 @@ async function createPost(c: C) {
   const chatId = +c.b.chat_id || 0
   if (chatId) await needAdmin(c, chatId)
   const id = newId()
-  await c.db.run("INSERT INTO posts(id,author_id,chat_id,text_body,media_id,media_kind,created_at) VALUES(?,?,?,?,?,?,?)",
-    [id, c.uid, chatId, text || null, c.b.media_id || null, c.b.media_id ? (c.b.media_kind === "video" ? "video" : "photo") : null, now()])
+  const meta = c.b.meta && typeof c.b.meta === "object" ? JSON.stringify(c.b.meta) : null
+  if (meta && meta.length > 6000) fail("Post juda katta")
+  await c.db.run("INSERT INTO posts(id,author_id,chat_id,text_body,media_id,media_kind,meta,created_at) VALUES(?,?,?,?,?,?,?,?)",
+    [id, c.uid, chatId, text || null, c.b.media_id || null, c.b.media_id ? (c.b.media_kind === "video" ? "video" : "photo") : null, meta, now()])
   if (c.b.media_id) {
     await c.db.run("UPDATE media SET expires_at=?, keep=1, chat_id=0, next_check=0 WHERE id=? AND owner_id=?", [now() + 100 * 365 * DAY, String(c.b.media_id), c.uid])
     c.wait(planReplicas(c.db, 1, String(c.b.media_id)))
@@ -985,6 +1019,22 @@ async function likePost(c: C) {
   const n = await c.db.one("SELECT COUNT(*) AS cnt FROM post_likes WHERE post_id=?", [id])
   await c.db.run("UPDATE posts SET like_count=? WHERE id=?", [Number(n?.cnt || 0), id])
   return json({ liked: !ex, like_count: Number(n?.cnt || 0) })
+}
+// Reels — vertikal video lenta: ochiq kanallar + shaxsiy video postlar (ko'rilgani hisoblanadi)
+async function reels(c: C) {
+  const before = +(c.url.searchParams.get("before") || 0) || Number.MAX_SAFE_INTEGER
+  const my = (await c.db.q("SELECT chat_id FROM chat_members WHERE user_id=? AND status='active'", [c.uid])).map((r) => r.chat_id)
+  const myList = my.length ? my : [0]
+  const rows = await c.db.q(
+    `SELECT p.* FROM posts p LEFT JOIN chats ch ON ch.id=p.chat_id
+     WHERE p.media_kind='video' AND p.id<? AND (p.chat_id=0 OR ch.is_public=1 OR p.chat_id IN (${ph(myList)}))
+     ORDER BY p.id DESC LIMIT 10`,
+    [before, ...myList],
+  )
+  const blocked = new Set((await c.db.q("SELECT user_id FROM blocks WHERE blocked_id=? UNION SELECT blocked_id AS user_id FROM blocks WHERE user_id=?", [c.uid, c.uid])).map((r) => r.user_id))
+  const list = rows.filter((r) => !blocked.has(r.author_id))
+  if (list.length) await c.db.run(`UPDATE posts SET views=views+1 WHERE id IN (${ph(list.map((x) => x.id))})`, list.map((x) => x.id))
+  return json(await postsOut(c, list))
 }
 async function listComments(c: C) {
   const rows = await c.db.q("SELECT * FROM post_comments WHERE post_id=? ORDER BY id LIMIT 200", [+c.p.id])
@@ -1422,6 +1472,8 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/chats/:id/join", joinChat],
   ["POST", "/chats/:id/leave", leaveChat],
   ["POST", "/chats/:id/mute", muteChat],
+  ["POST", "/chats/:id/pin", pinChat],
+  ["POST", "/messages/:id/pin", pinMessage],
   ["GET", "/chats/:id/members", listMembers],
   ["POST", "/chats/:id/members", addMembers],
   ["POST", "/chats/:id/members/:uid/:action", memberAction],
@@ -1446,6 +1498,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/stories/:id/views", storyViews],
   ["DELETE", "/stories/:id", deleteStory],
   ["GET", "/feed", feed],
+  ["GET", "/reels", reels],
   ["POST", "/posts", createPost],
   ["DELETE", "/posts/:id", deletePost],
   ["POST", "/posts/:id/like", likePost],

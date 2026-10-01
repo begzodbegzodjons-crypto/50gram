@@ -50,10 +50,34 @@ async function openChat(id) {
   $('msgs').innerHTML = '<div class="spin"></div>'
   await loadChatLocal(id)
   if (S.cur !== id) return
-  renderHeader(); renderMsgs(true); renderChats()
+  renderHeader(); renderPinned(); renderMsgs(true); renderChats()
   await fetchMessages(id)
+  renderPinned()
   markRead(id)
 }
+// ---------------- Qadalgan xabar (e'lon) paneli ----------------
+function renderPinned() {
+  const c = S.chats.get(S.cur), bar = $('d-pinbar')
+  if (!c || !bar) return
+  const m = c.pinned_id ? findMsg(c.pinned_id) : null
+  bar.classList.toggle('hide', !c.pinned_id)
+  if (!c.pinned_id) return
+  $('pinbar-t').textContent = '📌 Qadalgan xabar'
+  $('pinbar-x').textContent = m ? msgPreview(m, c).slice(0, 90) : 'Bosing — xabarga o‘tiladi'
+  $('pinbar-unpin').classList.toggle('hide', !(c.type === 'direct' || c.role === 'owner' || c.role === 'admin'))
+}
+$('d-pinbar').addEventListener('click', (e) => {
+  if (e.target.closest('#pinbar-unpin')) {
+    const c = S.chats.get(S.cur); if (!c || !c.pinned_id) return
+    post(`/messages/${c.pinned_id}/pin`, { on: false }).then(() => { c.pinned_id = 0; renderPinned() }).catch((er) => toast('⚠️ ' + er.message))
+    return
+  }
+  const c = S.chats.get(S.cur)
+  if (!c || !c.pinned_id) return
+  const el = qs('.mrow[data-mid="' + c.pinned_id + '"]')
+  if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('hl'); setTimeout(() => el.classList.remove('hl'), 1600) }
+  else toast('Xabar eski — «Yuqoriga surish» bilan oling')
+})
 function closeChat() {
   S.cur = null
   $('dialog').classList.remove('open')
@@ -339,6 +363,7 @@ function ctxMenu(m, x, y) {
   if (!m.deleted && !protect && m.kind !== 'call' && m.kind !== 'poll') items.push(['fwd', '↪️', 'Uzatish'])
   if (!m.deleted && m.meta?.media_id && !protect && ['photo', 'video', 'file', 'voice', 'round'].includes(m.kind)) items.push(['save', '⬇️', 'Saqlab olish'])
   if (!m.deleted && (mine || (c.type !== 'direct' && adm))) items.push(['del', '🗑', 'O‘chirish', 'red'])
+  if (!m.deleted && m.id > 0 && (c.type === 'direct' || adm)) items.push(['pin', '📌', S.chats.get(S.cur)?.pinned_id === m.id ? 'Qadashdan olish' : 'Yuqoriga qadash'])
   const bg = document.createElement('div'); bg.className = 'ctxbg'
   const box = document.createElement('div'); box.className = 'ctx'
   box.innerHTML = (canReact ? `<div class="rxr">${REACTS.map((r) => `<span data-r="${r}">${r}</span>`).join('')}</div>` : '') +
@@ -358,6 +383,7 @@ function ctxMenu(m, x, y) {
     if (k === 'copy') copy(m.body)
     if (k === 'edit') { editId = m.id; replyTo = null; $('inp').value = m.body; setReply(); autoGrow(); $('inp').focus() }
     if (k === 'fwd') forwardMsg(m)
+    if (k === 'pin') { try { const r2 = await post(`/messages/${m.id}/pin`, { on: S.chats.get(S.cur)?.pinned_id !== m.id }); S.chats.get(S.cur).pinned_id = r2.pinned_id; renderPinned(); toast(r2.pinned_id ? '📌 Xabar qadaldi' : 'Qadash olindi') } catch (er) { toast('⚠️ ' + er.message) } }
     if (k === 'save') { try { const u = await mediaUrl(m.meta.media_id); const a = document.createElement('a'); a.href = u; a.download = m.meta.name || ('50gram-' + m.id); document.body.appendChild(a); a.click(); a.remove() } catch (er) { toast('⚠️ ' + er.message) } }
     if (k === 'del') {
       if (!(await confirmBox(c.type === 'direct' ? 'Xabar ikkala tomonda ham o‘chirilsinmi?' : 'Xabar hamma uchun o‘chirilsinmi?', 'O‘chirish'))) return
@@ -827,6 +853,12 @@ on('typing', (ev) => {
   if (S.cur === ev.chat_id) renderHeader()
 })
 on('chat_update', () => { loadChats().catch(() => {}) })
+on('pinned', (ev) => {
+  const c = S.chats.get(ev.chat_id)
+  if (c) { c.pinned_id = ev.message ? ev.message.id : 0; if (ev.message) merge(ev.chat_id, [ev.message]) }
+  if (S.cur === ev.chat_id) renderPinned()
+  if (ev.message && S.cur !== ev.chat_id) toast('📌 Yangi e’lon qadaldi')
+})
 on('chat_deleted', async (ev) => {
   const id = ev.chat_id
   const ids = (S.msgs.get(id) || []).map((m) => m.meta?.media_id).filter(Boolean).map(String)
@@ -847,3 +879,5 @@ openChat = async function (id) {
   return p
 }
 setSendIcon()
+// Mediani avtomatik yuklash o‘chiq bo'lsa — video preload='none' qoladi (tejamkor rejim)
+if (!S.prefs.autoload) document.body.classList.add('noauto')
