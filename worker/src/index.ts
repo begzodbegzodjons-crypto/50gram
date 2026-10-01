@@ -1045,17 +1045,14 @@ function needsTr(s: string): boolean {
   return EN_STOP.test(low)
 }
 async function trToUz(s: string): Promise<string> {
-  for (let a = 0; a < 2; a++) {
-    try {
-      const r = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=uz&dt=t&q=" + encodeURIComponent(s.slice(0, 900)), { headers: TREND_UA })
-      if (r.status === 429) { await tSleep(900); continue } // throttle — 1 marta qayta urinish
-      if (!r.ok) { console.log("tr HTTP", r.status); return s }
-      const j: any = await r.json()
-      const out = (j?.[0] || []).map((x: any[]) => String(x?.[0] || "")).join("")
-      return out.trim() || s
-    } catch (e: any) { console.log("trerr", String(e?.message || e).slice(0, 100)); return s }
-  }
-  return s
+  // DIQQAT: free plan 50 subrequest/invocation — retry YO'Q, kesh konvergatsiyani ta'minlaydi
+  try {
+    const r = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=uz&dt=t&q=" + encodeURIComponent(s.slice(0, 900)), { headers: TREND_UA })
+    if (!r.ok) { console.log("tr HTTP", r.status); return s }
+    const j: any = await r.json()
+    const out = (j?.[0] || []).map((x: any[]) => String(x?.[0] || "")).join("")
+    return out.trim() || s
+  } catch (e: any) { console.log("trerr", String(e?.message || e).slice(0, 100)); return s }
 }
 // Tarjima keshi: har matn 1 marta tarjima qilinadi, 6 soat edge-keshda turadi
 async function trToUzCached(c: C, s: string): Promise<string> {
@@ -1116,7 +1113,7 @@ async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  const cacheKey = "https://trend.50gram.internal/t5?p=" + page + "&cat=" + onlyCat
+  const cacheKey = "https://trend.50gram.internal/t6?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
@@ -1154,16 +1151,14 @@ async function trend(c: C) {
       items = picked
     }
   }
-  // Tarjima: ketma-ket + keshli (gtx parallel burst'ni 429 bilan ushlaydi)
-  let trLeft = 14
+  // Tarjima: faqat SARLAVHALAR, ketma-ket, keskin byudjet (free plan 50 subrequest/invocation)
+  // Boshlanish: 5 feed + kesh ops + DM ≈ 10; tarjima ≤ 10 × (fetch+put) = 20. Jami ≈ 30 < 50 ✓
+  let trLeft = 10
   for (const it of items) {
     if (trLeft <= 0) break
-    const tTr = needsTr(it.title), sTr = it.snippet && needsTr(it.snippet)
-    if (!tTr && !sTr) continue
+    if (!needsTr(it.title)) continue
     trLeft--
-    if (tTr) it.title = await trToUzCached(c, it.title)
-    if (sTr) it.snippet = (await trToUzCached(c, it.snippet)).slice(0, 300)
-    await tSleep(200)
+    it.title = await trToUzCached(c, it.title)
   }
   items = items.filter((x) => x && x.title)
   for (const x of items) x.id = (await sha256(x.url)).slice(0, 12)
