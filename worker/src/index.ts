@@ -1047,11 +1047,31 @@ function needsTr(s: string): boolean {
 async function trToUz(s: string): Promise<string> {
   try {
     const r = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=uz&dt=t&q=" + encodeURIComponent(s.slice(0, 900)), { headers: TREND_UA })
-    if (!r.ok) { console.log("tr HTTP", r.status); return s }
+    if (!r.ok) {
+      console.log("tr HTTP", r.status)
+      if (r.status === 429) { await tSleep(600); return s } // backoff — kesh yordam beradi
+      return s
+    }
     const j: any = await r.json()
     const out = (j?.[0] || []).map((x: any[]) => String(x?.[0] || "")).join("")
     return out.trim() || s
   } catch (e: any) { console.log("trerr", String(e?.message || e).slice(0, 100)); return s }
+}
+// Tarjima keshi: har matn 1 marta tarjima qilinadi, 6 soat edge-keshda turadi
+async function trToUzCached(c: C, s: string): Promise<string> {
+  if (!s) return s
+  const h = (await sha256(s)).slice(0, 20)
+  const ck = "https://trend.50gram.internal/tr1/" + h
+  try {
+    const hit = await caches.default.match(ck)
+    if (hit) return await hit.text()
+  } catch {}
+  const out = await trToUz(s)
+  if (out && out !== s) {
+    const resp = new Response(out, { headers: { "cache-control": "public, s-maxage=21600" } })
+    c.wait(caches.default.put(ck, resp).catch(() => {}))
+  }
+  return out
 }
 async function dailymotion(page: number): Promise<any[]> {
   try {
@@ -1096,7 +1116,7 @@ async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  const cacheKey = "https://trend.50gram.internal/t3?p=" + page + "&cat=" + onlyCat
+  const cacheKey = "https://trend.50gram.internal/t4?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
@@ -1134,15 +1154,17 @@ async function trend(c: C) {
       items = picked
     }
   }
-  // Tarjima: o'zbekcha bo'lmagan sarlavhalar o'zbek tiliga (parallel, limit bilan)
-  let trLeft = 16
-  await Promise.all(items.map(async (it) => {
-    if (trLeft <= 0 || !needsTr(it.title)) return
+  // Tarjima: ketma-ket + keshli (gtx parallel burst'ni 429 bilan ushlaydi)
+  let trLeft = 14
+  for (const it of items) {
+    if (trLeft <= 0) break
+    const tTr = needsTr(it.title), sTr = it.snippet && needsTr(it.snippet)
+    if (!tTr && !sTr) continue
     trLeft--
-    const t1 = await trToUz(it.title)
-    it.title = t1
-    if (it.snippet && needsTr(it.snippet)) it.snippet = (await trToUz(it.snippet)).slice(0, 300)
-  }))
+    if (tTr) it.title = await trToUzCached(c, it.title)
+    if (sTr) it.snippet = (await trToUzCached(c, it.snippet)).slice(0, 300)
+    await tSleep(200)
+  }
   items = items.filter((x) => x && x.title)
   for (const x of items) x.id = (await sha256(x.url)).slice(0, 12)
   const out = { ok: true, page, items }
