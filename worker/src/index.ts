@@ -1036,15 +1036,15 @@ async function gnewsFetch(src: string, url: string, n: number): Promise<any[]> {
     return out
   } catch (e: any) { console.log("trenderr", src, String(e?.message || e).slice(0, 120)); return [] }
 }
-const EN_STOP = /\b(the|and|of|in|for|with|to|on|at|from|by|after|before|over|into|about|new|how|why|what|who|top|best|first|vs|amid|amId|says|will)\b/i
-const UZ_MARK = /[oʻ‘’gʻʼ]|o‘|g‘|ning|bilan|uchun|yangi|haqida|bo‘yicha|yili|keldi|berdi|ayti|deya|qilmoq|bo'ldi|o'rtas|birinchi|katta|yana|ham\b/i
+// KRITIK TUZATISH: eski UZ_MARK /​[oʻ‘’gʻʼ]/ belgilar to'plami har qanday "o"/"g" harfini moslab,
+// deyarli BARCHA inglizcha sarlavhalarni "o'zbekcha" deb tasniflab yuborardi (tarjima o'tkazib yuborilardi).
+const EN_STOP = /\b(the|and|of|in|for|with|to|on|at|from|by|after|before|over|into|about|new|how|why|what|who|top|best|first|vs|amid|says|said|will|would|can|could|should|may|might|must|as|is|are|was|were|be|been|has|have|had|his|her|its|their|this|that|these|those|more|most|than|not|but|or|if|when|while|during|against|out|up|down|off|back|just|now|day|days|year|years|world|us|uk|video|watch|live|report|reports|did|does|do|get|got|make|made|take|took|see|seen|show|showed|reveal|revealed|claim|claims|warn|warned|hit|killed|died|death|major|huge|big|police|man|woman|people|old|time|win|wins|lost|lose|beat|wins|open|opens|new|amid|here|there|still|again|back)\b/i
+const UZ_MARK = /[oO]['ʻʼ‘’][a-z]|\w+moq(da)?\b|\b(ning|bilan|uchun|yangi|haqida|bo‘yicha|yili|keldi|berdi|ayti|deya|qilmoq|birinchi|katta|yana|ham|va|bu|emas|qarshi|taxmin|xabar|tashrif|bayon|prezident|vazir|davlat|talab)\b/i
 function needsTr(s: string): boolean {
   if (!s || s.length < 3) return false
   if (/[а-яёӯғҳ]/i.test(s)) return true // kirill matn — tarjima kerak
-  if (/['ʻʼ‘’]/.test(s)) return false // oʻ/gʻ apostroflari bor — oʻzbekcha
-  const low = s.toLowerCase()
-  if (UZ_MARK.test(low)) return false
-  return EN_STOP.test(low)
+  if (UZ_MARK.test(s)) return false // oʻzbekcha belgilar bor
+  return EN_STOP.test(s)
 }
 async function trToUz(s: string): Promise<string> {
   // DIQQAT: free plan 50 subrequest/invocation — retry YO'Q, kesh konvergatsiyani ta'minlaydi.
@@ -1082,13 +1082,22 @@ function cyrToLat(s: string): string {
   return out
 }
 const hasCyr = (s: string) => /[а-яёӯғҳ]/i.test(s)
-// Workers AI tarjima (m2m100): binding — subrequest limitiga KIRMAYDI
+// Workers AI tarjima (zaxira bosqich): binding — subrequest limitiga KIRMAYDI.
+// DIQQAT: eski @cf/meta/m2m100_1.2B modeli Cloudflare tomonidan o'chirilgan — llama-3.1 ishlatiladi.
 async function trAI(env: Env, s: string): Promise<string> {
   try {
     if (!env.AI) return s
-    const r: any = await env.AI.run("@cf/meta/m2m100_1.2B", { text: s.slice(0, 400), source_lang: hasCyr(s) ? "ru" : "en", target_lang: "uz" })
-    const t = String(r?.translated_text || "").trim()
-    return t || s
+    const r: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+      messages: [
+        { role: "system", content: "You are a translator. Translate the user's text to Uzbek (Latin script). Reply with ONLY the translation, nothing else." },
+        { role: "user", content: s.slice(0, 350) },
+      ],
+      max_tokens: 300,
+    })
+    const t = String(r?.response || "").trim().replace(/^(?:['‘ʻ"]|tarjima:|translation:)\s*/i, "").trim()
+    // Yordamchi o'zbekcha belgi tekshiruvi: javob matni o'zbekcha ko'rinsagina qabul qilinadi
+    if (!t || t === s || t.length < 3) return s
+    return t
   } catch { return s }
 }
 // Tarjima keshi: har matn 1 marta tarjima qilinadi, 6 soat edge-keshda turadi.
@@ -1332,8 +1341,14 @@ async function trendTrDbg(c: C) {
   } catch (e: any) { st.c5 = { err: String(e?.message || e).slice(0, 80) } }
   try {
     if (c.env.AI) {
-      const r3: any = await c.env.AI.run("@cf/meta/m2m100_1.2B", { text: q.slice(0, 400), source_lang: "en", target_lang: "uz" })
-      st.ai = { result: String(r3?.translated_text || JSON.stringify(r3).slice(0, 80)).slice(0, 80) }
+      const r3: any = await c.env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+        messages: [
+          { role: "system", content: "You are a translator. Translate to Uzbek (Latin). Reply with ONLY the translation." },
+          { role: "user", content: q.slice(0, 300) },
+        ],
+        max_tokens: 300,
+      })
+      st.ai = { result: String(r3?.response || JSON.stringify(r3).slice(0, 80)).slice(0, 80) }
     } else st.ai = { err: "AI binding yo'q" }
   } catch (e: any) { st.ai = { err: String(e?.message || e).slice(0, 120) } }
   return json(st)
