@@ -1375,10 +1375,11 @@ async function trend(c: C) {
       items = picked
     }
   }
-  // Tarjima: faqat SARLAVHALAR, ketma-ket, keskin byudjet (free plan 50 subrequest/invocation)
+  // Tarjima: avval Shorts/video sarlavhalari (kam sonli, lekin foydalanuvchi birinchi ko'radi), so'ng yangiliklar.
   // Boshlanish: 5 feed + kesh ops + video hovuzi ≈ 15; tarjima ≤ 10 × (fetch+put) = 20. Jami ≈ 40 < 50 ✓
   let trLeft = 10
-  for (const it of items) {
+  const trList = [...items.filter((x) => x.kind === "short" || x.kind === "video"), ...items.filter((x) => x.kind !== "short" && x.kind !== "video")]
+  for (const it of trList) {
     if (trLeft <= 0) break
     if (!needsTr(it.title)) continue
     trLeft--
