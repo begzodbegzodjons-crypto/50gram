@@ -1050,6 +1050,22 @@ async function dailymotion(page: number): Promise<any[]> {
     })).filter((v: any) => v.embed)
   } catch { return [] }
 }
+async function feedFor(c: C, cat: string): Promise<any[]> {
+  // Har kategoriya o'z alohida edge-keshida (15 daq) — sahifalar arzon hisoblanadi
+  const ck = "https://trend.50gram.internal/f2/" + cat
+  try {
+    const hit = await caches.default.match(ck)
+    if (hit) return await hit.json()
+  } catch {}
+  const items = await gnewsFetch(cat, TREND_CATS[cat], 40)
+  if (items.length) {
+    const resp = json(items)
+    resp.headers.set("cache-control", "public, s-maxage=900")
+    c.wait(caches.default.put(ck, resp.clone()).catch(() => {}))
+  }
+  return items
+}
+const tSleep = (ms: number) => new Promise((res) => setTimeout(res, ms))
 async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
@@ -1063,21 +1079,23 @@ async function trend(c: C) {
   if (onlyCat === "video") {
     items = await dailymotion(page)
   } else if (onlyCat && TREND_CATS[onlyCat]) {
-    const raw = await gnewsFetch(onlyCat, TREND_CATS[onlyCat], 30)
+    const raw = await feedFor(c, onlyCat)
     items = raw.slice((page - 1) * 10, page * 10)
   } else {
-    // Barcha kategoriyalar: 3 tali guruhlarda (parallel burst Google tomonidan cheklanadi),
-    // qiziqish vazniga qarab aralashtirish
+    // Barcha kategoriyalar: ketma-ket (Google parallel burst'ni 503 bilan ushlaydi),
+    // har biri o'z edge-keshidan — ko'p hollarda shunchaki o'qish
     const keys0 = Object.keys(TREND_CATS)
-    const byCat = new Map<string, any[]>()
-    for (let i = 0; i < keys0.length; i += 3) {
-      const wave = keys0.slice(i, i + 3)
-      const res = await Promise.all(wave.map((k) => gnewsFetch(k, TREND_CATS[k], 30)))
-      wave.forEach((k, j) => byCat.set(k, res[j]))
-    }
     const w: Record<string, number> = {}
-    for (const part of catsW.split(",")) { const [k, v] = part.split(":"); if (k && byCat.has(k)) w[k] = +v || 0 }
+    for (const part of catsW.split(",")) { const [k, v] = part.split(":"); if (TREND_CATS[k]) w[k] = +v || 0 }
     const keys = keys0.slice().sort((a, b) => (w[b] || 0) - (w[a] || 0))
+    const byCat = new Map<string, any[]>()
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i]
+      let arr = await feedFor(c, k)
+      if (!arr.length && i < keys.length - 1) { await tSleep(700); arr = await feedFor(c, k) }
+      byCat.set(k, arr)
+      if (i < keys.length - 1) await tSleep(450)
+    }
     const perPage = 5 // har kategoriyadan sahifada shunchaki olinadi
     const picked: any[] = []
     const cursors = new Map(keys.map((k) => [k, (page - 1) * perPage] as [string, number]))
