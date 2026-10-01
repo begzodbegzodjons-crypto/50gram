@@ -19,6 +19,7 @@ export interface Env {
   TURN_KEY_ID?: string
   TURN_KEY_TOKEN?: string
   USER_SOCKET: any
+  AI?: any
   __db?: Db
 }
 
@@ -1054,7 +1055,31 @@ async function trToUz(s: string): Promise<string> {
     return out.trim() || s
   } catch (e: any) { console.log("trerr", String(e?.message || e).slice(0, 100)); return s }
 }
-// Tarjima keshi: har matn 1 marta tarjima qilinadi, 6 soat edge-keshda turadi
+// Kirill (o'zbek) -> lotin transliteratsiya: subrequest KERAK EMAS, 100% ishlaydi
+const CYR_MAP: Record<string, string> = { а: "a", б: "b", в: "v", г: "g", ғ: "g‘", д: "d", е: "e", ж: "j", з: "z", и: "i", й: "y", к: "k", қ: "q", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ў: "o‘", ф: "f", х: "x", ҳ: "h", ц: "ts", ч: "ch", ш: "sh", ъ: "‘", ь: "", ы: "i", э: "e", ю: "yu", я: "ya", ё: "yo", щ: "sh" }
+function cyrToLat(s: string): string {
+  let out = ""
+  for (const ch of s) {
+    const lo = ch.toLowerCase()
+    const m = CYR_MAP[lo]
+    if (m === undefined) { out += ch; continue }
+    if (ch !== lo && m) out += m.charAt(0).toUpperCase() + m.slice(1)
+    else out += m
+  }
+  return out
+}
+const hasCyr = (s: string) => /[а-яёӯғҳ]/i.test(s)
+// Workers AI tarjima (m2m100): binding — subrequest limitiga KIRMAYDI
+async function trAI(env: Env, s: string): Promise<string> {
+  try {
+    if (!env.AI) return s
+    const r: any = await env.AI.run("@cf/meta/m2m100_1.2B", { text: s.slice(0, 400), source_lang: hasCyr(s) ? "ru" : "en", target_lang: "uz" })
+    const t = String(r?.translated_text || "").trim()
+    return t || s
+  } catch { return s }
+}
+// Tarjima keshi: har matn 1 marta tarjima qilinadi, 6 soat edge-keshda turadi.
+// Zanjir: gtx (bepul, ba'zan 429) -> Workers AI -> kirill bo'lsa lokal transliteratsiya.
 async function trToUzCached(c: C, s: string): Promise<string> {
   if (!s) return s
   const h = (await sha256(s)).slice(0, 20)
@@ -1063,7 +1088,9 @@ async function trToUzCached(c: C, s: string): Promise<string> {
     const hit = await caches.default.match(ck)
     if (hit) return await hit.text()
   } catch {}
-  const out = await trToUz(s)
+  let out = await trToUz(s)
+  if (out === s) out = await trAI(c.env, s)
+  if ((out === s || hasCyr(out)) && hasCyr(s)) out = cyrToLat(s)
   if (out && out !== s) {
     const resp = new Response(out, { headers: { "cache-control": "public, s-maxage=21600" } })
     c.wait(caches.default.put(ck, resp).catch(() => {}))
@@ -1113,7 +1140,7 @@ async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  const cacheKey = "https://trend.50gram.internal/t6?p=" + page + "&cat=" + onlyCat
+  const cacheKey = "https://trend.50gram.internal/t7?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)

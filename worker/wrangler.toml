@@ -20,6 +20,10 @@ new_sqlite_classes = ["UserSocket"]
 [triggers]
 crons = ["*/30 * * * *"]
 
+# Workers AI: trend lentada tarjima uchun (subrequest limitiga kirmaydi)
+[ai]
+binding = "AI"
+
 [observability]
 enabled = true
 
