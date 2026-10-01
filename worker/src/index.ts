@@ -1045,17 +1045,17 @@ function needsTr(s: string): boolean {
   return EN_STOP.test(low)
 }
 async function trToUz(s: string): Promise<string> {
-  try {
-    const r = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=uz&dt=t&q=" + encodeURIComponent(s.slice(0, 900)), { headers: TREND_UA })
-    if (!r.ok) {
-      console.log("tr HTTP", r.status)
-      if (r.status === 429) { await tSleep(600); return s } // backoff — kesh yordam beradi
-      return s
-    }
-    const j: any = await r.json()
-    const out = (j?.[0] || []).map((x: any[]) => String(x?.[0] || "")).join("")
-    return out.trim() || s
-  } catch (e: any) { console.log("trerr", String(e?.message || e).slice(0, 100)); return s }
+  for (let a = 0; a < 2; a++) {
+    try {
+      const r = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=uz&dt=t&q=" + encodeURIComponent(s.slice(0, 900)), { headers: TREND_UA })
+      if (r.status === 429) { await tSleep(900); continue } // throttle — 1 marta qayta urinish
+      if (!r.ok) { console.log("tr HTTP", r.status); return s }
+      const j: any = await r.json()
+      const out = (j?.[0] || []).map((x: any[]) => String(x?.[0] || "")).join("")
+      return out.trim() || s
+    } catch (e: any) { console.log("trerr", String(e?.message || e).slice(0, 100)); return s }
+  }
+  return s
 }
 // Tarjima keshi: har matn 1 marta tarjima qilinadi, 6 soat edge-keshda turadi
 async function trToUzCached(c: C, s: string): Promise<string> {
@@ -1116,7 +1116,7 @@ async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  const cacheKey = "https://trend.50gram.internal/t4?p=" + page + "&cat=" + onlyCat
+  const cacheKey = "https://trend.50gram.internal/t5?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
