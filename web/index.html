@@ -38,6 +38,7 @@
         <input id="ap-last" class="inp" placeholder="Familiya (ixtiyoriy)" maxlength="64">
         <button class="btn big" id="b-prof">Davom etish</button>
       </div>
+      <a id="apk-dl" class="apk-btn" href="50gram.apk" download="50gram.apk"><b>📱 Android uchun yuklab olish (APK)</b><span>Ilova sifatida o‘rnating — fonda ham ishlaydi</span></a>
     </div>
   </section>
 
@@ -110,7 +111,8 @@
 <script src="social.js"></script>
 <script src="rtc.js"></script>
 <script>
-  if (S.token && S.me) startApp(); else showAuth()
+  if (S.token && S.me) startApp(); else showAuth();
+  try { if (navigator.userAgent.indexOf('50GramApp') > -1) document.getElementById('apk-dl').style.display = 'none'; } catch (e) {}
 </script>
 </body>
 </html>

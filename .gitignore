@@ -15,3 +15,4 @@ examples/
 tool-results/
 worklog.md
 package-lock.json.bak
+android/build/
