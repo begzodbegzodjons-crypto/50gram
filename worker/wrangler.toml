@@ -25,7 +25,8 @@ enabled = true
 
 [vars]
 # "1" bo'lsa va SMS sozlanmagan bo'lsa, kod ekranda ko'rsatiladi (FAQAT sinov uchun!)
-DEV_MODE = "0"
+# ESKIZ_EMAIL/ESKIZ_PASSWORD secretlar qo'shilgach "0" ga qaytariladi
+DEV_MODE = "1"
 # Sinov raqamlari (SMS yuborilmaydi): "+998900000001:111111,+998900000002:222222"
 TEST_PHONES = ""
 
