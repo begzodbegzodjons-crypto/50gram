@@ -1014,8 +1014,9 @@ async function gnewsFetch(cat: string, url: string, n: number): Promise<any[]> {
         time: isNaN(ts) ? now() : ts,
       })
     }
+    if (!out.length) console.log("trendempty", cat, r.status, xml.length, xml.slice(0, 150).replace(/\s+/g, " "))
     return out
-  } catch { return [] }
+  } catch (e: any) { console.log("trenderr", cat, String(e?.message || e).slice(0, 120)); return [] }
 }
 const EN_STOP = /\b(the|and|of|in|for|with|to|on|at|from|by|after|before|over|into|about|new|how|why|what|who|top|best|first|vs|amid|amId|says|will)\b/i
 const UZ_MARK = /[oʻ‘’gʻʼ]|o‘|g‘|ning|bilan|uchun|yangi|haqida|bo‘yicha|yili|keldi|berdi|ayti|deya|qilmoq|bo'ldi|o'rtas|birinchi|katta|yana|ham\b/i
