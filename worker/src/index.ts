@@ -690,7 +690,8 @@ async function getMessages(c: C) {
   const after = +(c.url.searchParams.get("after") || 0)
   const since = +(c.url.searchParams.get("since") || 0)
   const before = +(c.url.searchParams.get("before") || 0)
-  const latest = Math.min(200, Math.max(1, +(c.url.searchParams.get("latest") || 0)))
+  const latestQ = +(c.url.searchParams.get("latest") || 0)
+  const latest = latestQ ? Math.min(200, Math.max(1, latestQ)) : 0 // 0 = param yo'q (before/sinch rejimlar ishlaydi)
   const t = now()
   let all: any[]
   let more = false
@@ -715,7 +716,7 @@ async function getMessages(c: C) {
   const messages = await enrich(c, all)
   const um = await usersByIds(c, [...new Set(all.map((x) => x.sender_id))])
   const peer = ch.type === "direct" ? await c.db.one("SELECT last_read FROM chat_members WHERE chat_id=? AND user_id<>?", [id, c.uid]) : null
-  return json({ messages, users: Object.fromEntries(um), now: t, peer_last_read: peer?.last_read ?? null, more, dbg: { latest, before, after, rawBefore: c.url.searchParams.get("before") } })
+  return json({ messages, users: Object.fromEntries(um), now: t, peer_last_read: peer?.last_read ?? null, more })
 }
 async function sendMessage(c: C) {
   const id = +c.p.id
