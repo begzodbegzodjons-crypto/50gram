@@ -204,6 +204,7 @@ function reelHTML(p) {
 }
 function renderReels() {
   const box = $('feedlist')
+  $('t-feed').classList.add('reelmode')
   box.innerHTML = feedPosts.length
     ? `<div class="reels">${feedPosts.map(reelHTML).join('')}</div>${feedEnd ? '' : '<div class="hint" style="text-align:center;padding:12px">Pastga suring — yana videolar 🎬</div>'}`
     : `<div class="empty"><span class="big">🎬</span>Hali video yo‘q. Lenta tabida 🎬 Reels ni tanlab video post joylang!</div>`
@@ -217,7 +218,7 @@ function renderReels() {
         if (en.isIntersecting && en.intersectionRatio > 0.6) { v.play().catch(() => {}); v.muted = false }
         else v.pause()
       }
-    }, { root: rd, threshold: [0, 0.6, 1] })
+    }, { root: qs('#t-feed'), threshold: [0, 0.6, 1] })
     qsa('.reel video', box).forEach((v) => reelsObserver.observe(v))
   }
 }
@@ -232,7 +233,7 @@ function renderFeed() {
     : `<div class="empty"><span class="big">📰</span>${feedMode === 'subs' ? 'Obuna bo‘lgan kanallaringizda hali post yo‘q' : 'Hali postlar yo‘q. Birinchi bo‘lib yangilik yoki e’lon joylang!'}</div>`
   hydrate(box)
 }
-$('feedseg').onclick = (e) => { const d = e.target.closest('[data-m]'); if (!d) return; feedMode = d.dataset.m; qsa('#feedseg div').forEach((x) => x.classList.toggle('on', x === d)); $('b-post').classList.toggle('hide', feedMode === 'reels'); loadFeed(true) }
+$('feedseg').onclick = (e) => { const d = e.target.closest('[data-m]'); if (!d) return; feedMode = d.dataset.m; qsa('#feedseg div').forEach((x) => x.classList.toggle('on', x === d)); $('b-post').classList.toggle('hide', feedMode === 'reels'); $('t-feed').classList.toggle('reelmode', feedMode === 'reels'); loadFeed(true) }
 $('feedlist').addEventListener('click', async (e) => {
   if (feedMode === 'reels') {
     const reel = e.target.closest('[data-reel]')
