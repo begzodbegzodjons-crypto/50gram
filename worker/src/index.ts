@@ -984,9 +984,15 @@ function tagGet(block: string, tag: string): string {
   return m ? m[1].trim() : ""
 }
 async function gnewsFetch(cat: string, url: string, n: number): Promise<any[]> {
+  const UA = { headers: TREND_UA, cf: { cacheTtl: 900, cacheEverything: true } } as any
   try {
-    const r = await fetch(url, { headers: TREND_UA, cf: { cacheTtl: 600 } } as any)
-    if (!r.ok) return []
+    let r = await fetch(url, UA)
+    // Google parallel burst'ni cheklaydi — 1 marta kutib qayta urinish
+    if (r.status === 429 || r.status === 503) {
+      await new Promise((res) => setTimeout(res, 350))
+      r = await fetch(url, UA)
+    }
+    if (!r.ok) { console.log("trend", cat, "HTTP", r.status); return [] }
     const xml = await r.text()
     const out: any[] = []
     for (const block of xml.split("<item>").slice(1)) {
@@ -1047,7 +1053,7 @@ async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  const cacheKey = "https://trend.50gram.internal/t?p=" + page + "&cat=" + onlyCat
+  const cacheKey = "https://trend.50gram.internal/t2?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
@@ -1059,12 +1065,18 @@ async function trend(c: C) {
     const raw = await gnewsFetch(onlyCat, TREND_CATS[onlyCat], 30)
     items = raw.slice((page - 1) * 10, page * 10)
   } else {
-    // Barcha kategoriyalar: bir vaqtda olib, qiziqish vazniga qarab aralashtirish
-    const batches = await Promise.all(Object.entries(TREND_CATS).map(([k, u]) => gnewsFetch(k, u, 30)))
-    const byCat = new Map(Object.keys(TREND_CATS).map((k, i) => [k, batches[i]] as [string, any[]]))
+    // Barcha kategoriyalar: 3 tali guruhlarda (parallel burst Google tomonidan cheklanadi),
+    // qiziqish vazniga qarab aralashtirish
+    const keys0 = Object.keys(TREND_CATS)
+    const byCat = new Map<string, any[]>()
+    for (let i = 0; i < keys0.length; i += 3) {
+      const wave = keys0.slice(i, i + 3)
+      const res = await Promise.all(wave.map((k) => gnewsFetch(k, TREND_CATS[k], 30)))
+      wave.forEach((k, j) => byCat.set(k, res[j]))
+    }
     const w: Record<string, number> = {}
     for (const part of catsW.split(",")) { const [k, v] = part.split(":"); if (k && byCat.has(k)) w[k] = +v || 0 }
-    const keys = Object.keys(TREND_CATS).sort((a, b) => (w[b] || 0) - (w[a] || 0))
+    const keys = keys0.slice().sort((a, b) => (w[b] || 0) - (w[a] || 0))
     const perPage = 5 // har kategoriyadan sahifada shunchaki olinadi
     const picked: any[] = []
     const cursors = new Map(keys.map((k) => [k, (page - 1) * perPage] as [string, number]))
