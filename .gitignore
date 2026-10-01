@@ -1,0 +1,17 @@
+node_modules/
+.wrangler/
+.dev.vars
+*.log
+.DS_Store
+
+# Lokal muhit / platforma papkalari (repoga kirmaydi)
+.env
+upload/
+skills/
+scripts/
+download/
+examples/
+.zscripts/
+tool-results/
+worklog.md
+package-lock.json.bak

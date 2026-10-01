@@ -1,0 +1,15 @@
+{
+  "name": "50 Gram",
+  "short_name": "50 Gram",
+  "description": "Tezkor o‘zbek messenjeri: chatlar, kanallar, lenta, qo‘ng‘iroqlar",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0A7CFF",
+  "lang": "uz",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

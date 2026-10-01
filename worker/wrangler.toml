@@ -1,0 +1,39 @@
+name = "50gram"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# Frontend (web/) shu Worker bilan birga joylanadi: https://50gram.<sizning-subdomen>.workers.dev
+[assets]
+directory = "../web"
+run_worker_first = ["/api/*"]
+
+# Real-time: har foydalanuvchiga bitta Durable Object (Free planda SQLite backend bilan ishlaydi)
+[[durable_objects.bindings]]
+name = "USER_SOCKET"
+class_name = "UserSocket"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["UserSocket"]
+
+# Har 30 daqiqada eskirgan xabar, fayl va istoriyalarni serverdan o'chiradi
+[triggers]
+crons = ["*/30 * * * *"]
+
+[observability]
+enabled = true
+
+[vars]
+# "1" bo'lsa va SMS sozlanmagan bo'lsa, kod ekranda ko'rsatiladi (FAQAT sinov uchun!)
+DEV_MODE = "0"
+# Sinov raqamlari (SMS yuborilmaydi): "+998900000001:111111,+998900000002:222222"
+TEST_PHONES = ""
+
+# Secretlar (terminalda bir marta):
+#   npx wrangler secret put DATABASE_URL     # TiDB Cloud -> Connect -> Serverless Driver URL
+#   npx wrangler secret put JWT_SECRET       # kamida 32 ta tasodifiy belgi
+#   npx wrangler secret put ESKIZ_EMAIL      # eskiz.uz login
+#   npx wrangler secret put ESKIZ_PASSWORD
+# Ixtiyoriy (qo'ng'iroqlar har qanday tarmoqda ulanishi uchun TURN):
+#   npx wrangler secret put TURN_KEY_ID
+#   npx wrangler secret put TURN_KEY_TOKEN
