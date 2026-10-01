@@ -23,7 +23,7 @@ async function openChatInfo(id) {
       adm && c.join_approval ? row('requests', '📬', 'Qo‘shilish so‘rovlari', c.requests ? String(c.requests.length || c.requests) : '') : '',
       (adm || (!ch && c.permissions?.invite)) && joined ? row('add', '➕', 'A‘zo qo‘shish') : '',
     ])}
-    ${adm ? rowsHTML([row('edit', '✏️', 'Tahrirlash', 'Nom, tavsif, rasm, username'), row('type', c.is_public ? '🌐' : '🔒', ch ? 'Kanal turi' : 'Guruh turi', c.is_public ? 'Ochiq — qidiruvda ko‘rinadi' : 'Yopiq — faqat havola orqali'), !ch ? row('perms', '🛡', 'Ruxsatlar', 'A‘zolar nima qila oladi') : '', row('settings', '⚙️', 'Sozlamalar', ch ? 'Imzo, reaksiyalar, himoya' : 'Sekin rejim, reaksiyalar, himoya'), row('revoke', '♻️', 'Havolani yangilash', 'Eski havola ishlamay qoladi')]) : ''}
+    ${adm ? rowsHTML([row('edit', '✏️', 'Tahrirlash', 'Nom, tavsif, rasm, username'), row('announce', '📣', ch ? 'E’lon yuborish' : 'Xabar yozish', ch ? 'Obunachilarga darhol yetkaziladi' : 'Guruhga yangilik joylash'), row('stats', '📊', 'Statistika', 'A’zolar, xabarlar, ko‘rishlar'), row('type', c.is_public ? '🌐' : '🔒', ch ? 'Kanal turi' : 'Guruh turi', c.is_public ? 'Ochiq — qidiruvda ko‘rinadi' : 'Yopiq — faqat havola orqali'), !ch ? row('perms', '🛡', 'Ruxsatlar', 'A‘zolar nima qila oladi') : '', row('settings', '⚙️', 'Sozlamalar', ch ? 'Imzo, reaksiyalar, himoya' : 'Sekin rejim, reaksiyalar, himoya'), row('revoke', '♻️', 'Havolani yangilash', 'Eski havola ishlamay qoladi')]) : ''}
     ${rowsHTML([joined ? row('export', '📥', 'Tarixni zaxiralash', 'Chat tarixini .txt faylga yuklab olish') : ''])}
     ${rowsHTML([
       !joined ? row('join', '✅', ch ? 'Obuna bo‘lish' : 'Qo‘shilish') : '',
@@ -46,6 +46,8 @@ async function openChatInfo(id) {
     if (a === 'type') typeSheet(c)
     if (a === 'perms') permsSheet(c)
     if (a === 'settings') settingsSheet(c)
+    if (a === 'announce') { closeSheet(sh); postSheet(c.id) }
+    if (a === 'stats') statsSheet(c)
     if (a === 'revoke') { if (await confirmBox('Yangi havola yaratilsinmi? Eskisi ishlamaydi.', 'Yangilash')) tryDo(async () => { const r = await post(`/chats/${id}/invite`); c.invite_hash = r.invite_hash; copy(inviteLink(c)) }, '✅ Yangi havola nusxalandi') }
     if (a === 'join') { closeSheet(sh); joinChat(id) }
     if (a === 'leave') {
@@ -101,6 +103,22 @@ function permsSheet(c) {
     const k = s.dataset.sw, on = !((c.permissions || {})[k] !== 0)
     if (await patchChat(c, { permissions: { [k]: on ? 1 : 0 } })) qs('.sw', s).classList.toggle('on', on)
   }
+}
+async function statsSheet(c) {
+  let s
+  try { s = await api(`/chats/${c.id}/stats`) } catch (e) { return toast('⚠️ ' + e.message) }
+  const ch = c.type === 'channel'
+  sheet(h3('📊 Statistika — ' + esc(c.title)) + `<div class="statgrid">
+    <div class="st"><b>${s.members}</b><small>${ch ? 'Obunachi' : 'A’zo'}</small></div>
+    <div class="st"><b>${s.admins}</b><small>Adminlar</small></div>
+    <div class="st"><b>${s.today}</b><small>Bugungi xabarlar</small></div>
+    <div class="st"><b>${s.messages}</b><small>Umumiy xabarlar</small></div>
+    <div class="st"><b>${s.posts}</b><small>Postlar</small></div>
+    <div class="st"><b>${fmtN(s.views)}</b><small>Ko‘rishlar</small></div>
+    <div class="st"><b>${s.likes}</b><small>Layklar</small></div>
+    <div class="st"><b>${s.comments}</b><small>Izohlar</small></div>
+    ${s.banned ? `<div class="st" style="grid-column:1/-1"><b>${s.banned}</b><small>Bloklangan — A’zolar bo‘limidan boshqariladi</small></div>` : ''}
+  </div>`)
 }
 function settingsSheet(c) {
   const st = c.settings || {}, ch = c.type === 'channel'
@@ -298,6 +316,7 @@ async function renderMe() {
     ${swRow('p-preview', '👀 Xabar matni bildirishnomada', !!S.prefs.preview, 'O‘chiq bo‘lsa faqat «Yangi xabar» ko‘rinadi')}
     ${swRow('p-autoload', '⬇️ Medianini avtomatik yuklash', !!S.prefs.autoload, 'Rasm/video oldindan yuklanadi')}
   </div>
+  ${rowsHTML([row('chatview', '🎨', 'Chat ko‘rinishi', 'Shrift hajmi va suhbat foni'), row('trendset', '🔥', 'Trend qiziqishlarim', 'Lentada nima ko‘p chiqishini tanlang')])}
   <div class="sec">🕸 Qurilmalar tarmog‘i (P2P)</div>
   <div class="rows">
     ${swRow('share', 'Tarmoqqa hissa qo‘shish', localStorage.getItem('g50_share') !== '0', 'Ma’lumotlaringiz shifrlangan holda boshqa a’zolarga yetkaziladi')}
@@ -327,6 +346,8 @@ $('melist').addEventListener('click', async (e) => {
   const it = e.target.closest('[data-a]'); if (!it) return
   const a = it.dataset.a
   if (a === 'edit') editMeSheet()
+  if (a === 'chatview') chatViewSheet()
+  if (a === 'trendset') trendInterestsSheet()
   if (a === 'story') createStory()
   if (a === 'live') startLive()
   if (a === 'saved') openDirectWith(S.me.id)
@@ -382,3 +403,63 @@ async function blocksSheet() {
   const sh = sheet(h3('Bloklanganlar') + `<div class="list" id="bl-l">${draw()}</div>`)
   sh.onclick = async (e) => { const it = e.target.closest('[data-b]'); if (!it || !e.target.closest('button')) return; try { await del('/blocks/' + it.dataset.b); list = list.filter((u) => u.id !== +it.dataset.b); qs('#bl-l', sh).innerHTML = draw(); toast('✅ Blokdan chiqarildi') } catch (er) { toast('⚠️ ' + er.message) } }
 }
+
+// ---------------- Chat ko'rinishi: shrift va fon ----------------
+const WALLS = [
+  '', // standart
+  'linear-gradient(160deg,#0A7CFF22,#7B2FF733),var(--fon)',
+  'linear-gradient(160deg,#FF6A5C22,#B3123A22),var(--fon)',
+  'linear-gradient(160deg,#11998e22,#38ef7d22),var(--fon)',
+  'linear-gradient(160deg,#f7971e22,#ffd20022),var(--fon)',
+  'linear-gradient(160deg,#23252644,#41434544),var(--fon)',
+]
+function applyWall(i) {
+  const m = $('msgs')
+  if (m) m.style.background = WALLS[i] || ''
+}
+function applyFont(px) {
+  if (px && px >= 13) document.documentElement.style.setProperty('--msgfs', px + 'px')
+  else document.documentElement.style.removeProperty('--msgfs')
+}
+function initChatView() {
+  applyFont(+localStorage.getItem('g50_font') || 0)
+  applyWall(+localStorage.getItem('g50_wall') || 0)
+}
+function chatViewSheet() {
+  const cur = +localStorage.getItem('g50_font') || 15
+  const curW = +localStorage.getItem('g50_wall') || 0
+  const sh = sheet(h3('🎨 Chat ko‘rinishi') + `
+    <label class="mut">Shrift hajmi: <b id="cv-fv">${cur}px</b></label>
+    <input type="range" id="cv-f" min="13" max="20" value="${cur}" style="width:100%">
+    <div class="pv" style="margin:10px 0"><div class="mrow me"><div class="m">Salom! Qanday ahvolda?</div></div><div class="mrow"><div class="m">Yaxshi, rahmat! 😊</div></div></div>
+    <label class="mut">Suhbat foni</label>
+    <div id="cv-w" style="display:flex;gap:10px;flex-wrap:wrap;padding:6px 0">
+      ${WALLS.map((w, i) => `<span data-w="${i}" style="width:44px;height:44px;border-radius:12px;cursor:pointer;border:2.5px solid ${curW === i ? 'var(--asos)' : 'var(--chiziq)'};background:${w || 'var(--fon)'};display:inline-block"></span>`).join('')}
+    </div>
+    <div class="hint">Shrift va fon darhol qo‘llanadi va qurilmangizda saqlanadi.</div>`)
+  const prev = (px) => { qs('.pv', sh).style.fontSize = px + 'px' }
+  qs('#cv-f', sh).oninput = (e) => { $('cv-fv').textContent = e.target.value + 'px'; applyFont(+e.target.value); prev(+e.target.value) }
+  qs('#cv-f', sh).onchange = (e) => { localStorage.setItem('g50_font', e.target.value); toast('✅ Saqlandi') }
+  qs('#cv-w', sh).onclick = (e) => {
+    const s = e.target.closest('[data-w]'); if (!s) return
+    localStorage.setItem('g50_wall', s.dataset.w)
+    applyWall(+s.dataset.w)
+    qsa('#cv-w [data-w]', sh).forEach((x) => (x.style.borderColor = x === s ? 'var(--asos)' : 'var(--chiziq)'))
+  }
+}
+// Trend qiziqishlarini qo'lda sozlash (o'zi ochgani hisoblanadi ham)
+function trendInterestsSheet() {
+  const t = tintGet()
+  const sh = sheet(h3('🔥 Trend qiziqishlarim') + `<div class="hint">Ko‘proq qiziqtirgan mavzularingiz lentada ko‘proq chiqadi. Omadi qancha ko‘p bo‘lsa — shunchalik ko‘p chiqadi.</div>` +
+    Object.entries(TCATS).filter(([k]) => k !== 'all').map(([k, [e, l]]) => `<div class="rows"><div><div class="rt">${e} ${l}</div><input type="range" data-ti="${k}" min="0" max="10" value="${t[k] || 0}" style="width:110px"></div></div>`).join('') +
+    `<button class="btn gh big" id="ti-r">Qiziqishlarni tozalash</button>`)
+  qs('#ti-r', sh).onclick = () => { try { localStorage.setItem('g50_tint', '{}') } catch {}; toast('Tozalandi'); closeSheet(sh) }
+  sh.onchange = (e) => {
+    const r = e.target.closest('[data-ti]'); if (!r) return
+    const t2 = tintGet()
+    if (+r.value > 0) t2[r.dataset.ti] = +r.value; else delete t2[r.dataset.ti]
+    try { localStorage.setItem('g50_tint', JSON.stringify(t2)) } catch {}
+    toast('✅ Qiziqishlar saqlandi — Trend yangilanadi')
+  }
+}
+initChatView()

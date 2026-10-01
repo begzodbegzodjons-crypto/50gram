@@ -146,6 +146,17 @@ async function fetchMessages(id) {
   fetching.add(id)
   try {
     await loadChatLocal(id)
+    // Tez ochilish: serverdagi eng oxirgi 80 xabar BITTA so'rovda (avval 10 so'rov ketardi)
+    const locals = S.msgs.get(id) || []
+    if (!locals.some((m) => m.id > 0 && !m.p2p)) {
+      const r = await api(`/chats/${id}/messages?latest=80`)
+      merge(id, r.messages, r.users)
+      S.since.set(id, r.now)
+      const c0 = S.chats.get(id)
+      if (c0 && r.peer_last_read !== null && r.peer_last_read !== undefined) c0.peer_last_read = r.peer_last_read
+      if (S.cur === id) renderMsgs()
+    }
+    // Sinxronlash: yangi yoki o'zgargan xabarlar (odatda 1 davra)
     for (let round = 0; round < 10; round++) {
       const list = S.msgs.get(id) || []
       const after = list.reduce((a, m) => (m.id > 0 && !m.p2p && m.id > a ? m.id : a), 0)
@@ -205,7 +216,7 @@ function renderMsgs(force) {
   const list = S.msgs.get(S.cur) || []
   const atBottom = force || box.scrollHeight - box.scrollTop - box.clientHeight < 140
   const keys = [], rows = []
-  if (c.joined !== false && P2P.enabled()) { keys.push('older'); rows.push('<div class="sys" data-older style="cursor:pointer">⬆️ Avvalgi xabarlarni a’zolar qurilmalaridan yuklash</div>') }
+  if (c.joined !== false) { keys.push('older'); rows.push('<div class="sys" data-older style="cursor:pointer">⬆️ Avvalgi xabarlarni yuklash</div>') }
   let lastDay = '', prev = null
   for (let i = 0; i < list.length; i++) {
     const m = list[i]
@@ -332,18 +343,32 @@ function viewImage(src, isVideo) {
 }
 async function loadOlder() {
   const id = S.cur, list = S.msgs.get(id) || []
-  const first = list.find((m) => m.id > 0)
+  const first = list.find((m) => m.id > 0 && !m.p2p)
   const el = qs('[data-older]', $('msgs'))
-  if (el) el.textContent = '⏳ A’zolar qurilmalaridan qidirilmoqda…'
+  if (el) el.textContent = '⏳ Yuklanmoqda…'
+  // 1) SERVER: butun tarix hech qachon o'chmaydi — orqaga sahifalash
+  if (first) {
+    try {
+      const r = await api(`/chats/${id}/messages?before=${first.id}`)
+      if (r.messages && r.messages.length) {
+        const box = $('msgs'), h = box.scrollHeight
+        merge(id, r.messages)
+        saveChatLocal(id)
+        if (S.cur === id) { renderMsgs(); box.scrollTop = box.scrollHeight - h }
+        return
+      }
+    } catch (e) { toast('⚠️ ' + e.message) }
+  }
+  // 2) A'zolar qurilmalari (P2P) — serverda bo'lmagan bo'lsa
   try {
     const got = await P2P.history(id, first ? first.id : 0)
-    if (!got.length) { toast('Avvalgi xabarlar topilmadi'); if (el) el.textContent = '⬆️ Avvalgi xabarlarni a’zolar qurilmalaridan yuklash'; return }
+    if (!got.length) { toast('Boshlanishiga yetib keldik'); if (el) el.textContent = '⬆️ Barcha yozishmalar ko‘rildi'; setTimeout(() => { if (el && el.isConnected) el.remove() }, 1500); return }
     const box = $('msgs'), h = box.scrollHeight
     merge(id, got)
     saveChatLocal(id)
     if (S.cur === id) { renderMsgs(); box.scrollTop = box.scrollHeight - h }
     toast(`🕸 ${got.length} ta xabar tiklandi`)
-  } catch (e) { toast('⚠️ ' + e.message); if (el) el.textContent = '⬆️ Avvalgi xabarlarni a’zolar qurilmalaridan yuklash' }
+  } catch (e) { toast('⚠️ ' + e.message); if (el) el.textContent = '⬆️ Avvalgi xabarlarni yuklash' }
 }
 
 // ---------------- Kontekst menyu ----------------

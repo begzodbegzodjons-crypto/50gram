@@ -646,7 +646,7 @@ function tabGo(id) {
   qsa('.tab').forEach((t) => t.classList.toggle('on', t.id === id))
   qsa('.dock button').forEach((b) => b.classList.toggle('on', b.dataset.t === id))
   if (id === 't-contacts') loadContacts()
-  if (id === 't-feed') loadFeed(true)
+  if (id === 't-feed') (feedMode === 'trend' ? loadTrend(true) : loadFeed(true))
   if (id === 't-channels') renderChannels()
   if (id === 't-me') renderMe()
 }

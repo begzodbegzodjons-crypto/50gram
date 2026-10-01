@@ -688,16 +688,33 @@ async function getMessages(c: C) {
   if (!(m && m.status === "active") && !(ch.type !== "direct" && ch.is_public)) fail("Ruxsat yo‘q", 403)
   const after = +(c.url.searchParams.get("after") || 0)
   const since = +(c.url.searchParams.get("since") || 0)
+  const before = +(c.url.searchParams.get("before") || 0)
+  const latest = Math.min(200, Math.max(1, +(c.url.searchParams.get("latest") || 0)))
   const t = now()
-  const fresh = await c.db.q("SELECT * FROM messages WHERE chat_id=? AND id>? ORDER BY id LIMIT 300", [id, after])
-  const changed = since && after
-    ? await c.db.q("SELECT * FROM messages WHERE chat_id=? AND id<=? AND updated_at>? ORDER BY id LIMIT 300", [id, after, since])
-    : []
-  const all = [...changed, ...fresh]
+  let all: any[]
+  let more = false
+  if (latest) {
+    // Tez ochilish: eng oxirgi N xabar bitta so'rovda (10 martagacha so'rov o'rniga 1)
+    const rows = await c.db.q("SELECT * FROM messages WHERE chat_id=? ORDER BY id DESC LIMIT " + latest, [id])
+    all = rows.reverse()
+    more = rows.length === latest
+  } else if (before) {
+    // Orqaga sahifalash: butun tarix saqlangan — eski yozishmalar hech qachon yo'qolmaydi
+    const rows = await c.db.q("SELECT * FROM messages WHERE chat_id=? AND id<? ORDER BY id DESC LIMIT 100", [id, before])
+    all = rows.reverse()
+    more = rows.length === 100
+  } else {
+    const fresh = await c.db.q("SELECT * FROM messages WHERE chat_id=? AND id>? ORDER BY id LIMIT 300", [id, after])
+    const changed = since && after
+      ? await c.db.q("SELECT * FROM messages WHERE chat_id=? AND id<=? AND updated_at>? ORDER BY id LIMIT 300", [id, after, since])
+      : []
+    all = [...changed, ...fresh]
+    more = fresh.length === 300
+  }
   const messages = await enrich(c, all)
   const um = await usersByIds(c, [...new Set(all.map((x) => x.sender_id))])
   const peer = ch.type === "direct" ? await c.db.one("SELECT last_read FROM chat_members WHERE chat_id=? AND user_id<>?", [id, c.uid]) : null
-  return json({ messages, users: Object.fromEntries(um), now: t, peer_last_read: peer?.last_read ?? null, more: fresh.length === 300 })
+  return json({ messages, users: Object.fromEntries(um), now: t, peer_last_read: peer?.last_read ?? null, more })
 }
 async function sendMessage(c: C) {
   const id = +c.p.id
@@ -808,8 +825,7 @@ async function markRead(c: C) {
   const ch = await needChat(c, id)
   await c.db.run("UPDATE chat_members SET last_read=? WHERE chat_id=? AND user_id=? AND last_read<?", [last, id, c.uid, last])
   if (ch.type === "direct") {
-    // Yetkazildi va o'qildi — serverdagi nusxa 10 daqiqadan keyin o'chiriladi (qurilmalarda qoladi)
-    await c.db.run("UPDATE messages SET expires_at=? WHERE chat_id=? AND id<=? AND sender_id<>? AND expires_at>?", [now() + 10 * 60000, id, last, c.uid, now() + 10 * 60000])
+    // O'CHMAS TARIX: o'qilgan xabarlar ham serverda butunlay saqlanadi — hech narsa avtomatik o'chmaydi
     notifyChat(c, id, { type: "read", chat_id: id, user_id: c.uid, last_id: last })
   }
   return json({ ok: true })
@@ -945,6 +961,161 @@ async function deleteStory(c: C) {
   await c.db.run("DELETE FROM stories WHERE id=? AND user_id=?", [+c.p.id, c.uid])
   await c.db.run("DELETE FROM story_views WHERE story_id=?", [+c.p.id])
   return json({ ok: true })
+}
+
+// ------------------------- 🔥 Trend lenta (internetdan jonli, UMUMAN saqlanmaydi) -------------------------
+// Google News RSS (o'zbek nashri) + Dailymotion trending videolar; tarjima gtx orqali; 10 daq edge-cache.
+// Hech qanday DB yozuvi yo'q — so'rov to'g'ridan-to'g'ri internetdan olinadi va uzatiladi. Manba nomi ko'rsatilmaydi.
+const TREND_UA = { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" }
+const TREND_CATS: Record<string, string> = {
+  uz: "https://news.google.com/rss?hl=uz&gl=UZ&ceid=UZ:uz",
+  world: "https://news.google.com/rss/headlines/section/topic/WORLD?hl=uz&gl=UZ&ceid=UZ:uz",
+  tech: "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=uz&gl=UZ&ceid=UZ:uz",
+  sport: "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=uz&gl=UZ&ceid=UZ:uz",
+  biznes: "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=uz&gl=UZ&ceid=UZ:uz",
+  shou: "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=uz&gl=UZ&ceid=UZ:uz",
+  fan: "https://news.google.com/rss/headlines/section/topic/SCIENCE?hl=uz&gl=UZ&ceid=UZ:uz",
+  salomatlik: "https://news.google.com/rss/headlines/section/topic/HEALTH?hl=uz&gl=UZ&ceid=UZ:uz",
+}
+const decodeEnt = (s: string) => s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;|&rsquo;/g, "'").replace(/&nbsp;/g, " ").replace(/&hellip;/g, "…").replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(+n) } catch { return "" } })
+const stripHtml = (s: string) => decodeEnt(s.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ")).trim()
+function tagGet(block: string, tag: string): string {
+  const m = block.match(new RegExp("<" + tag + ">(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</" + tag + ">"))
+  return m ? m[1].trim() : ""
+}
+async function gnewsFetch(cat: string, url: string, n: number): Promise<any[]> {
+  try {
+    const r = await fetch(url, { headers: TREND_UA, cf: { cacheTtl: 600 } } as any)
+    if (!r.ok) return []
+    const xml = await r.text()
+    const out: any[] = []
+    for (const block of xml.split("<item>").slice(1)) {
+      if (out.length >= n) break
+      const rawTitle = tagGet(block, "title")
+      const link = tagGet(block, "link")
+      if (!rawTitle || !link) continue
+      const desc = tagGet(block, "description")
+      const imgM = desc.match(/<img[^>]+src="(https:\/\/[^"]+)"/)
+      const mcM = !imgM ? (block.match(/<media:content[^>]+url="(https:\/\/[^"]+)"[^>]*medium="image"/) || block.match(/<media:thumbnail[^>]+url="(https:\/\/[^"]+)"/) || block.match(/<enclosure[^>]+url="(https:\/\/[^"]+)"/)) : null
+      const pub = tagGet(block, "pubDate")
+      const ts = pub ? Date.parse(pub) : NaN
+      // Manba nomini yashirish: "Sarlavha - Manba nomi" -> "Sarlavha"
+      const title = rawTitle.replace(/\s+[-–—]\s+[^-–—]{2,42}$/, "").trim() || rawTitle
+      out.push({
+        kind: "news", cat, title, url: link,
+        snippet: stripHtml(desc).slice(0, 300),
+        image: imgM ? imgM[1] : mcM ? mcM[1] : "",
+        time: isNaN(ts) ? now() : ts,
+      })
+    }
+    return out
+  } catch { return [] }
+}
+const EN_STOP = /\b(the|and|of|in|for|with|to|on|at|from|by|after|before|over|into|about|new|how|why|what|who|top|best|first|vs|amid|amId|says|will)\b/i
+const UZ_MARK = /[oʻ‘’gʻʼ]|o‘|g‘|ning|bilan|uchun|yangi|haqida|bo‘yicha|yili|keldi|berdi|ayti|deya|qilmoq|bo'ldi|o'rtas|birinchi|katta|yana|ham\b/i
+function needsTr(s: string): boolean {
+  if (!s || s.length < 3) return false
+  if (/[а-яёӯғҳ]/i.test(s)) return true // kirill matn — tarjima kerak
+  if (/['ʻʼ‘’]/.test(s)) return false // oʻ/gʻ apostroflari bor — oʻzbekcha
+  const low = s.toLowerCase()
+  if (UZ_MARK.test(low)) return false
+  return EN_STOP.test(low)
+}
+async function trToUz(s: string): Promise<string> {
+  try {
+    const r = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=uz&dt=t&q=" + encodeURIComponent(s.slice(0, 900)), { headers: TREND_UA })
+    if (!r.ok) return s
+    const j: any = await r.json()
+    const out = (j?.[0] || []).map((x: any[]) => String(x?.[0] || "")).join("")
+    return out.trim() || s
+  } catch { return s }
+}
+async function dailymotion(page: number): Promise<any[]> {
+  try {
+    const r = await fetch(`https://api.dailymotion.com/videos?fields=id,title,duration,views_total,thumbnail_360_url,created_time&sort=trending&limit=14&page=${page}`, { headers: TREND_UA, cf: { cacheTtl: 600 } } as any)
+    if (!r.ok) return []
+    const j: any = await r.json()
+    return (j.list || []).map((v: any) => ({
+      kind: "video", cat: "video", embed: String(v.id || ""),
+      title: String(v.title || "Video"), url: "https://www.dailymotion.com/video/" + v.id,
+      image: String(v.thumbnail_360_url || ""), duration: +v.duration || 0, views: +v.views_total || 0,
+      time: v.created_time ? +v.created_time * 1000 : now(),
+    })).filter((v: any) => v.embed)
+  } catch { return [] }
+}
+async function trend(c: C) {
+  const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
+  const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
+  const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
+  const cacheKey = "https://trend.50gram.internal/t?p=" + page + "&cat=" + onlyCat
+  try {
+    const hit = await caches.default.match(cacheKey)
+    if (hit) return new Response(hit.body, hit)
+  } catch {}
+  let items: any[] = []
+  if (onlyCat === "video") {
+    items = await dailymotion(page)
+  } else if (onlyCat && TREND_CATS[onlyCat]) {
+    const raw = await gnewsFetch(onlyCat, TREND_CATS[onlyCat], 30)
+    items = raw.slice((page - 1) * 10, page * 10)
+  } else {
+    // Barcha kategoriyalar: bir vaqtda olib, qiziqish vazniga qarab aralashtirish
+    const batches = await Promise.all(Object.entries(TREND_CATS).map(([k, u]) => gnewsFetch(k, u, 30)))
+    const byCat = new Map(Object.keys(TREND_CATS).map((k, i) => [k, batches[i]] as [string, any[]]))
+    const w: Record<string, number> = {}
+    for (const part of catsW.split(",")) { const [k, v] = part.split(":"); if (k && byCat.has(k)) w[k] = +v || 0 }
+    const keys = Object.keys(TREND_CATS).sort((a, b) => (w[b] || 0) - (w[a] || 0))
+    const perPage = 5 // har kategoriyadan sahifada shunchaki olinadi
+    const picked: any[] = []
+    const cursors = new Map(keys.map((k) => [k, (page - 1) * perPage] as [string, number]))
+    let left = keys.length * perPage
+    while (left > 0) {
+      let added = false
+      for (const k of keys) {
+        const arr = byCat.get(k) || [], cur = cursors.get(k)!
+        if (cur >= arr.length || picked.length >= 44) continue
+        picked.push(arr[cur]); cursors.set(k, cur + 1); left--; added = true
+      }
+      if (!added) break
+    }
+    // Har sahifaga trending video Shorts ham aralashtiriladi
+    const vids = await dailymotion(page)
+    for (let i = 0, vi = 0; i < picked.length && vi < vids.length; i += 7) picked.splice(i, 0, vids[vi++])
+    items = picked
+  }
+  // Tarjima: o'zbekcha bo'lmagan sarlavhalar o'zbek tiliga (parallel, limit bilan)
+  let trLeft = 16
+  await Promise.all(items.map(async (it) => {
+    if (trLeft <= 0 || !needsTr(it.title)) return
+    trLeft--
+    const t1 = await trToUz(it.title)
+    it.title = t1
+    if (it.snippet && needsTr(it.snippet)) it.snippet = (await trToUz(it.snippet)).slice(0, 300)
+  }))
+  items = items.filter((x) => x && x.title)
+  for (const x of items) x.id = (await sha256(x.url)).slice(0, 12)
+  const out = { ok: true, page, items }
+  const resp = json(out)
+  resp.headers.set("cache-control", "public, s-maxage=600, stale-while-revalidate=180")
+  c.wait(caches.default.put(cacheKey, resp.clone()).catch(() => {}))
+  return resp
+}
+async function chatStats(c: C) {
+  const id = +c.p.id
+  await needAdmin(c, id)
+  const one = async (sql: string, v: unknown[] = []) => Number((await c.db.one(sql, v))?.n || 0)
+  const [members, admins, banned, msgs, posts, views, likes, comments, today] = await Promise.all([
+    one("SELECT COUNT(*) n FROM chat_members WHERE chat_id=? AND status='active'", [id]),
+    one("SELECT COUNT(*) n FROM chat_members WHERE chat_id=? AND role IN ('owner','admin') AND status='active'", [id]),
+    one("SELECT COUNT(*) n FROM chat_members WHERE chat_id=? AND status='banned'", [id]),
+    one("SELECT COUNT(*) n FROM messages WHERE chat_id=? AND deleted=0", [id]),
+    one("SELECT COUNT(*) n FROM posts WHERE chat_id=?", [id]),
+    one("SELECT COALESCE(SUM(views),0) n FROM posts WHERE chat_id=?", [id]),
+    one("SELECT COUNT(*) n FROM post_likes pl JOIN posts p ON p.id=pl.post_id WHERE p.chat_id=?", [id]),
+    one("SELECT COUNT(*) n FROM post_comments pc JOIN posts p ON p.id=pc.post_id WHERE p.chat_id=?", [id]),
+    one("SELECT COUNT(*) n FROM messages WHERE chat_id=? AND created_at>?", [id, now() - DAY]),
+  ])
+  return json({ ok: true, members, admins, banned, messages: msgs, posts, views, likes, comments, today })
 }
 
 // ------------------------- Lenta -------------------------
@@ -1477,6 +1648,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/chats/:id/members", listMembers],
   ["POST", "/chats/:id/members", addMembers],
   ["POST", "/chats/:id/members/:uid/:action", memberAction],
+  ["GET", "/chats/:id/stats", chatStats],
   ["GET", "/chats/:id/requests", listRequests],
   ["POST", "/chats/:id/requests/:uid/:action", requestAction],
   ["GET", "/chats/:id/messages", getMessages],
@@ -1499,6 +1671,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["DELETE", "/stories/:id", deleteStory],
   ["GET", "/feed", feed],
   ["GET", "/reels", reels],
+  ["GET", "/trend", trend],
   ["POST", "/posts", createPost],
   ["DELETE", "/posts/:id", deletePost],
   ["POST", "/posts/:id/like", likePost],

@@ -484,3 +484,58 @@ body.noauto video[data-media]{background:#0b1524 url("data:image/svg+xml,%3Csvg 
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
 }
+
+/* ================= 🔥 TREND lenta (internetdan jonli) ================= */
+.trendchips{display:flex;gap:8px;overflow-x:auto;padding:8px 12px;scrollbar-width:none;-ms-overflow-style:none;background:var(--fon);position:sticky;top:0;z-index:2}
+.trendchips::-webkit-scrollbar{display:none}
+.trendchips.hide{display:none}
+.tchip{flex:0 0 auto;padding:7px 14px;border-radius:20px;background:var(--sirt);border:1.5px solid var(--chiziq);font-size:13px;font-weight:600;color:var(--matn);cursor:pointer;transition:all .18s ease;white-space:nowrap}
+.tchip:active{transform:scale(.93)}
+.tchip.on{background:linear-gradient(135deg,var(--asos),#7B2FF7);color:#fff;border-color:transparent;box-shadow:0 3px 10px rgba(10,124,255,.35)}
+.tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:12px;padding:12px}
+@media (min-width:640px){.tgrid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}}
+.tcard{background:var(--sirt);border-radius:16px;overflow:hidden;box-shadow:var(--soya);cursor:pointer;transition:transform .18s ease,box-shadow .18s ease;display:flex;flex-direction:column;animation:fadein .3s ease}
+.tcard:active{transform:scale(.97)}
+.tcard img{width:100%;aspect-ratio:16/10;object-fit:cover;background:var(--sirt2);display:block}
+.tcard .tcb{padding:10px 12px 12px;display:flex;flex-direction:column;gap:5px;flex:1}
+.tcard .tcb b{font-size:13.5px;line-height:1.35;font-weight:700;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.tcard .tcb small{font-size:11.5px;color:var(--xira);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tcard .tcb small.tm{display:block;-webkit-line-clamp:1}
+.tcard .tch{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;color:var(--asos);background:var(--asos-och);padding:3px 8px;border-radius:10px;width:fit-content}
+/* Video kartochka — 9:16 shorts uslubi */
+.tcard.vid{aspect-ratio:9/13;justify-content:flex-end;position:relative;background-size:cover;background-position:center;background-color:var(--sirt2);min-height:210px}
+.tcard.vid .tcb{background:linear-gradient(transparent,rgba(5,12,25,.85) 40%);color:#fff;padding-top:34px}
+.tcard.vid .tcb b{color:#fff;-webkit-line-clamp:2}
+.tcard.vid .tcb small{color:rgba(255,255,255,.8);-webkit-line-clamp:1}
+.tcard.vid .tch{position:absolute;top:8px;left:8px;background:rgba(200,16,46,.92);color:#fff}
+/* Skeleton shimmer */
+.tcard.sk{pointer-events:none}
+.skimg{width:100%;aspect-ratio:16/10;background:linear-gradient(100deg,var(--sirt2) 40%,var(--asos-och) 50%,var(--sirt2) 60%);background-size:200% 100%;animation:shimmer 1.2s infinite linear}
+.tcard.sk b,.tcard.sk small{background:var(--sirt2);border-radius:6px;color:transparent!important}
+@keyframes shimmer{to{background-position:-200% 0}}
+.tload{display:flex;justify-content:center;padding:14px}
+/* Yangilik to'liq ko'rinishi (sheet ichida) */
+.tnews{display:flex;flex-direction:column;gap:10px}
+.tnews img{width:100%;border-radius:14px;aspect-ratio:16/9;object-fit:cover}
+.tnews h2{margin:0;font-size:19px;line-height:1.35}
+.tnews p{margin:0;font-size:14px;line-height:1.55;color:var(--xira)}
+/* Video pleyer to'liq ekran */
+.tvo{position:fixed;inset:0;z-index:240;background:rgba(4,8,18,.96);display:flex;align-items:center;justify-content:center;padding:14px;opacity:0;transition:opacity .2s ease}
+.tvo.on{opacity:1}
+.tvo .xb{position:absolute;top:14px;right:14px;width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.12);color:#fff;border:0;font-size:18px;cursor:pointer;z-index:2}
+.tvo .tvb{width:100%;max-width:480px;display:flex;flex-direction:column;gap:10px}
+.tvo .tvb iframe{width:100%;aspect-ratio:16/9;border-radius:14px;border:0;background:#000}
+.tvo .tvi{display:flex;flex-direction:column;gap:6px;color:#fff}
+.tvo .tvi b{font-size:15.5px;line-height:1.4}
+.tvo .tvi small{color:rgba(255,255,255,.65)}
+.tvo .tvi .btn{align-self:flex-start}
+/* Statistika gridi */
+.statgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:4px 0}
+.statgrid .st{background:var(--sirt2);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.statgrid .st b{font-size:20px;font-weight:800;color:var(--matn)}
+.statgrid .st small{font-size:12px;color:var(--xira)}
+/* Chat ko'rinishi: shrift hajmi (CSS var) va suhbat foni */
+.m{font-size:var(--msgfs,14.5px)}
+.msgs{transition:background .3s ease}
+.sh .pv .m{font-size:inherit}
+.tcard .tnoimg{width:100%;aspect-ratio:16/10;display:flex;align-items:center;justify-content:center;font-size:46px;background:linear-gradient(135deg,var(--asos-och),transparent 70%),var(--sirt2)}

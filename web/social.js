@@ -162,9 +162,86 @@ function textStory() {
 }
 on('story_reaction', (ev) => { const u = S.users.get(ev.user_id); toast(`${ev.reaction} ${u ? uname(u) : 'Kimdir'} istoriyangizga munosabat bildirdi`) })
 
-// ---------------- Lenta: yangiliklar, e'lonlar, reels ----------------
-let feedMode = 'all', feedPosts = [], feedEnd = false, feedBusy = false
+// ---------------- Lenta: 🔥 Trend (internet), yangiliklar, e'lonlar, reels ----------------
+let feedMode = 'trend', feedPosts = [], feedEnd = false, feedBusy = false
 let reelsObserver = null
+
+// ============ 🔥 TREND: internetdan jonli yangilik va videolar ============
+// Serverga saqlanmaydi — to'g'ridan-to'g'ri internetdan olinadi; manba nomi ko'rsatilmaydi.
+const TCATS = {
+  all: ['🔥', 'Barchasi'], uz: ['🇺🇿', 'O‘zbekiston'], world: ['🌍', 'Dunyo'], tech: ['💻', 'Texnologiya'],
+  sport: ['⚽', 'Sport'], biznes: ['💼', 'Biznes'], shou: ['🎬', 'Ko‘ngilochar'], fan: ['🔬', 'Fan'],
+  salomatlik: ['❤️', 'Salomatlik'], video: ['🎥', 'Video'],
+}
+let trendItems = [], trendPage = 0, trendEnd = false, trendBusy = false, trendCat = 'all'
+const tintGet = () => { try { return JSON.parse(localStorage.getItem('g50_tint') || '{}') } catch { return {} } }
+function tintAdd(cat) {
+  if (!TCATS[cat] || cat === 'all') return
+  const t = tintGet(); t[cat] = (t[cat] || 0) + 1
+  try { localStorage.setItem('g50_tint', JSON.stringify(t)) } catch {}
+}
+const catsParam = () => Object.entries(tintGet()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k, v]) => k + ':' + v).join(',')
+const fmtN = (n) => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.0', '') + ' mln' : n >= 1e3 ? (n / 1e3).toFixed(1).replace('.0', '') + ' ming' : String(n || 0)
+function renderTrendChips() {
+  const box = $('trendchips')
+  if (!box || feedMode !== 'trend') return
+  box.innerHTML = Object.entries(TCATS).map(([k, [e, l]]) => `<span class="tchip ${trendCat === k ? 'on' : ''}" data-tc="${k}">${e} ${l}</span>`).join('')
+}
+function trendCard(x) {
+  if (x.kind === 'video') return `<div class="tcard vid" data-tv="${x.id}" style="${x.image ? `background-image:url('${esc(x.image)}')` : ''}"><span class="tch">🎥 Video</span><div class="tcb"><b>${esc(x.title)}</b><small>${fmtAgo(x.time)}${x.views ? ' · 👁 ' + fmtN(x.views) : ''} · ${fmtDur(x.duration || 0)}</small></div></div>`
+  const em = TCATS[x.cat] ? TCATS[x.cat][0] : '📰'
+  const img = x.image ? `<img loading="lazy" src="${esc(x.image)}" alt="" referrerpolicy="no-referrer">` : `<div class="tnoimg">${em}</div>`
+  return `<div class="tcard${x.image ? '' : ' noimg'}" data-tn="${x.id}">${img}<div class="tcb"><span class="tch">${em} ${TCATS[x.cat] ? TCATS[x.cat][1] : 'Yangilik'}</span><b>${esc(x.title)}</b>${x.snippet ? `<small>${esc(x.snippet)}</small>` : ''}<small class="tm">${fmtAgo(x.time)}</small></div></div>`
+}
+function renderTrend() {
+  const box = $('feedlist')
+  $('t-feed').classList.remove('reelmode')
+  renderTrendChips()
+  box.innerHTML = trendItems.length
+    ? `<div class="tgrid">${trendItems.map(trendCard).join('')}</div>` +
+      (trendEnd ? '<div class="hint" style="text-align:center;padding:12px">Yangiliklar tugamaydi — birozdan keyin yana yangilanadi ✨</div>' : '<div class="tload"><span class="spin"></span></div>')
+    : `<div class="empty"><span class="big">🔥</span>Yangiliklar yuklanmadi. Qaytadan urinib ko‘ring.</div>`
+}
+function trendSkeleton() {
+  return `<div class="tgrid">${Array(6).fill('<div class="tcard sk"><div class="skimg"></div><div class="tcb"><b>‎</b><small>‎</small></div></div>').join('')}</div>`
+}
+async function loadTrend(reset) {
+  if (trendBusy) return
+  if (reset) { trendItems = []; trendPage = 0; trendEnd = false; $('feedlist').innerHTML = trendSkeleton() }
+  if (trendEnd) return
+  trendBusy = true
+  try {
+    trendPage++
+    const q = `?page=${trendPage}` + (trendCat !== 'all' ? '&cat=' + trendCat : '') + (trendCat === 'all' && trendPage === 1 ? '&cats=' + encodeURIComponent(catsParam()) : '')
+    const r = await api('/trend' + q)
+    const list = r.items || []
+    trendItems.push(...list)
+    if (!list.length) trendEnd = true
+    renderTrend()
+  } catch (e) { if (reset) $('feedlist').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`; trendPage-- } finally { trendBusy = false }
+}
+function openTrendNews(x) {
+  tintAdd(x.cat)
+  sheet(`<div class="tnews">${x.image ? `<img src="${esc(x.image)}" alt="" referrerpolicy="no-referrer">` : ''}<span class="tch">${TCATS[x.cat] ? TCATS[x.cat][0] + ' ' + TCATS[x.cat][1] : '📰 Yangilik'}</span><h2>${esc(x.title)}</h2><small class="mut">${fmtAgo(x.time)}</small>${x.snippet ? `<p>${esc(x.snippet)}</p>` : ''}<a class="btn big" href="${esc(x.url)}" target="_blank" rel="noopener">🌐 To‘liq o‘qish</a></div>`)
+}
+function openTrendVideo(x) {
+  tintAdd('video')
+  const o = document.createElement('div')
+  o.className = 'tvo'
+  o.innerHTML = `<button class="xb">✕</button><div class="tvb"><iframe src="https://geo.dailymotion.com/player.html?video=${esc(x.embed)}&autoplay=1" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe><div class="tvi"><b>${esc(x.title)}</b><small>${fmtAgo(x.time)}${x.views ? ' · 👁 ' + fmtN(x.views) : ''}</small><button class="btn gh" data-vsh>↗️ Ulashish</button></div></div>`
+  document.body.appendChild(o)
+  requestAnimationFrame(() => o.classList.add('on'))
+  qs('.xb', o).onclick = () => { o.classList.remove('on'); setTimeout(() => o.remove(), 200) }
+  qs('[data-vsh]', o).onclick = () => share((x.title || 'Video').slice(0, 80), x.url)
+  o.onclick = (e) => { if (e.target === o) qs('.xb', o).click() }
+}
+$('trendchips').addEventListener('click', (e) => {
+  const c = e.target.closest('[data-tc]'); if (!c) return
+  trendCat = c.dataset.tc
+  loadTrend(true)
+})
+
+// ============ Umumiy lenta (postlar/reels) ============
 async function loadFeed(reset) {
   if (feedBusy) return
   if (reset) { feedPosts = []; feedEnd = false; $('feedlist').innerHTML = '<div class="spin"></div>' }
@@ -233,8 +310,15 @@ function renderFeed() {
     : `<div class="empty"><span class="big">📰</span>${feedMode === 'subs' ? 'Obuna bo‘lgan kanallaringizda hali post yo‘q' : 'Hali postlar yo‘q. Birinchi bo‘lib yangilik yoki e’lon joylang!'}</div>`
   hydrate(box)
 }
-$('feedseg').onclick = (e) => { const d = e.target.closest('[data-m]'); if (!d) return; feedMode = d.dataset.m; qsa('#feedseg div').forEach((x) => x.classList.toggle('on', x === d)); $('b-post').classList.toggle('hide', feedMode === 'reels'); $('t-feed').classList.toggle('reelmode', feedMode === 'reels'); loadFeed(true) }
+$('feedseg').onclick = (e) => { const d = e.target.closest('[data-m]'); if (!d) return; feedMode = d.dataset.m; qsa('#feedseg div').forEach((x) => x.classList.toggle('on', x === d)); $('b-post').classList.toggle('hide', feedMode === 'reels' || feedMode === 'trend'); $('t-feed').classList.toggle('reelmode', feedMode === 'reels'); $('trendchips').classList.toggle('hide', feedMode !== 'trend'); feedMode === 'trend' ? loadTrend(true) : loadFeed(true) }
 $('feedlist').addEventListener('click', async (e) => {
+  if (feedMode === 'trend') {
+    const tn = e.target.closest('[data-tn]')
+    if (tn) { const x = trendItems.find((v) => v.id === tn.dataset.tn); if (x) openTrendNews(x) }
+    const tv = e.target.closest('[data-tv]')
+    if (tv) { const x = trendItems.find((v) => v.id === tv.dataset.tv); if (x) openTrendVideo(x) }
+    return
+  }
   if (feedMode === 'reels') {
     const reel = e.target.closest('[data-reel]')
     if (!reel) return
@@ -278,7 +362,7 @@ $('feedlist').addEventListener('click', async (e) => {
   const w = e.target.closest('[data-who]')
   if (w) { const v = w.dataset.who; if (v[0] === 'u') openUser(+v.slice(1)); else { const c = S.chats.get(+v.slice(1)); c && c.joined !== false ? openChat(c.id) : chatPreview(p.chat) } }
 })
-$('t-feed').addEventListener('scroll', (e) => { const t = e.target; if (t.scrollHeight - t.scrollTop - t.clientHeight < 400) loadFeed() }, { passive: true })
+$('t-feed').addEventListener('scroll', (e) => { const t = e.target; if (t.scrollHeight - t.scrollTop - t.clientHeight < 600) { if (feedMode === 'trend') loadTrend(); else loadFeed() } }, { passive: true })
 async function commentsSheet(p, el) {
   let list = []
   try { list = await api(`/posts/${p.id}/comments`) } catch (e) { return toast('⚠️ ' + e.message) }
@@ -291,10 +375,11 @@ async function commentsSheet(p, el) {
   qs('#cm-s', sh).onclick = send
   qs('#cm-i', sh).onkeydown = (e) => e.key === 'Enter' && send()
 }
-$('b-post').onclick = () => {
+// Yangi post / e'lon — kanal boshqaruvidan ham ochiladi (preChatId tanlangan bo'ladi)
+function postSheet(preChatId = 0) {
   const mine = [...S.chats.values()].filter((c) => c.type === 'channel' && isAdmC(c))
   let file = null
-  const sh = sheet(h3('Yangi post') + `<label class="mut">Qayerga</label><select class="inp" id="np-w"><option value="0">👤 Mening lentam (shaxsiy)</option>${mine.map((c) => `<option value="${c.id}">📢 ${esc(c.title)}</option>`).join('')}</select>
+  const sh = sheet(h3('Yangi post') + `<label class="mut">Qayerga</label><select class="inp" id="np-w"><option value="0">👤 Mening lentam (shaxsiy)</option>${mine.map((c) => `<option value="${c.id}" ${c.id === preChatId ? 'selected' : ''}>📢 ${esc(c.title)}</option>`).join('')}</select>
     <textarea class="inp" id="np-t" rows="5" maxlength="3000" placeholder="Yangilik, e’lon yoki reklama matni…"></textarea>
     <div id="np-pv"></div><button class="btn gh" id="np-m">🖼 Rasm yoki video qo‘shish</button><button class="btn big" id="np-s">Joylash</button>`)
   qs('#np-m', sh).onclick = async () => {
@@ -311,10 +396,12 @@ $('b-post').onclick = () => {
       if (file) { const video = file.type.startsWith('video/'); const blob = video ? file : await resizeImage(file, 1600, 0.85); media_id = await upload(blob, file.name); media_kind = video ? 'video' : 'photo'; meta = mediaInfo(media_id) }
       const p = await post('/posts', { text_body: text, media_id, media_kind, meta, chat_id: +qs('#np-w', sh).value })
       closeSheet(sh)
-      feedPosts.unshift(p); renderFeed(); toast('✅ Joylandi — video bo‘lsa Reels’da ko‘rinadi 🎬')
+      if (feedMode === 'all' || feedMode === 'subs') { feedPosts.unshift(p); renderFeed() }
+      toast('✅ Joylandi — video bo‘lsa Reels’da ko‘rinadi 🎬')
     } catch (e) { toast('⚠️ ' + e.message); btn.disabled = false; btn.textContent = 'Joylash' }
   }
 }
+$('b-post').onclick = () => postSheet(0)
 
 // ---------------- Kontaktlar ----------------
 async function loadContactsQuiet() {
