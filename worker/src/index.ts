@@ -1195,8 +1195,9 @@ async function dmShorts(): Promise<any[]> {
 
 // --- YouTube trending (dunyo bo'yicha eng ko'p ko'rilgan videolar va Shorts) ---
 // Ochiq Piped/Invidious API'lari orqali (API kalit kerak emas, kichik JSON). Manba nomi hech qanday javobda ko'rsatilmaydi.
-const PIPED_APIS = ["https://api.piped.private.coffee", "https://pipedapi.kavin.rocks", "https://pipedapi.adminforge.de"]
-const INVID_APIS = ["https://inv.nadeko.net", "https://invidious.nerdvpn.de"]
+// MUHIM: faqat Cloudflare'da TURMAYDIGAN instansalar (worker CF'li saytga to'g'ridan-to'g'ri ulanolmaydi).
+const PIPED_APIS = ["https://api.piped.private.coffee", "https://pipedapi.kavin.rocks"]
+const INVID_APIS = ["https://invidious.nerdvpn.de"]
 async function fT(url: string, ms: number, cacheTtl = 600): Promise<Response | null> {
   try {
     const r = await fetch(url, { headers: TREND_UA, signal: AbortSignal.timeout(ms), cf: { cacheTtl, cacheEverything: true } } as any)
@@ -1244,60 +1245,28 @@ async function youtubeTrending(): Promise<any[]> {
   console.log("trend yt bo'sh")
   return []
 }
-// --- Reddit viral videolar: to'g'ridan-to'g'ri mp4 — muqovasiz, bevosita ijro etiladi (manba yashirin) ---
-const REDDIT_SR = ["Damnthatsinteresting", "interestingasfuck"]
-async function redditViral(): Promise<any[]> {
-  const out: any[] = []
-  for (const sr of REDDIT_SR) {
-    const r = await fT(`https://www.reddit.com/r/${sr}/hot.json?limit=30&raw_json=1`, 5000)
-    if (!r) continue
-    try {
-      const j: any = await r.json()
-      for (const ch of j?.data?.children || []) {
-        const d = ch?.data || {}
-        const title = String(d.title || "").trim()
-        const v = d?.secure_media?.reddit_video || d?.media?.reddit_video
-        const mp4 = String(v?.fallback_url || "")
-        if (!title || !mp4 || d.stickied || d.pinned || d.over_18 || (+d.score || 0) < 200) continue
-        out.push({
-          kind: "short", vid: "mp4", mp4, audio: mp4.replace(/DASH_[^/]*\.mp4$/, "DASH_AUDIO_128.mp4"),
-          title, views: +d.score || 0, duration: Math.round(+v?.duration || 0),
-          time: (+d.created_utc || 0) * 1000, image: /^https/.test(String(d.thumbnail)) ? String(d.thumbnail) : "",
-          url: "https://www.reddit.com" + String(d.permalink || ""), cat: "video",
-        })
-      }
-    } catch {}
-    if (out.length >= 20) break
-  }
-  return out
-}
-// --- TikTok trending (eng yaxshi urinish; blok bo'lsa jim o'tkaziladi — tizim buzilmaydi) ---
-async function tiktokTrending(): Promise<any[]> {
-  const r = await fT("https://www.tiktok.com/api/recommend/item_list/?aid=1988&count=20&region=UZ", 5000)
-  if (!r) return []
-  try {
-    const j: any = await r.json()
-    return (j?.itemList || []).map((it: any) => ({
-      kind: "short", vid: "tt", yt: String(it?.video?.video_id || ""),
-      title: String(it?.desc || "").trim() || "Shorts", image: String(it?.video?.cover || ""),
-      views: +it?.statistics?.play_count || 0, duration: Math.round(+it?.video?.duration || 0),
-      time: +it?.create_time ? +it.create_time * 1000 : now(),
-      url: "https://www.tiktok.com/@" + String(it?.author?.unique_id || "video") + "/video/" + it?.video?.video_id, cat: "video",
-    })).filter((v: any) => v.yt && v.title)
-  } catch { return [] }
-}
-// --- Yagona video hovuzi (edge-kesh 10 daq): Shorts + uzun videolar, ko'rish soni bo'yicha saralangan ---
+// Reddit (403: serverdan bloklangan) va TikTok (O'zbekistonda VPN'siz ishlamaydi) manbalari olib tashlandi.
+// --- Yagona video hovuzi (edge-kesh 10 daq): Shorts + uzun videolar ---
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  const ck = "https://trend.50gram.internal/poolv2"
+  const ck = "https://trend.50gram.internal/poolv3"
   try {
     const hit = await caches.default.match(ck)
     if (hit) return await hit.json()
   } catch {}
-  const [yt, rd, tt, dmLong, dmS] = await Promise.all([youtubeTrending(), redditViral(), tiktokTrending(), dailymotion(1), dmShorts()])
-  // Live streamlar (dur<0) chiqariladi; dur<=90 — Shorts, qolgani uzun videolar
-  const shorts = [...dmS, ...rd, ...yt.filter((v: any) => v.duration > 0 && v.duration <= 90), ...tt]
-  const vids = [...yt.filter((v: any) => v.duration > 90 || v.duration === 0), ...dmLong]
-  shorts.sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
+  const [yt, dmLong, dmS] = await Promise.all([youtubeTrending(), dailymotion(1), dmShorts()])
+  // Live streamlar (dur<0) chiqariladi; dur 1..90 — Shorts, qolgani uzun videolar
+  const ytShorts = yt.filter((v: any) => v.duration > 0 && v.duration <= 90)
+  const ytLong = yt.filter((v: any) => v.duration > 90 || v.duration === 0)
+  // YouTube birinchi o'rinda (O'zbekistonda ishonchli ijro etiladi), Dailymotion 1:1 aralashtiriladi
+  ytShorts.sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
+  const shorts: any[] = []
+  let yi = 0, di = 0
+  while (yi < ytShorts.length || di < dmS.length) {
+    if (yi < ytShorts.length) shorts.push(ytShorts[yi++])
+    if (yi < ytShorts.length) shorts.push(ytShorts[yi++])
+    if (di < dmS.length) shorts.push(dmS[di++])
+  }
+  const vids = [...ytLong, ...dmLong]
   vids.sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
   const data = { shorts: shorts.slice(0, 44), vids: vids.slice(0, 44) }
   if (data.shorts.length || data.vids.length) {

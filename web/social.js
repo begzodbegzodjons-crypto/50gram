@@ -278,7 +278,8 @@ function openTrendVideo(x) {
   // Pleyer formati: mp4 (to'g'ridan-to'g'ri, muqovasiz) > YouTube > Dailymotion — manba nomi ko'rsatilmaydi
   let pl = ''
   if (x.mp4) pl = `<video class="tvp" src="${esc(x.mp4)}" playsinline autoplay controls preload="metadata"></video><audio class="tva" preload="none"></audio>`
-  else if (x.yt) pl = `<iframe class="tvp" src="https://www.youtube-nocookie.com/embed/${esc(x.yt)}?autoplay=1&playsinline=1&rel=0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>`
+  else if (x.ig) pl = `<iframe class="tvp" src="https://www.instagram.com/reel/${esc(x.ig)}/embed/captioned/" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>`
+  else if (x.yt) pl = `<iframe class="tvp" src="https://www.youtube.com/embed/${esc(x.yt)}?autoplay=1&playsinline=1&rel=0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>`
   else pl = `<iframe class="tvp" src="https://geo.dailymotion.com/player.html?video=${esc(x.embed)}&autoplay=1" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>`
   o.innerHTML = `<button class="xb">✕</button><div class="tvb">${pl}<div class="tvi"><b>${esc(x.title)}</b><small>${fmtAgo(x.time)}${x.views ? ' · 👁 ' + fmtN(x.views) : ''}</small><button class="btn gh" data-vsh>↗️ Ulashish</button></div></div>`
   document.body.appendChild(o)
@@ -548,6 +549,12 @@ let shPostsEnd = false, shTrPage = 0, shBusyMore = false, shLastTap = 0, shTapTi
 const shNormPosts = (list) => (Array.isArray(list) ? list : []).filter((p) => p.media_kind === 'video').map((p) => ({ t: 'post', p }))
 const shNormTrend = (list) => (Array.isArray(list) ? list : []).filter((x) => x && (x.kind === 'short' || x.kind === 'video')).map((x) => ({ t: 'trend', x }))
 
+function shBindFrame(f) {
+  const slide = f.closest('.sh-slide')
+  if (!slide) return
+  f.addEventListener('load', () => { slide.dataset.ok = '1'; const l = qs('.sh-load', slide); if (l) l.style.display = 'none' }, { once: true })
+}
+
 function shSlideHTML(it, i) {
   if (it.t === 'post') {
     const p = it.p
@@ -569,11 +576,15 @@ function shSlideHTML(it, i) {
   }
   const x = it.x
   let pl = ''
-  if (x.mp4) pl = `<video src="${esc(x.mp4)}" loop playsinline preload="metadata" data-shaudio="${esc(x.audio || '')}"></video>`
-  else if (x.yt) pl = `<iframe src="https://www.youtube-nocookie.com/embed/${esc(x.yt)}?autoplay=1&playsinline=1&rel=0&loop=1&playlist=${esc(x.yt)}&mute=${shMuted ? 1 : 0}" allow="autoplay; encrypted-media" allowfullscreen frameborder="0"></iframe>`
+  const bg = x.image ? ` style="background:#07070c url('${esc(x.image)}') center/cover no-repeat"` : ''
+  if (x.mp4) pl = `<video src="${esc(x.mp4)}" loop playsinline preload="metadata" data-shaudio="${esc(x.audio || '')}" poster="${esc(x.image || '')}"></video>`
+  else if (x.ig) pl = `<iframe src="https://www.instagram.com/reel/${esc(x.ig)}/embed/captioned/" allow="autoplay; encrypted-media" allowfullscreen frameborder="0"></iframe>`
+  else if (x.yt) pl = `<iframe src="https://www.youtube.com/embed/${esc(x.yt)}?autoplay=1&playsinline=1&rel=0&loop=1&playlist=${esc(x.yt)}&mute=${shMuted ? 1 : 0}" allow="autoplay; encrypted-media" allowfullscreen frameborder="0"></iframe>`
   else pl = `<iframe src="https://geo.dailymotion.com/player.html?video=${esc(x.embed)}&autoplay=1&mute=${shMuted ? 1 : 0}" allow="autoplay; fullscreen; encrypted-media" allowfullscreen frameborder="0"></iframe>`
-  return `<div class="sh-slide" data-shi="${i}" data-ttrend="1">
+  return `<div class="sh-slide" data-shi="${i}" data-ttrend="1"${bg}>
     ${pl}
+    <div class="sh-load"><i></i><i></i><i></i></div>
+    <div class="sh-failbox">⏳ Video yuklanmadi — internet sekin bo'lishi mumkin<br><a href="${esc(x.url || '#')}" target="_blank" rel="noopener">Boshqa oynada ochish ↗</a> · Pastga suring — keyingi video</div>
     <div class="sh-shade"></div>
     <div class="sh-bot"><b>${esc(x.title)}</b><small>${x.views ? '👁 ' + fmtN(x.views) : ''}${x.duration ? ' · ' + fmtDur(x.duration) : ''}</small></div>
     <div class="sh-acts"><button data-ssh>↗️</button></div>
@@ -587,6 +598,8 @@ function shBindVideo(v) {
   const slide = v.closest('.sh-slide')
   const prog = qs('.sh-prog i', slide)
   v.addEventListener('timeupdate', () => { if (prog && v.duration) prog.style.width = (v.currentTime / v.duration) * 100 + '%' })
+  v.addEventListener('loadeddata', () => { const l = qs('.sh-load', slide); if (l) l.style.display = 'none' }, { once: true })
+  v.addEventListener('error', () => { const l = qs('.sh-load', slide); if (l) l.style.display = 'none'; slide.classList.add('sh-fail') }, { once: true })
   v.addEventListener('play', () => slide.classList.remove('paused'))
   v.addEventListener('pause', () => slide.classList.add('paused'))
   v.addEventListener('canplay', () => { if (slide.dataset.on === '1') v.play().catch(() => {}) })
@@ -667,6 +680,20 @@ function shActivate(w, slide) {
     if (!ifr.dataset.src) ifr.dataset.src = ifr.src
     if (ifr.src !== ifr.dataset.src) ifr.src = ifr.dataset.src
   }
+  // Qora ekran himoyasi: 7s ichida yuklanmasa — xabar ko'rsat (poster fon har doim ko'rinadi)
+  if (ifr) {
+    slide.classList.remove('sh-fail')
+    const ld = qs('.sh-load', slide)
+    if (ld) ld.style.display = ''
+    clearTimeout(slide._shwd)
+    slide._shwd = setTimeout(() => {
+      if (!slide.dataset.ok && shWrap && slide.isConnected) {
+        slide.classList.add('sh-fail')
+        const l2 = qs('.sh-load', slide)
+        if (l2) l2.style.display = 'none'
+      }
+    }, 7000)
+  }
 }
 function shDeactivate(slide) {
   slide.dataset.on = ''
@@ -680,7 +707,7 @@ function shAppend(items) {
   shList.push(...items)
   sc.insertAdjacentHTML('beforeend', items.map((it, k) => shSlideHTML(it, base + k)).join(''))
   const fresh = qsa('.sh-slide', sc).slice(base)
-  fresh.forEach((s) => { shObs && shObs.observe(s); qsa('video', s).forEach(shBindVideo) })
+  fresh.forEach((s) => { shObs && shObs.observe(s); qsa('video', s).forEach(shBindVideo); qsa('iframe', s).forEach(shBindFrame) })
   hydrate(sc)
 }
 async function shMore() {
@@ -713,6 +740,7 @@ function shClose() {
   try {
     clearInterval(shWtTimer); shObs && shObs.disconnect(); shKeyH && document.removeEventListener('keydown', shKeyH)
     qsa('video', shWrap).forEach((v) => { try { v.pause(); if (v._shAudio) v._shAudio.pause() } catch {} })
+    qsa('.sh-slide', shWrap).forEach((s) => clearTimeout(s._shwd))
   } catch {}
   const w = shWrap
   shWrap = null
@@ -758,6 +786,7 @@ function openShorts(list, startIdx = 0) {
     const sc = qs('.sh-scroll', w)
     hydrate(sc)
     qsa('video', sc).forEach(shBindVideo)
+    qsa('iframe', sc).forEach(shBindFrame)
     // Boshqaruv
     w.addEventListener('click', async (e) => {
       if (e.target.closest('#sh-x')) return shClose()
