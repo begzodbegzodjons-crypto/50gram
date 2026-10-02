@@ -4,6 +4,10 @@ let iceCache = null, iceAt = 0
 async function iceServers() {
   if (iceCache && Date.now() - iceAt < 30 * 60000) return iceCache
   try { iceCache = (await api('/ice')).iceServers; iceAt = Date.now() } catch { iceCache = [{ urls: 'stun:stun.l.google.com:19302' }] }
+  // MUHIM (Task 33): ba'zi tarmoqlar (mobil operator CGNAT, korporativ NAT) faqat STUN orqali
+  // P2P ulanmaydi — efir "qotib qoladi", izohlar esa ishlaydi. Ochiq TURN zaxirasi qo'shamiz.
+  const hasTurn = (iceCache || []).some((s) => [].concat(s?.urls || []).some((u) => String(u).indexOf('turn') === 0))
+  if (!hasTurn) iceCache.push({ urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443'], username: 'openrelayproject', credential: 'openrelayproject' })
   return iceCache
 }
 const sig = (to, data) => post('/signal', { to, data }).catch(() => {})
@@ -526,6 +530,31 @@ async function liveRejoin() {
     else if (LIVE === L) armRetry(L)
   } finally { L.rejoining = false }
 }
+// Tomoshabin videosini ishga tushirish (Task 33 — QORA EKRAN tuzatuvi).
+// Sabab: tomoshabin videosi OVOZLI (muted emas). Tracklar kelganda foydalanuvchining
+// dastlabki bosishi "tugagan" bo'ladi — brauzer autoplay siyosati play()ni bloklaydi
+// va .catch(() => {}) buni jim yutib yuborardi → video abadiy to'xtab qolarardi
+// (qora ekran), izoh/sovg'a/layk esa ishlab turardi. Yechim: bloklansa — jim (muted)
+// boshlaymiz va "🔊 Ovozni yoqish" tugmasi chiqaramiz (bitta bosishda ovoz tiklanadi).
+function livePlay(L) {
+  const v = qs('.lv', L.el); if (!v) return
+  if (v.srcObject !== L.stream) v.srcObject = L.stream
+  let p; try { p = v.play() } catch (e) { p = null }
+  if (p && p.catch) p.catch(() => {
+    if (v.muted) return
+    v.muted = true
+    try { const q = v.play(); if (q && q.catch) q.catch(() => {}) } catch {}
+    let un = qs('.l-un', L.el)
+    if (!un) {
+      un = document.createElement('button')
+      un.className = 'l-un'
+      un.type = 'button'
+      un.textContent = '🔊 Ovozni yoqish'
+      un.onclick = (ev) => { ev.stopPropagation(); v.muted = false; try { v.play() } catch {} un.remove() }
+      L.el.appendChild(un)
+    }
+  })
+}
 function onUpTrack(L, e) {
   if (LIVE !== L) return
   const tr = e.track
@@ -533,9 +562,7 @@ function onUpTrack(L, e) {
   if (!L.stream.getTracks().includes(tr)) L.stream.addTrack(tr)
   // Yangi manbadan kelgan treklarni farzandlarga ham almashtirib beramiz
   for (const k of L.kids.values()) { const s = k.pc.getSenders().find((x) => x.track?.kind === tr.kind); if (s && s.track !== tr) s.replaceTrack(tr).catch(() => {}) }
-  const v = qs('.lv', L.el)
-  if (v.srcObject !== L.stream) v.srcObject = L.stream
-  v.play?.().catch(() => {})
+  livePlay(L)
   L.gotUp = true; L.tries = 0; clearTimeout(L.retry)
   qs('.wait', L.el)?.remove()
   if (!L.ready && L.stream.getVideoTracks().length) { L.ready = true; post(`/lives/${L.id}/ready`).catch(() => {}) }

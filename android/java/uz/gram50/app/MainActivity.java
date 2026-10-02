@@ -28,7 +28,7 @@ import android.widget.TextView;
 import org.json.JSONObject;
 
 /**
- * 50 Gram — native Android ilova (v2.3, professional).
+ * 50 Gram — native Android ilova (v2.4, professional).
  * - To'liq ekran splash (logotip bilan) — sahifa yuklanguncha brend ko'rinadi
  * - Qo'ng'iroqlar: JS bridge (Android50) — fonida ham to'liq ekran javob oynasi
  * - Kamera/mikrofon, fayl tanlash, fonda ishlash — hammasi brauzer cheklovisiz
@@ -37,6 +37,9 @@ import org.json.JSONObject;
  *   ruxsatni tekshirib, haqiqiy Android oynasini chiqaradi + "Sozlamalar" zaxirasi
  * - v2.3: saytdagi .apk yuklab olish havolasi ilova ichida ishlashi uchun DownloadListener
  *   qo'shildi — tizim brauzeri orqali yuklanadi
+ * - v2.4: TIZIM "ORQAGA" TUGMASI endi ilovani yopmaydi — ilova ichida bir qadam orqaga
+ *   qaytadi (ochiq chat/efir/oyna yopiladi, JS __50back orqali). Hech narsa ochiq
+ *   bo'lmasa ilova fonga o'tadi (moveTaskToBack) — xabarlar olib kelaveradi
  */
 public class MainActivity extends Activity {
 
@@ -71,7 +74,7 @@ public class MainActivity extends Activity {
     }
 
     @JavascriptInterface
-    public String version() { return "2.3"; }
+    public String version() { return "2.4"; }
 
     /** Web tomondan ruxsatlarni ataylab so'rash (masalan qo'ng'iroq tugmasi bosilganda). */
     @JavascriptInterface
@@ -105,7 +108,7 @@ public class MainActivity extends Activity {
     s.setCacheMode(WebSettings.LOAD_DEFAULT);
     s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     s.setJavaScriptCanOpenWindowsAutomatically(true);
-    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.3");
+    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.4");
     web.addJavascriptInterface(new Bridge(), "Android50");
 
     web.setWebViewClient(new WebViewClient() {
@@ -370,8 +373,26 @@ public class MainActivity extends Activity {
     super.onActivityResult(requestCode, resultCode, data);
   }
 
+  // ---------------- ORQAGA TUGMASI (v2.4) ----------------
+  // Ilova ichida bir qadam orqaga: ochiq chat/efir/istoriya/oyna yopiladi (JS __50back).
+  // Hech narsa ochiq bo'lmasa — ilova FONGA o'tadi (moveTaskToBack), o'chmaydi:
+  // WebSocket tirik qoladi, xabar va qo'ng'iroqlar o'z vaqtida kelaveradi.
   @Override
   public void onBackPressed() {
+    if (web != null) {
+      try {
+        web.evaluateJavascript("(window.__50back&&window.__50back())?'1':'0'", new android.webkit.ValueCallback<String>() {
+          @Override public void onReceiveValue(String v) {
+            if (v == null || v.indexOf('1') < 0) backFallback();
+          }
+        });
+        return;
+      } catch (Exception ignored) { }
+    }
+    backFallback();
+  }
+
+  void backFallback() {
     if (web != null && web.canGoBack()) web.goBack();
     else moveTaskToBack(true); // o'chirmaymiz — fonda davom etadi
   }

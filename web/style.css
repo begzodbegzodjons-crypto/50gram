@@ -311,7 +311,10 @@ body.dark .m{border-color:rgba(255,255,255,.07);box-shadow:0 2px 10px rgba(0,0,0
 .gifg .gif .g1{font-size:52px}
 
 /* ---------- SHEET — pastki oyna (iOS uslubi) ---------- */
-.shbg{position:fixed;inset:0;z-index:50;background:rgba(10,16,32,.5);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);display:flex;align-items:flex-end;justify-content:center;animation:fadein .18s ease}
+/* z-index 95: qo'ng'iroq/efir/istoriya overlay'laridan (.over z-80) YUQORIDA turadi —
+   aks holda efirdagi "Tugatish" tasdiqlash oynasi efir ekranining ortida qolib,
+   ko'rinmas va efir hech qachon to'xtamasdi (Task 33 tuzatuvi) */
+.shbg{position:fixed;inset:0;z-index:95;background:rgba(10,16,32,.5);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);display:flex;align-items:flex-end;justify-content:center;animation:fadein .18s ease}
 @keyframes fade{from{opacity:0}}
 .sheet{width:100%;max-width:560px;max-height:92vh;background:var(--sirt);border-radius:28px 28px 0 0;padding:8px 18px calc(18px + env(safe-area-inset-bottom));overflow-y:auto;animation:sheetup .3s cubic-bezier(.2,.9,.3,1.02);box-shadow:0 -12px 50px rgba(18,28,68,.22)}
 @keyframes up{from{transform:translateY(40%)}}
@@ -441,6 +444,9 @@ body.dark .sheet .grab{background:linear-gradient(90deg,#31415F,#42527A);box-sha
 .live .lbot input{flex:1;border:0;background:rgba(255,255,255,.18);color:#fff;border-radius:22px;padding:11px 16px;outline:0;min-width:0}
 .live .lbot input::placeholder{color:rgba(255,255,255,.7)}
 .live .wait{position:relative;z-index:2;text-align:center;opacity:.9}
+/* "Ovozni yoqish" tugmasi — brauzer autoplay'ni bloklab, video ovozsiz boshlanganda chiqadi (Task 33) */
+.l-un{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);z-index:6;background:rgba(14,19,48,.88);color:#fff;border:1px solid rgba(255,255,255,.22);border-radius:26px;padding:13px 26px;font-size:15.5px;font-weight:800;letter-spacing:.2px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 10px 34px rgba(10,16,32,.5);animation:fadein .25s ease;cursor:pointer}
+.l-un:active{transform:translate(-50%,-50%) scale(.96)}
 .roundrec{background:rgba(0,0,0,.9)}
 .roundrec .rr{position:relative;width:min(78vw,340px);height:min(78vw,340px)}
 .roundrec video{width:100%;height:100%;border-radius:50%;object-fit:cover;transform:scaleX(-1);background:#222}

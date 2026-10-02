@@ -441,6 +441,42 @@ function closePage(p) {
 }
 const closeAllPages = () => qsa('.page').forEach((p) => p.remove())
 
+// ---------------- ORQAGA TUGMASI (Android APK tizim tugmasi) ----------------
+// Task 33: tizim "orqaga" tugmasi ilovadan chiqib ketmasin — ichkarida BIR QADAM orqaga
+// qaytsin (ochiq chat/oyna/efir yopiladi). Ustma-ust qatlamlar aynan shu tartibda yopiladi:
+// kontekst menyu → pastki oyna → to'liq ekran sahifa → efir → istoriya → chat.
+// Hech narsa ochiq bo'lmasa — false qaytadi, APK ilovani fonga yuboradi (o'chirmaydi).
+window.__50back = () => {
+  // 1) Kontekst menyu (uzun bosish menyusi)
+  const cx = qs('.ctxbg')
+  if (cx) { cx.click(); return true }
+  // 2) Pastdan chiqadigan oynalar (profil, sozlamalar, tasdiqlash, guruh ma'lumoti…)
+  const sheets = qsa('.shbg')
+  if (sheets.length) { closeSheet(sheets[sheets.length - 1]); return true }
+  // 3) To'liq ekran sozlamalar sahifalari (ichma-ich qatlamlar — eng ustidagini yopamiz)
+  const pages = qsa('.page')
+  if (pages.length) { closePage(pages[pages.length - 1]); return true }
+  // 4) Jonli efir: sovg'a paneli → tomoshabin chiqadi, efirchida tasdiqlash oynasi
+  if (typeof LIVE !== 'undefined' && LIVE) {
+    const gp = qs('#l-gift', LIVE.el)
+    if (gp && !gp.classList.contains('hide')) { gp.classList.add('hide'); return true }
+    if (LIVE.host) { endLive(); return true }
+    leaveLive(); return true
+  }
+  // 5) Istorya ko'rish oynasi
+  if (typeof svState !== 'undefined' && svState) { closeStory(); return true }
+  // 6) Qo'ng'iroq: tasodifan tugatmasin — orqaga hech narsa qilmaydi (APK fonga yuboradi)
+  if (typeof CALL !== 'undefined' && CALL) return false
+  // 7) Stiker/emoji paneli
+  const pk = $('picker')
+  if (pk && pk.classList.contains('on')) { pk.classList.remove('on'); return true }
+  // 8) Ochiq chat — ro'yxatga qaytish
+  if ($('dialog') && $('dialog').classList.contains('open')) { closeChat(); return true }
+  // 9) Kirish: kod bosqichidan raqam bosqichiga
+  if (!$('auth').classList.contains('hide') && !$('a-code').classList.contains('hide')) { $('b-back').click(); return true }
+  return false
+}
+
 // Rangli ikonkali qator (Telegram/iOS Settings uslubi) — keng sozlamalar uchun
 const tile = (emoji, c1, c2) => `<span class="stile" style="background:linear-gradient(145deg,${c1},${c2})">${emoji}</span>`
 // Sahifa ichidagi qatorlar (pageRows) — .rows'dan foydalanadi
