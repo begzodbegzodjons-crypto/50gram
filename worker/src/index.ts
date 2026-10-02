@@ -1400,6 +1400,24 @@ async function trendSrcDbg(c: C) {
     let n = 0; try { n = JSON.parse(txt).length } catch {}
     st.piped_coffee_cf = { status: r.status, ms: Date.now() - t0, items: n, head: txt.slice(0, 80).replace(/\s+/g, " ") }
   } catch (e: any) { st.piped_coffee_cf = { err: String(e?.message || e).slice(0, 90), ms: Date.now() - t0 } }
+  // fT + aynan youtubeTrending mapping simulatsiyasi
+  const t1 = Date.now()
+  try {
+    const r = await fT("https://api.piped.private.coffee/trending?region=US", 8000)
+    if (!r) st.ft_coffee = { ok: false, ms: Date.now() - t1 }
+    else {
+      const j: any = await r.json()
+      const list = Array.isArray(j) ? j : j.items || []
+      const out = (list || []).map((v: any) => { const id = String(v.url || "").split("v=")[1]; return id ? String(v.title || "") : null }).filter(Boolean)
+      st.ft_coffee = { ok: true, status: r.status, ms: Date.now() - t1, raw: list.length, mapped: out.length, sample: out.slice(0, 2) }
+    }
+  } catch (e: any) { st.ft_coffee = { ok: false, err: String(e?.message || e).slice(0, 90), ms: Date.now() - t1 } }
+  // To'liq youtubeTrending() chaqiruvi (natija sanog'i)
+  const t2 = Date.now()
+  try {
+    const yt = await youtubeTrending()
+    st.yt_full = { count: yt.length, ms: Date.now() - t2, sample: yt.slice(0, 2).map((v: any) => v.yt + " " + String(v.title).slice(0, 30)) }
+  } catch (e: any) { st.yt_full = { err: String(e?.message || e).slice(0, 90), ms: Date.now() - t2 } }
   return json(st)
 }
 async function trendInsights(c: C) {
