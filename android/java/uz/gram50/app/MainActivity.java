@@ -28,7 +28,7 @@ import android.widget.TextView;
 import org.json.JSONObject;
 
 /**
- * 50 Gram — native Android ilova (v2.0, professional).
+ * 50 Gram — native Android ilova (v2.1, professional).
  * - To'liq ekran splash (logotip bilan) — sahifa yuklanguncha brend ko'rinadi
  * - Qo'ng'iroqlar: JS bridge (Android50) — fonida ham to'liq ekran javob oynasi
  * - Kamera/mikrofon, fayl tanlash, fonda ishlash — hammasi brauzer cheklovisiz
@@ -65,7 +65,7 @@ public class MainActivity extends Activity {
     }
 
     @JavascriptInterface
-    public String version() { return "2.0"; }
+    public String version() { return "2.1"; }
   }
 
   @Override
@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
     s.setCacheMode(WebSettings.LOAD_DEFAULT);
     s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     s.setJavaScriptCanOpenWindowsAutomatically(true);
-    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.0");
+    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.1");
     web.addJavascriptInterface(new Bridge(), "Android50");
 
     web.setWebViewClient(new WebViewClient() {
