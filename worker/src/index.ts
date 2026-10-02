@@ -1223,10 +1223,12 @@ async function pipedMap(base: string, region: string, pass: number): Promise<any
     }).filter((v: any) => v && v.title)
   } catch { return [] }
 }
+// O'zbeklarga xos kontentni aniqlash (sarlavha bo'yicha) — ular lenta boshiga suriladi
+const UZ_RE = /(o['ʻ‘ʼ]?zbek|uzbek|Ўзбек|Ӯзбек|узбек|toshkent|tashkent|tashkend|samarqand|samarkand|buxoro|bukhara|andijon|namangan|nukus|termiz|qarshi|jizzax|navoiy|urganch|qo['ʻ‘ʼ]qon|kokand|farg['ʻ‘ʼ]ona|fergana|xorazm|surxondaryo|sirdaryo|qashqadaryo|andijon|chilonzor|yunusobod|zbekiston|zbekiston|o'zbekcha|oʻzbekcha)/i
 async function youtubeTrending(): Promise<any[]> {
-  // Piped: US + TR parallel, 2 pass (vaqtincha sekinlik bo'lishi mumkin). duration=-1 = LIVE — ular ham qo'shiladi.
+  // Piped: UZ (O'zbekiston — birinchi navbat) + US parallel, 2 pass. LIVE (duration=-1) qo'shilmaydi — ular qotib sekin ishlaydi.
   for (let pass = 0; pass < 2; pass++) {
-    const res = await Promise.allSettled(PIPED_APIS.flatMap((b) => [pipedMap(b, "US", pass), pipedMap(b, "TR", pass)]))
+    const res = await Promise.allSettled(PIPED_APIS.flatMap((b) => [pipedMap(b, "UZ", pass), pipedMap(b, "US", pass)]))
     const merged: any[] = []
     const seen = new Set<string>()
     for (const r of res) {
@@ -1236,9 +1238,10 @@ async function youtubeTrending(): Promise<any[]> {
     if (merged.length >= 5) return merged
     if (pass === 0) await new Promise((res2) => setTimeout(res2, 400))
   }
-  // 3) Invidious instance'lar
-  for (const base of INVID_APIS) {
-    const r = await fT(base + "/api/v1/trending?region=US", 8000)
+  // 3) Invidious instance'lar — UZ birinchi navbatda
+  for (const region of ["UZ", "US"]) {
+    for (const base of INVID_APIS) {
+    const r = await fT(base + "/api/v1/trending?region=" + region, 8000)
     if (!r) continue
     try {
       const j: any = await r.json()
@@ -1251,36 +1254,80 @@ async function youtubeTrending(): Promise<any[]> {
       })).filter((v: any) => v.yt && v.title)
       if (out.length >= 5) return out
     } catch {}
+    }
   }
   console.log("trend yt bo'sh")
   return []
 }
+// --- O'ZBEK SHORTS: Piped qidiruv (filter=videos) orqali haqiqiy o'zbek Shorts'lari (1..90s) ---
+// Trending UZ bo'sh qaytaradi (YouTube global trending sahifasi 2025'da yopilgan), lekin QIDIRUV ishlaydi
+// va o'zbek kontentini to'g'ridan-to'g'ri beradi (jonli efirlar + uzun videolar filtrlanadi).
+const UZ_QUERIES = ["o‘zbekiston shorts", "o‘zbekcha shorts", "o‘zbek komik shorts", "toshkent shorts"]
+async function uzSearch(): Promise<any[]> {
+  const one = async (base: string, q: string): Promise<any[]> => {
+    const r = await fT(base + "/search?q=" + encodeURIComponent(q) + "&filter=videos", 9000)
+    if (!r) return []
+    try {
+      const j: any = await r.json()
+      return ((j.items || []) as any[]).map((v: any) => {
+        const id = String(v.url || "").split("v=")[1]
+        const dur = +v.duration || 0
+        if (!id || dur < 1 || dur > 90) return null // FAQAT haqiqiy Shorts uzunligi — uzun video va jonli efir yo'q
+        return {
+          kind: "short", vid: "yt", yt: id.split("&")[0], uz: 1,
+          title: String(v.title || ""), image: String(v.thumbnail || ""),
+          views: +v.views || 0, duration: dur,
+          time: +v.uploaded > 0 ? +v.uploaded : now(),
+          url: "https://www.youtube.com/watch?v=" + id.split("&")[0], cat: "video",
+        }
+      }).filter((v: any) => v && v.title)
+    } catch { return [] }
+  }
+  const out: any[] = []
+  const seen = new Set<string>()
+  const res = await Promise.allSettled(PIPED_APIS.flatMap((b) => UZ_QUERIES.map((q) => one(b, q))))
+  for (const r of res) {
+    if (r.status !== "fulfilled") continue
+    for (const v of r.value) { if (v && !seen.has(v.yt)) { seen.add(v.yt); out.push(v) } }
+  }
+  return out
+}
 // Reddit (403: serverdan bloklangan) va TikTok (O'zbekistonda VPN'siz ishlamaydi) manbalari olib tashlandi.
 // --- Yagona video hovuzi (edge-kesh 10 daq): Shorts + uzun videolar ---
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  const ck = "https://trend.50gram.internal/poolv5"
+  const ck = "https://trend.50gram.internal/poolv6"
   try {
     const hit = await caches.default.match(ck)
     if (hit) return await hit.json()
   } catch {}
-  const [yt, dmLong, dmS] = await Promise.all([youtubeTrending(), dailymotion(1), dmShorts()])
-  // YT: dur 1..90 — Shorts; dur=-1 — LIVE (embed'da yaxshi ijro etiladi, kind='short'); qolgani uzun videolar
-  const ytShorts = yt.filter((v: any) => v.duration >= 1 && v.duration <= 90)
-  const ytLive = yt.filter((v: any) => v.duration < 0).map((v: any) => ({ ...v, kind: "short", live: true, duration: 0 }))
+  const [yt, uz, dmLong, dmS] = await Promise.all([youtubeTrending(), uzSearch(), dailymotion(1), dmShorts()])
+  // LIVE (dur=-1) umuman chiqarildi — qotib sekin ishlaydi (foydalanuvchi shikoyati).
+  // O'zbek qidiruv natijalari (uz=1) + global trending (faqat 1..90s) — birlashtiriladi, dubl olib tashlanadi.
+  const merged: any[] = []
+  const mSeen = new Set<string>()
+  for (const v of [...uz, ...yt]) { if (v && v.yt && !mSeen.has(v.yt)) { mSeen.add(v.yt); merged.push(v) } }
+  const ytShorts = merged.filter((v: any) => v.duration >= 1 && v.duration <= 90)
   const ytLong = yt.filter((v: any) => v.duration > 90)
-  // Shorts: YouTube (shorts+live) birinchi o'rinda (O'zbekistonda ishonchli), Dailymotion 1:1 aralashtiriladi
-  ytShorts.sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
-  const ytMix = [...ytShorts, ...ytLive]
+  // Qidiruvdan kelganlar uz=1 (sarlavhada kalit so'z bo'lmasa ham o'zbek manbadan), qolganlari sarlavha bo'yicha
+  for (const v of ytShorts) if (!(v as any).uz) (v as any).uz = UZ_RE.test(String(v.title || "")) ? 1 : 0
+  const uzList = ytShorts.filter((v: any) => v.uz).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
+  const otherList = ytShorts.filter((v: any) => !v.uz).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
+  const ytMix: any[] = []
+  let ui = 0, oi = 0
+  while (ui < uzList.length || oi < otherList.length) {
+    for (let k = 0; k < 3 && ui < uzList.length; k++) ytMix.push(uzList[ui++]) // 3 o'zbek : 1 chet el
+    if (oi < otherList.length) ytMix.push(otherList[oi++])
+  }
+  // Dailymotion shorts o'zbek blokidan keyin 1:4 nisbatda (hajm uchun, chet el kontenti ortiqcha ko'rinmaydi)
   const shorts: any[] = []
-  let yi = 0, di = 0
-  while (yi < ytMix.length || di < dmS.length) {
-    if (yi < ytMix.length) shorts.push(ytMix[yi++])
-    if (yi < ytMix.length) shorts.push(ytMix[yi++])
+  let mi = 0, di = 0
+  while (mi < ytMix.length || di < dmS.length) {
+    for (let k = 0; k < 4 && mi < ytMix.length; k++) shorts.push(ytMix[mi++])
     if (di < dmS.length) shorts.push(dmS[di++])
   }
   const vids = [...ytLong, ...dmLong]
   vids.sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
-  const data = { shorts: shorts.slice(0, 44), vids: vids.slice(0, 44) }
+  const data = { shorts: shorts.slice(0, 48), vids: vids.slice(0, 44) }
   if (data.shorts.length || data.vids.length) {
     const resp = json(data)
     // YouTube muvaffaqiyatli bo'lsa 10 daq kesh; yo'q bo'lsa 60s — yomon hovuz tez o'z-o'zidan tuzatiladi
@@ -1460,9 +1507,9 @@ async function trend(c: C) {
   } catch {}
   let items: any[] = []
   if (onlyCat === "video") {
-    // Video: Shorts (vertikal) + uzun videolar aralash, cheksiz (oxirida qaytadan boshlanadi)
+    // Video: FAQAT haqiqiy Shorts (uzun videolar va jonli efirlar sekin/qotadi — foydalanuvchi talabi)
     const vp = await videoPool(c)
-    const all = [...vp.shorts, ...vp.vids]
+    const all = vp.shorts
     const s0 = ((page - 1) * 12) % Math.max(1, all.length)
     items = all.slice(s0, s0 + 12)
     if (items.length < 12 && all.length) items.push(...all.slice(0, 12 - items.length))
@@ -1490,9 +1537,9 @@ async function trend(c: C) {
         }
         if (!added) break
       }
-      // Har sahifaga dunyo trend Shorts/videolar aralashtiriladi (ko'rish soni bo'yicha eng yuqorilari)
+      // Har sahifaga trend Shorts aralashtiriladi (uzun videolar sekin — qo'shilmaydi)
       const vp = await videoPool(c)
-      const vall = [...vp.shorts, ...vp.vids]
+      const vall = vp.shorts
       const v0 = ((page - 1) * 3) % Math.max(1, vall.length)
       const picks = vall.slice(v0, v0 + 3)
       for (let i = 3, vi = 0; i < picked.length && vi < picks.length; i += 7) picked.splice(i, 0, picks[vi++])
