@@ -22,10 +22,11 @@ function savePrefs(patch, sync = true) {
   sendPrefsToSW()
 }
 // Service worker'ga push sozlamalarini yetkazish (bildirishnomada matn/tovush boshqaruvi uchun)
+// token ham beriladi — SW qo'ng'iroq bildirishnomasidan "Rad etish" bosilganda serverga xabar beradi
 function sendPrefsToSW() {
   try {
     if (!('serviceWorker' in navigator)) return
-    const p = { push: S.prefs.push !== 0, preview: S.prefs.preview !== 0, sounds: S.prefs.sounds !== 0 }
+    const p = { push: S.prefs.push !== 0, preview: S.prefs.preview !== 0, sounds: S.prefs.sounds !== 0, token: S.token || '' }
     navigator.serviceWorker.ready.then((r) => { try { r.active && r.active.postMessage({ type: 'prefs', prefs: p }) } catch {} })
     navigator.serviceWorker.controller && navigator.serviceWorker.controller.postMessage({ type: 'prefs', prefs: p })
   } catch {}
@@ -559,7 +560,7 @@ function wsConnect() {
   try {
     const ws = new WebSocket(API.replace(/^http/, 'ws') + '/ws?token=' + encodeURIComponent(S.token))
     S.ws = ws
-    ws.onopen = () => { S.wsOk = true; wsRetry = 1000; setConn(); syncAll() }
+    ws.onopen = () => { S.wsOk = true; wsRetry = 1000; setConn(); syncAll(); try { window.__50wsOpen && window.__50wsOpen() } catch {} }
     ws.onmessage = (e) => { let ev; try { ev = JSON.parse(e.data) } catch { return } if (ev.type !== 'pong') dispatch(ev) }
     ws.onclose = () => { S.wsOk = false; setConn(); if (S.token) setTimeout(wsConnect, wsRetry); wsRetry = Math.min(wsRetry * 2, 20000) }
     ws.onerror = () => {}

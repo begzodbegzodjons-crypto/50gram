@@ -1,5 +1,5 @@
 // 50 Gram service worker: ilova qobig'ini keshlaydi (oflayn ochiladi) + Telegram-uslubidagi Web Push.
-const V = '50gram-v16'
+const V = '50gram-v17'
 const SHELL = ['./', 'index.html', 'style.css', 'config.js', 'core.js', 'p2p.js', 'storage.js', 'chat.js', 'manage.js', 'social.js', 'rtc.js', 'logo.png', 'icon-192.png', 'icon-512.png', 'manifest.json']
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(V).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())) })
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== V).map((k) => caches.delete(k)))).then(() => self.clients.claim())) })
@@ -46,12 +46,28 @@ self.addEventListener('push', (e) => {
     if (prefs.push === false) return // foydalanuvchi push'ni o'chirgan
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     const vis = all.filter((c) => c.visibilityState === 'visible')
-    if (vis.length) {
+    if (vis.length && !d.call) {
       // Ilova ekranda: tizim bildirishnomasi shart emas — ilovaga topshiramiz (jonli WS allaqachon ko'rsatadi)
       for (const c of vis) { try { c.postMessage({ type: 'pushmsg', data: d }) } catch {} }
       return
     }
     try {
+      if (d.call) {
+        // QO'NG'IROQ: Telegram-uslubidagi qo'ng'iroq bildirishnomasi — Javob berish / Rad etish
+        await self.registration.showNotification(d.t, {
+          body: d.b || '',
+          icon: 'icon-192.png',
+          badge: 'icon-192.png',
+          tag: d.tag || 'g50call',
+          renotify: true,
+          requireInteraction: true,
+          silent: false,
+          vibrate: [400, 120, 400, 120, 400],
+          data: { call: 1, call_id: String(d.tag || '').replace('g50call', '') },
+          actions: [{ action: 'answer', title: '📞 Javob berish' }, { action: 'decline', title: 'Rad etish' }],
+        })
+        return
+      }
       await self.registration.showNotification(d.t, {
         body: prefs.preview === false ? 'Yangi xabar' : (d.b || ''),
         icon: 'icon-192.png',
@@ -68,11 +84,27 @@ self.addEventListener('push', (e) => {
 })
 self.addEventListener('notificationclick', (e) => {
   e.notification.close()
-  const chat = (e.notification.data && e.notification.data.chat_id) || 0
+  const nd = e.notification.data || {}
   e.waitUntil((async () => {
+    // Qo'ng'iroq bildirishnomasi: "Rad etish" — serverga yuboriladi; "Javob berish"/ochish — ilova ochiladi
+    if (nd.call && e.action === 'decline' && nd.call_id) {
+      const prefs = (await idbGet('prefs')) || {}
+      if (prefs.token) {
+        try {
+          const base = new URL(self.registration.scope)
+          await fetch(base.origin + '/api/calls/' + nd.call_id + '/status', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: 'Bearer ' + prefs.token },
+            body: JSON.stringify({ status: 'declined' }),
+          })
+        } catch {}
+      }
+      return
+    }
+    const chat = nd.chat_id || 0
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     for (const c of all) {
-      try { await c.focus(); c.postMessage({ type: 'openchat', chat_id: chat }); return } catch {}
+      try { await c.focus(); if (chat) c.postMessage({ type: 'openchat', chat_id: chat }); return } catch {}
     }
     await self.clients.openWindow(chat ? './#chat/' + chat : './')
   })())

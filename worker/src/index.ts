@@ -1013,17 +1013,19 @@ async function deleteStory(c: C) {
 }
 
 // ------------------------- 🔥 Trend lenta (internetdan jonli, UMUMAN saqlanmaydi) -------------------------
-// O'zbekcha RSS manbalar (kun.uz, daryo, gazeta, BBC Uzbek, spot) + Dailymotion trending videolar.
+// O'zbekcha RSS manbalar (kun.uz, daryo, gazeta, BBC Uzbek, spot, nuz) — paralel agregat + tarjima.
 // Kategoriyalar kalit-so'z bo'yicha; kirill/inliz sarlavhalar avtomatik o'zbekchaga tarjima qilinadi.
 // Hech qanday DB yozuvi yo'q — so'rov to'g'ridan-to'g'ri internetdan olinadi. Manba nomi ko'rsatilmaydi.
 const TREND_UA = { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" }
 // Ishonchli RSS manbalar (Cloudflare Worker'dan 200 qaytaradi; Google News DC IP'larga 503 beradi)
+// spot.uz o'zbekcha (oz) versiyasi + nuz.uz qo'shildi — ko'proq har xil o'zbek kontenti
 const TREND_FEEDS: Array<[string, string]> = [
   ["kun", "https://kun.uz/news/rss"],
   ["daryo", "https://daryo.uz/rss/"],
   ["gazeta", "https://www.gazeta.uz/oz/rss/"],
   ["bbc", "https://feeds.bbci.co.uk/uzbek/latin/rss.xml"],
-  ["spot", "https://www.spot.uz/ru/rss/"],
+  ["spot", "https://www.spot.uz/oz/rss/"],
+  ["nuz", "https://nuz.uz/feed"],
 ]
 // Kategoriyalash: kalit-so'zlar bo'yicha (manba ikkinchi darajali maslahatchi)
 const CAT_RE: Record<string, RegExp> = {
@@ -1165,38 +1167,12 @@ async function trToUzCached(c: C, s: string): Promise<string> {
   }
   return out
 }
-async function dailymotion(page: number): Promise<any[]> {
-  try {
-    const r = await fetch(`https://api.dailymotion.com/videos?fields=id,title,duration,views_total,thumbnail_360_url,created_time&sort=trending&limit=14&page=${page}`, { headers: TREND_UA, cf: { cacheTtl: 600 } } as any)
-    if (!r.ok) return []
-    const j: any = await r.json()
-    return (j.list || []).map((v: any) => ({
-      kind: "video", cat: "video", embed: String(v.id || ""),
-      title: String(v.title || "Video"), url: "https://www.dailymotion.com/video/" + v.id,
-      image: String(v.thumbnail_360_url || ""), duration: +v.duration || 0, views: +v.views_total || 0,
-      time: v.created_time ? +v.created_time * 1000 : now(),
-    })).filter((v: any) => v.embed)
-  } catch { return [] }
-}
-// Dailymotion trending Shorts (2 daqiqadan qisqa, ko'rish soni bo'yicha trend)
-async function dmShorts(): Promise<any[]> {
-  try {
-    const r = await fetch("https://api.dailymotion.com/videos?fields=id,title,duration,views_total,thumbnail_240_url,thumbnail_360_url,created_time&sort=trending&shorter_than=2&limit=22", { headers: TREND_UA, cf: { cacheTtl: 600 } } as any)
-    if (!r.ok) return []
-    const j: any = await r.json()
-    return (j.list || []).map((v: any) => ({
-      kind: "short", cat: "video", vid: "dm", embed: String(v.id || ""),
-      title: String(v.title || "Shorts"), url: "https://www.dailymotion.com/video/" + v.id,
-      image: String(v.thumbnail_240_url || v.thumbnail_360_url || ""), duration: +v.duration || 0,
-      views: +v.views_total || 0, time: v.created_time ? +v.created_time * 1000 : now(),
-    })).filter((v: any) => v.embed)
-  } catch { return [] }
-}
-
-// --- YouTube trending (dunyo bo'yicha eng ko'p ko'rilgan videolar va Shorts) ---
-// Ochiq Piped/Invidious API'lari orqali (API kalit kerak emas, kichik JSON). Manba nomi hech qanday javobda ko'rsatilmaydi.
+// --- O'ZBEK KONTENTI — 100% O'zbekiston ---
+// 1) Sertifikatlangan o'zbek kanallari (YouTube kanal RSS — eng tez va ishonchli manba, ~300ms)
+// 2) Piped/Invidious QIDIRUV: o'zbekcha so'rovlar (faqat 1..90s va UZ sarlavha) — yangi kontent
+// Dailymotion va chet-el trending (US region) OLIB TASHLANDI — foydalanuvchi: "faqat o'zbekistondagi trendagilari".
 // MUHIM: faqat Cloudflare'da TURMAYDIGAN instansalar (worker CF'li saytga to'g'ridan-to'g'ri ulanolmaydi).
-const PIPED_APIS = ["https://api.piped.private.coffee", "https://pipedapi.kavin.rocks"]
+const PIPED_APIS = ["https://api.piped.private.coffee", "https://pipedapi.adminforge.de"]
 const INVID_APIS = ["https://invidious.nerdvpn.de"]
 async function fT(url: string, ms: number, cacheTtl = 600): Promise<Response | null> {
   try {
@@ -1204,65 +1180,55 @@ async function fT(url: string, ms: number, cacheTtl = 600): Promise<Response | n
     return r.ok ? r : null
   } catch { return null }
 }
-async function pipedMap(base: string, region: string, pass: number): Promise<any[]> {
-  const r = await fT(base + "/trending?region=" + region, 8000)
-  if (!r) return []
-  try {
-    const j: any = await r.json()
-    const list = Array.isArray(j) ? j : j.items || []
-    return (list || []).map((v: any) => {
-      const id = String(v.url || "").split("v=")[1]
-      if (!id) return null
-      return {
-        kind: "video", vid: "yt", yt: id.split("&")[0],
-        title: String(v.title || ""), image: String(v.thumbnail || ""),
-        views: +v.views || 0, duration: +v.duration || 0,
-        time: +v.uploaded > 0 ? +v.uploaded : now(),
-        url: "https://www.youtube.com/watch?v=" + id.split("&")[0], cat: "video",
+// Sertifikatlangan o'zbek kanallari — haqiqiy qidiruv orqali topilgan va tekshirilgan (komik, hazil, dubljaz, vines)
+const UZ_CHANNELS = [
+  "UCd5_-70CbGPmmz2YusxX1zQ", // YANGI TV — komik sketchlar
+  "UCZm8kCDX5sFagGux3qz5hRg", // Umidjon Murodullayev — qisqa hazillar
+  "UCccjqZeIXuVeZyi9C5Bil4A", // 404 uz
+  "UCHyWMPoLqTWteebdhjKoB4Q", // Uzbek vid
+  "UCfKQvap5T1SKGBRgZKhyhXg", // MANGU_YT
+  "UCuXexJqac0W-TUTab-Yqt8g", // ANYONE SHOW — qisqa hazillar
+  "UCfjrghi9WYjRAd9B9zArkFQ", // Uzbek Vines
+  "UCIU-k8B7_Cd8AJOtncj4hOQ", // Anilan Dublaj UZ
+  "UCoqpEBq2svog4P1bk-Is1rA", // Anilan UZ
+  "UCXMqPws1-cBxaXX9asB0WiA", // Anilan DUBLAJ
+]
+// Kanal RSS: tez (~300ms/kanal, parallel), videoId+sarlavha+ko'rish soni+yuklangan vaqt bor
+async function uzChannelShorts(): Promise<any[]> {
+  const feeds = await Promise.all(UZ_CHANNELS.map(async (ch) => {
+    const r = await fT("https://www.youtube.com/feeds/videos.xml?channel_id=" + ch, 6000, 300)
+    if (!r) return []
+    try {
+      const xml = await r.text()
+      const out: any[] = []
+      for (const e of xml.split("<entry>").slice(1).slice(0, 5)) {
+        const vid = tagGet(e, "yt:videoId")
+        const title = tagGet(e, "title")
+        const pub = tagGet(e, "published")
+        const vm = e.match(/<media:statistics views="(\d+)"/)
+        const views = vm ? +vm[1] : 0
+        if (!vid || !title) continue
+        out.push({
+          kind: "short", vid: "yt", yt: vid, uz: 1, src: "ch",
+          title, image: "https://i.ytimg.com/vi/" + vid + "/hqdefault.jpg",
+          views, duration: 0,
+          time: pub ? (Date.parse(pub) || now()) : now(),
+          url: "https://www.youtube.com/watch?v=" + vid, cat: "video",
+        })
       }
-    }).filter((v: any) => v && v.title)
-  } catch { return [] }
+      return out
+    } catch { return [] }
+  }))
+  return feeds.flat()
 }
-// O'zbeklarga xos kontentni aniqlash (sarlavha bo'yicha) — ular lenta boshiga suriladi
 const UZ_RE = /(o['ʻ‘ʼ]?zbek|uzbek|Ўзбек|Ӯзбек|узбек|Узбек|ткент|Тошкент|Ташкент|тошкент|ткент|samarqand|samarkand|Самарканд|buxoro|bukhara|Бухара|andijon|Андижон|namangan|Наманган|nukus|Нукус|termiz|Термез|qarshi|Карши|jizzax|Жиззах|navoiy|Навои|urganch|Урганч|qo['ʻ‘ʼ]qon|Коканд|kokand|farg['ʻ‘ʼ]ona|fergana|Фергана|xorazm|Хоразм|surxondaryo|sirdaryo|qashqadaryo|chilonzor|yunusobod|zbekiston|zbekiston|Ўзбекистон|Узбекистон|o'zbekcha|oʻzbekcha)/i
 async function youtubeTrending(): Promise<any[]> {
-  // Piped: UZ (O'zbekiston — birinchi navbat) + US parallel, 2 pass. LIVE (duration=-1) qo'shilmaydi — ular qotib sekin ishlaydi.
-  for (let pass = 0; pass < 2; pass++) {
-    const res = await Promise.allSettled(PIPED_APIS.flatMap((b) => [pipedMap(b, "UZ", pass), pipedMap(b, "US", pass)]))
-    const merged: any[] = []
-    const seen = new Set<string>()
-    for (const r of res) {
-      if (r.status !== "fulfilled") continue
-      for (const v of r.value) { if (v && !seen.has(v.yt)) { seen.add(v.yt); merged.push(v) } }
-    }
-    if (merged.length >= 5) return merged
-    if (pass === 0) await new Promise((res2) => setTimeout(res2, 400))
-  }
-  // 3) Invidious instance'lar — UZ birinchi navbatda
-  for (const region of ["UZ", "US"]) {
-    for (const base of INVID_APIS) {
-    const r = await fT(base + "/api/v1/trending?region=" + region, 8000)
-    if (!r) continue
-    try {
-      const j: any = await r.json()
-      const out = (Array.isArray(j) ? j : []).map((v: any) => ({
-        kind: "video", vid: "yt", yt: String(v.videoId || ""),
-        title: String(v.title || ""), image: String(v.videoThumbnails?.[0]?.url || ""),
-        views: +v.viewCount || 0, duration: +v.lengthSeconds || 0,
-        time: +v.published > 0 ? +v.published * 1000 : now(),
-        url: "https://www.youtube.com/watch?v=" + v.videoId, cat: "video",
-      })).filter((v: any) => v.yt && v.title)
-      if (out.length >= 5) return out
-    } catch {}
-    }
-  }
-  console.log("trend yt bo'sh")
+  // Chet-el trending OLINGAN (foydalanuvchi: faqat o'zbek kontenti) — faqat UZ qidiruvi va kanallar qoladi.
   return []
 }
-// --- O'ZBEK SHORTS: Piped qidiruv (filter=videos) orqali haqiqiy o'zbek Shorts'lari (1..90s) ---
-// Trending UZ bo'sh qaytaradi (YouTube global trending sahifasi 2025'da yopilgan), lekin QIDIRUV ishlaydi
-// va o'zbek kontentini to'g'ridan-to'g'ri beradi (jonli efirlar + uzun videolar filtrlanadi).
-const UZ_QUERIES = ["o‘zbekiston shorts", "o‘zbekcha shorts", "o‘zbek komik shorts", "toshkent shorts"]
+// --- O'ZBEK SHORTS: Piped/Invidious QIDIRUV — faqat o'zbekcha (1..90s VA sarlavha UZ) ---
+// Chet-el kontenti QATIY filtrlanadi: UZ_RE mos kelmasa — umuman qo'shilmaydi.
+const UZ_QUERIES = ["o‘zbekiston shorts", "o‘zbekcha shorts", "o‘zbek komik shorts", "toshkent shorts", "o‘zbekcha hazil", "qiziqarli o‘zbekcha video", "o‘zbek prank", "o‘zbekcha dubljaz"]
 async function uzSearch(): Promise<any[]> {
   const one = async (base: string, q: string): Promise<any[]> => {
     const r = await fT(base + "/search?q=" + encodeURIComponent(q) + "&filter=videos", 9000)
@@ -1273,9 +1239,11 @@ async function uzSearch(): Promise<any[]> {
         const id = String(v.url || "").split("v=")[1]
         const dur = +v.duration || 0
         if (!id || dur < 1 || dur > 90) return null // FAQAT haqiqiy Shorts uzunligi — uzun video va jonli efir yo'q
+        const title = String(v.title || "")
+        if (!UZ_RE.test(title)) return null // QATIY: faqat o'zbekcha sarlavhali videolar
         return {
-          kind: "short", vid: "yt", yt: id.split("&")[0], uz: UZ_RE.test(String(v.title || "")) ? 1 : 0,
-          title: String(v.title || ""), image: String(v.thumbnail || ""),
+          kind: "short", vid: "yt", yt: id.split("&")[0], uz: 1, src: "s",
+          title, image: String(v.thumbnail || ""),
           views: +v.views || 0, duration: dur,
           time: +v.uploaded > 0 ? +v.uploaded : now(),
           url: "https://www.youtube.com/watch?v=" + id.split("&")[0], cat: "video",
@@ -1285,82 +1253,100 @@ async function uzSearch(): Promise<any[]> {
   }
   const out: any[] = []
   const seen = new Set<string>()
-  const res = await Promise.allSettled(PIPED_APIS.flatMap((b) => UZ_QUERIES.map((q) => one(b, q))))
+  const res = await Promise.allSettled([
+    ...PIPED_APIS.flatMap((b) => UZ_QUERIES.map((q) => one(b, q))),
+    ...INVID_APIS.map((b) => oneInvid(b)),
+  ])
   for (const r of res) {
     if (r.status !== "fulfilled") continue
     for (const v of r.value) { if (v && !seen.has(v.yt)) { seen.add(v.yt); out.push(v) } }
   }
   return out
 }
-// Reddit (403: serverdan bloklangan) va TikTok (O'zbekistonda VPN'siz ishlamaydi) manbalari olib tashlandi.
-// --- Yagona video hovuzi (edge-kesh 10 daq): Shorts + uzun videolar ---
-async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  const ck = "https://trend.50gram.internal/poolv7"
+// Invidious qidiruv zaxira manbasi (formati boshqa: videoId/lengthSeconds/viewCount)
+async function oneInvid(base: string): Promise<any[]> {
+  const q = UZ_QUERIES[Math.floor(Math.random() * UZ_QUERIES.length)]
+  const r = await fT(base + "/api/v1/search?q=" + encodeURIComponent(q) + "&type=video", 8000)
+  if (!r) return []
   try {
-    const hit = await caches.default.match(ck)
-    if (hit) return await hit.json()
-  } catch {}
-  const [yt, uz, dmLong, dmS] = await Promise.all([youtubeTrending(), uzSearch(), dailymotion(1), dmShorts()])
-  // LIVE (dur=-1) umuman chiqarildi — qotib sekin ishlaydi (foydalanuvchi shikoyati).
-  // O'zbek qidiruv natijalari (uz=1) + global trending (faqat 1..90s) — birlashtiriladi, dubl olib tashlanadi.
-  const merged: any[] = []
-  const mSeen = new Set<string>()
-  for (const v of [...uz, ...yt]) { if (v && v.yt && !mSeen.has(v.yt)) { mSeen.add(v.yt); merged.push(v) } }
-  const ytShorts = merged.filter((v: any) => v.duration >= 1 && v.duration <= 90)
-  const ytLong = yt.filter((v: any) => v.duration > 90)
-  // uz belgisi: sarlavhada o'zbekcha kalit so'z (qidiruvdan kelganlar ham shu yo'l bilan tekshiriladi)
-  for (const v of ytShorts) if (!(v as any).uz) (v as any).uz = UZ_RE.test(String(v.title || "")) ? 1 : 0
-  const uzList = ytShorts.filter((v: any) => v.uz).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
-  const otherList = ytShorts.filter((v: any) => !v.uz).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
-  const ytMix: any[] = []
-  let ui = 0, oi = 0
-  while (ui < uzList.length || oi < otherList.length) {
-    for (let k = 0; k < 3 && ui < uzList.length; k++) ytMix.push(uzList[ui++]) // 3 o'zbek : 1 chet el
-    if (oi < otherList.length) ytMix.push(otherList[oi++])
-  }
-  // Dailymotion shorts o'zbek blokidan keyin 1:4 nisbatda (hajm uchun, chet el kontenti ortiqcha ko'rinmaydi)
-  const shorts: any[] = []
-  let mi = 0, di = 0
-  while (mi < ytMix.length || di < dmS.length) {
-    for (let k = 0; k < 4 && mi < ytMix.length; k++) shorts.push(ytMix[mi++])
-    if (di < dmS.length) shorts.push(dmS[di++])
-  }
-  const vids = [...ytLong, ...dmLong]
-  vids.sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
-  const data = { shorts: shorts.slice(0, 48), vids: vids.slice(0, 44) }
-  if (data.shorts.length || data.vids.length) {
-    const resp = json(data)
-    // YouTube muvaffaqiyatli bo'lsa 10 daq kesh; yo'q bo'lsa 60s — yomon hovuz tez o'z-o'zidan tuzatiladi
-    const hasYt = data.shorts.some((v: any) => v.vid === "yt") || data.vids.some((v: any) => v.vid === "yt")
-    resp.headers.set("cache-control", "public, s-maxage=" + (hasYt ? 600 : 60))
-    c.wait(caches.default.put(ck, resp.clone()).catch(() => {}))
-  }
-  return data
+    const j: any = await r.json()
+    return (Array.isArray(j) ? j : []).map((v: any) => {
+      const dur = +v.lengthSeconds || 0
+      const title = String(v.title || "")
+      if (!v.videoId || dur < 1 || dur > 90 || !UZ_RE.test(title)) return null
+      return {
+        kind: "short", vid: "yt", yt: String(v.videoId), uz: 1, src: "s",
+        title, image: String(v.videoThumbnails?.[0]?.url || ""),
+        views: +v.viewCount || 0, duration: dur,
+        time: +v.published > 0 ? +v.published * 1000 : now(),
+        url: "https://www.youtube.com/watch?v=" + v.videoId, cat: "video",
+      }
+    }).filter((v: any) => v && v.title)
+  } catch { return [] }
 }
-const tSleep = (ms: number) => new Promise((res) => setTimeout(res, ms))
-async function newsPool(c: C): Promise<any[]> {
-  // Barcha manbalar bitta kategoriyalangan pool'da (edge-kesh 15 daq) — sahifalar arzon hisoblanadi
-  const ck = "https://trend.50gram.internal/pool3"
+// Reddit (403: serverdan bloklangan) va TikTok (O'zbekistonda VPN'siz ishlamaydi) manbalari olib tashlandi.
+// --- Yagona video hovuzi: stale-while-revalidate — eski hovuz DARHOL qaytadi, yangilash fonda ketadi.
+// Bu foydalanuvchining asosiy shikoyati ("lenta juda sekin ochmoqda") uchun asosiy yechim:
+// upstream sekin/o'lik bo'lsa ham foydalanuvchi DOIM keshlangan kontentni zudlik bilan oladi.
+const POOL_FRESH_MS = 20 * 60 * 1000
+async function cacheGetJSON<T>(ck: string): Promise<{ t: number; data: T } | null> {
+  try { const hit = await caches.default.match(ck); if (hit) return await hit.json() } catch {}
+  return null
+}
+async function cachePutJSON(ck: string, obj: unknown): Promise<void> {
   try {
-    const hit = await caches.default.match(ck)
-    if (hit) return await hit.json()
+    const r = json(obj)
+    r.headers.set("cache-control", "public, s-maxage=1200")
+    await caches.default.put(ck, r)
   } catch {}
-  const out: any[] = []
-  for (let i = 0; i < TREND_FEEDS.length; i++) {
-    const [src, url] = TREND_FEEDS[i]
-    const items = await gnewsFetch(src, url, 45)
-    for (const it of items) { it.cat = classify((it.title || "") + " " + (it.snippet || ""), src); delete it.src; out.push(it) }
-    if (!items.length && i < TREND_FEEDS.length - 1) await tSleep(500)
-    else if (i < TREND_FEEDS.length - 1) await tSleep(300)
+}
+async function buildVideoPool(): Promise<{ shorts: any[]; vids: any[] }> {
+  // Kanal yangiliklari (vaqt bo'yicha) + qidiruv topganlari (ko'rish soni bo'yicha) — 2:1 aralashtiriladi
+  const [chan, uz] = await Promise.all([uzChannelShorts(), uzSearch()])
+  const seen = new Set<string>()
+  const ch = chan.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt)).sort((a: any, b: any) => (b.time || 0) - (a.time || 0))
+  const se = uz.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt)).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
+  const shorts: any[] = []
+  let ci = 0, si = 0
+  while ((ci < ch.length || si < se.length) && shorts.length < 48) {
+    for (let k = 0; k < 2 && ci < ch.length; k++) shorts.push(ch[ci++])
+    if (si < se.length) shorts.push(se[si++])
   }
+  return { shorts: shorts.slice(0, 48), vids: [] }
+}
+async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
+  const ck = "https://trend.50gram.internal/poolv8"
+  const meta = await cacheGetJSON<{ shorts: any[]; vids: any[] }>(ck)
+  if (meta && meta.data && meta.data.shorts?.length) {
+    if (now() - meta.t < POOL_FRESH_MS) return meta.data
+    c.wait(buildVideoPool().then((d) => { if (d.shorts.length) return cachePutJSON(ck, { t: now(), data: d }) }).catch(() => {}))
+    return meta.data
+  }
+  const d = await buildVideoPool()
+  if (d.shorts.length) await cachePutJSON(ck, { t: now(), data: d })
+  return d
+}
+async function newsPool(c: C): Promise<any[]> {
+  // Barcha manbalar PARALLEL yuklanadi + stale-while-revalidate: eski pool DARHOL qaytadi (sovuq sahifa ham tez)
+  const ck = "https://trend.50gram.internal/poolN4"
+  const meta = await cacheGetJSON<any[]>(ck)
+  if (meta && meta.data?.length) {
+    if (now() - meta.t < 15 * 60 * 1000) return meta.data
+    c.wait(buildNewsPool().then((d) => { if (d.length) return cachePutJSON(ck, { t: now(), data: d }) }).catch(() => {}))
+    return meta.data
+  }
+  const d = await buildNewsPool()
+  if (d.length) await cachePutJSON(ck, { t: now(), data: d })
+  return d
+}
+async function buildNewsPool(): Promise<any[]> {
+  const res = await Promise.all(TREND_FEEDS.map(async ([src, url]) => {
+    const items = await gnewsFetch(src, url, 40)
+    for (const it of items) { it.cat = classify((it.title || "") + " " + (it.snippet || ""), src); delete it.src }
+    return items
+  }))
   // Eng yangilari oldinda
-  out.sort((a, b) => (b.time || 0) - (a.time || 0))
-  if (out.length) {
-    const resp = json(out)
-    resp.headers.set("cache-control", "public, s-maxage=900")
-    c.wait(caches.default.put(ck, resp.clone()).catch(() => {}))
-  }
-  return out
+  return res.flat().sort((a, b) => (b.time || 0) - (a.time || 0))
 }
 const CAT_KEYS = ["uz", "world", "tech", "sport", "biznes", "shou", "fan", "salomatlik"]
 const TREND_CATS = new Set([...CAT_KEYS, "video"])
@@ -1707,6 +1693,14 @@ async function ice(c: C) {
   }
   return json({ iceServers: servers })
 }
+async function callPending(c: C) {
+  // WS uzilgan paytda kelgan qo'ng'iroqni qayta o'ynatish: ilova ochilganda o'zini "ringing" holatda topadi
+  const row = await c.db.one("SELECT * FROM calls WHERE callee_id=? AND status='ringing' AND started_at>? ORDER BY started_at DESC LIMIT 1", [c.uid, now() - 80 * 1000])
+  if (!row) return json({ call: null })
+  const from = (await usersByIds(c, [+row.caller_id])).get(+row.caller_id)
+  if (!from) return json({ call: null })
+  return json({ call: { call_id: row.id, video: !!row.video, from: { ...from, first_name: (from as any).real_name || from.first_name, last_name: "" } } })
+}
 async function startCall(c: C) {
   const to = +c.b.to
   if (!to || to === c.uid) fail("Kimga qo‘ng‘iroq?")
@@ -1716,7 +1710,7 @@ async function startCall(c: C) {
   const me = (await usersByIds(c, [c.uid])).get(c.uid)
   // qo'ng'iroq qiluvchi qabul qiluvchining kontakt nomini ko'rmaydi — haqiqiy ismi yuboriladi
   c.wait(notify(c.env, [to], { type: "call", call_id: id, video: !!c.b.video, from: { ...me, first_name: me.real_name, last_name: "" } }))
-  c.wait(pushUsers(c.env, [to], { t: `${me?.real_name || "50 Gram"} qo‘ng‘iroq qilmoqda`, b: c.b.video ? "📹 Video qo‘ng‘iroq" : "📞 Audio qo‘ng‘iroq", c: 0, tag: "g50call" + id, call: 1 }, { urgency: "high", ttl: 60 }))
+  c.wait(pushUsers(c.env, [to], { t: `${me?.real_name || "50 Gram"} qo‘ng‘iroq qilmoqda`, b: c.b.video ? "📹 Video qo‘ng‘iroq" : "📞 Audio qo‘ng‘iroq", c: 0, tag: "g50call" + id, call: 1 }, { urgency: "high", ttl: 90 }))
   return json({ call_id: id })
 }
 async function signal(c: C) {
@@ -2153,6 +2147,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/push/unsubscribe", pushUnsubscribe],
   ["GET", "/ice", ice],
   ["POST", "/calls", startCall],
+  ["GET", "/calls/pending", callPending],
   ["POST", "/calls/:id/status", callStatus],
   ["POST", "/signal", signal],
   ["POST", "/p2p/have", p2pHave],

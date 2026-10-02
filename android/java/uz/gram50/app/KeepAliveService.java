@@ -7,13 +7,15 @@ import android.app.Service;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
-import android.os.PowerManager;
 
-/** Fon xizmati: brauzer cheklovlari yo'q — CPU/ulanish tirik, xabarlar o'z vaqtida keladi. */
+/**
+ * Fon xizmati: ilova jarayoni tirik turadi — WebSocket ulanishi uzilmaydi,
+ * shuning uchun xabarlar va QO'NG'IROQLAR fonda ham o'z vaqtida yetib boradi.
+ * Doimiy WakeLock ishlatilmaydi — batareya tejalgan (foreground service yetarli).
+ */
 public class KeepAliveService extends Service {
 
   static final String CH_ID = "50gram_service";
-  PowerManager.WakeLock wl;
 
   @Override
   public void onCreate() {
@@ -29,15 +31,15 @@ public class KeepAliveService extends Service {
       nm.createNotificationChannel(ch);
       n = new Notification.Builder(this, CH_ID)
           .setSmallIcon(R.mipmap.ic_launcher)
-          .setContentTitle("50 Gram ishlayapti")
-          .setContentText("Xabarlar o'z vaqtida yetib boradi")
+          .setContentTitle("50 Gram fonda ishlayapti")
+          .setContentText("Xabarlar va qo'ng'iroqlar o'z vaqtida yetadi")
           .setOngoing(true)
           .build();
     } else {
       n = new Notification.Builder(this)
           .setSmallIcon(R.mipmap.ic_launcher)
-          .setContentTitle("50 Gram ishlayapti")
-          .setContentText("Xabarlar o'z vaqtida yetib boradi")
+          .setContentTitle("50 Gram fonda ishlayapti")
+          .setContentText("Xabarlar va qo'ng'iroqlar o'z vaqtida yetadi")
           .setOngoing(true)
           .build();
     }
@@ -46,10 +48,6 @@ public class KeepAliveService extends Service {
     } else {
       startForeground(1, n);
     }
-
-    PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-    wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "50gram:keepalive");
-    wl.acquire();
   }
 
   @Override
@@ -63,12 +61,6 @@ public class KeepAliveService extends Service {
     Intent r = new Intent(getApplicationContext(), KeepAliveService.class);
     if (Build.VERSION.SDK_INT >= 26) startForegroundService(r); else startService(r);
     super.onTaskRemoved(rootIntent);
-  }
-
-  @Override
-  public void onDestroy() {
-    if (wl != null && wl.isHeld()) wl.release();
-    super.onDestroy();
   }
 
   @Override

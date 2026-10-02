@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="uz.gram50.app"
-    android:versionCode="2"
-    android:versionName="1.1">
+    android:versionCode="3"
+    android:versionName="2.0">
 
   <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/>
 
@@ -13,6 +13,9 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+  <uses-permission android:name="android.permission.VIBRATE"/>
+  <!-- Qo'ng'iroq: qulf ekranda ham to'liq ekran javob oynasi -->
+  <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
   <!-- Qo'ng'iroqlar uchun: kamera va mikrofon (WebView getUserMedia) -->
   <uses-permission android:name="android.permission.CAMERA"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
@@ -21,6 +24,7 @@
   <application
       android:label="50 Gram"
       android:icon="@mipmap/ic_launcher"
+      android:roundIcon="@mipmap/ic_launcher"
       android:usesCleartextTraffic="false"
       android:allowBackup="true"
       android:hardwareAccelerated="true"

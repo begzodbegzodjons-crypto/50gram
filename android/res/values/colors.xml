@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Adaptive ikonka fon rangi — logotip atlasiga mos to'q ko'k -->
+  <color name="ic_launcher_bg">#1E4FB8</color>
+</resources>

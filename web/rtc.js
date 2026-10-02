@@ -78,11 +78,46 @@ async function callUser(uid, video) {
     CALL.id = r.call_id
     setCallState('Chaqirilmoqda…')
     ringTone(true)
-    CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', true, 'Javob bermadi'), 45000)
+    CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', true, 'Javob bermadi'), 75000)
   } catch (e) { toast('⚠️ ' + e.message); endCall('ended', !!CALL?.id) }
 }
-on('call', (ev) => {
+// ---------------- FON REJIMIDA QO'NG'IROQ ----------------
+// APK (native WebView): window.Android50 bridge — to'liq ekran qo'ng'iroq bildirishnomasi (Javob berish/Rad etish)
+// PWA: sw.js qo'ng'iroq bildirishnomasi ko'rsatadi (push call payload).
+// WS uzilgan bo'lsa: ulanganda /calls/pending orqali "ringing" qo'ng'iroq qayta o'ynatiladi.
+const nativeCall = () => (window.Android50 && typeof window.Android50.callIncoming === 'function') ? window.Android50 : null
+const nativeCallCancel = () => { try { window.Android50 && window.Android50.callStarted && window.Android50.callStarted() } catch {} }
+let pendingNativeCall = null
+window.__50call = (act, id) => {
+  const ev = pendingNativeCall
+  if (act === 'answer') {
+    pendingNativeCall = null
+    if (ev && !CALL) incomingCall(ev) // UI hali yaratilmagan (fon rejimi) — yaratamiz
+    if (CALL && String(CALL.id) === String(id)) { nativeCallCancel(); acceptCall() }
+  } else if (act === 'decline') {
+    pendingNativeCall = null
+    nativeCallCancel()
+    if (CALL && String(CALL.id) === String(id)) endCall('declined', true)
+    else post(`/calls/${id}/status`, { status: 'declined' }).catch(() => {})
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  // Foydalanuvchi bildirishnomani emas, ilovani o'zi ochgan bo'lsa — qo'ng'iroq oynasini ko'rsatamiz
+  if (!document.hidden && pendingNativeCall && !CALL) {
+    const ev = pendingNativeCall
+    pendingNativeCall = null
+    incomingCall(ev)
+  }
+})
+function incomingCall(ev) {
   if (CALL) { sig(ev.from.id, { k: 'busy', call_id: ev.call_id }); return }
+  // FON REJIMIDA (APK): sahifa yashirin bo'lsa — native to'liq ekran qo'ng'iroq oynasi (tugmalar bilan)
+  const nb = nativeCall()
+  if (nb && document.hidden) {
+    pendingNativeCall = ev
+    try { nb.callIncoming(JSON.stringify({ id: ev.call_id, name: uname(ev.from), video: !!ev.video })) } catch {}
+    return
+  }
   S.users.set(ev.from.id, { ...(S.users.get(ev.from.id) || {}), ...ev.from })
   const peer = S.users.get(ev.from.id)
   CALL = { id: ev.call_id, peer, video: !!ev.video, outgoing: false, ice: [], el: callUI(peer, ev.video, ev.video ? 'Video qo‘ng‘iroq…' : 'Qo‘ng‘iroq…') }
@@ -91,8 +126,18 @@ on('call', (ev) => {
   ringTone(true)
   vibrate([400, 200, 400, 200, 400])
   notifyLocal('📞 ' + uname(peer), ev.video ? 'Video qo‘ng‘iroq' : 'Ovozli qo‘ng‘iroq')
-  CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', false), 45000)
-})
+  nativeCallCancel() // APK: agar native bildirishnoma chiqqan bo'lsa — endi UI bor, yopamiz
+  CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', false), 75000)
+}
+on('call', incomingCall)
+// WS qayta ulanganda: WS uzilgan paytda kelgan qo'ng'iroq bo'lsa — darhol qo'ng'iroq oynasi
+window.__50wsOpen = async () => {
+  if (CALL || pendingNativeCall) return
+  try {
+    const r = await api('/calls/pending')
+    if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, from: r.call.from })
+  } catch {}
+}
 async function acceptCall() {
   const C = CALL; if (!C) return
   ringTone(false); clearTimeout(C.timeout)
@@ -148,6 +193,7 @@ function endCall(status = 'ended', report = true, msg) {
   const C = CALL; if (!C) return
   CALL = null
   ringTone(false)
+  nativeCallCancel() // APK: qo'ng'iroq bildirishnomasini yopish
   clearTimeout(C.timeout); clearInterval(C.tick)
   const dur = C.started ? Math.round((Date.now() - C.started) / 1000) : 0
   if (report && C.id) {

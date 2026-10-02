@@ -244,9 +244,38 @@ function obsTrend() {
 function trendSkeleton() {
   return `<div class="tgrid">${Array(6).fill('<div class="tcard sk"><div class="skimg"></div><div class="tcb"><b>‎</b><small>‎</small></div></div>').join('')}</div>`
 }
+// ZUDLIK keshi: oxirgi 1-sahifa sessionStorage'da — lenta HAR QAYTA OCHILGANDA darhol chiziladi (fon yangilanadi)
+// Bu "lenta juda sekin ochmoqda" shikoyatining client-tarafi yechimi.
+function trendCacheSave(items) {
+  try { sessionStorage.setItem('g50_trend_p1', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
+}
+function trendCacheGet() {
+  try {
+    const d = JSON.parse(sessionStorage.getItem('g50_trend_p1') || '')
+    if (d && d.items && Date.now() - d.t < 5 * 60 * 1000) return d.items
+  } catch {}
+  return null
+}
 async function loadTrend(reset) {
   if (trendBusy) return
-  if (reset) { trendItems = []; trendPage = 0; trendEnd = false; $('feedlist').innerHTML = trendSkeleton() }
+  if (reset) {
+    trendItems = []; trendPage = 0; trendEnd = false
+    const cached = trendCat === 'all' ? trendCacheGet() : null
+    if (cached && cached.length) {
+      // KESH DARHOL: skeleton o'rniga oxirgi kontent ko'rinadi, yangisi fon Keladi
+      trendItems = cached.slice()
+      trendPage = 1
+      renderTrend()
+      trendBusy = true
+      try {
+        const r = await api('/trend?page=1' + (catsParam() ? '&cats=' + encodeURIComponent(catsParam()) : ''))
+        const list = r.items || []
+        if (feedMode === 'trend' && list.length) { trendItems = list; renderTrend(); trendCacheSave(list) }
+      } catch {} finally { trendBusy = false }
+      return
+    }
+    $('feedlist').innerHTML = trendSkeleton()
+  }
   if (trendEnd) return
   trendBusy = true
   try {
@@ -262,6 +291,7 @@ async function loadTrend(reset) {
     }
     trendItems.push(...list)
     if (!list.length) trendEnd = true
+    if (trendPage === 1 && trendCat === 'all') trendCacheSave(trendItems)
     renderTrend()
   } catch (e) { if (reset) $('feedlist').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`; trendPage-- } finally { trendBusy = false }
 }
@@ -799,10 +829,17 @@ async function shortsStart(opt = {}) {
   try {
     let posts = shNormPosts(feedPosts)
     if (opt.post && !posts.some((x) => x.p.id === opt.post.id)) posts.unshift({ t: 'post', p: opt.post })
-    if (!posts.length) { try { posts = shNormPosts(await api('/reels')) } catch {} }
+    // TREND SHORTS TO'SIQ QILMAYDI: keshda bo'lsa darhol qo'shamiz, yo'q bo'lsa ilova OCHILGACH fonda yuklanadi.
+    // Avval: shortsStart ikkala API'ni ketma-ket kutardi — sekin API butun Shorts'ni bloklaydi (asosiy sekinlik sababi).
     let tr = shNormTrend(trendItems.filter((x) => x.kind === 'short'))
-    if (!tr.length) { try { tr = shNormTrend(await api('/trend?cat=video&page=1')) } catch {} }
+    if (!tr.length && opt.trend) { try { tr = shNormTrend(await api('/trend?cat=video&page=1')) } catch {} }
     if (opt.trend && !tr.some((x) => x.x.id === opt.trend.id)) tr.unshift({ t: 'trend', x: opt.trend })
+    if (!posts.length && !tr.length && !opt.trend) {
+      // Hech narsa yo'q — ikkala manba PARALLEL kutiladi (ketma-ket emas!)
+      const [rp, rt] = await Promise.allSettled([api('/reels'), api('/trend?cat=video&page=1')])
+      if (rp.status === 'fulfilled') posts = shNormPosts(rp.value)
+      if (rt.status === 'fulfilled') tr = shNormTrend(rt.value)
+    }
     if (!posts.length && !tr.length) return toast('Hali video yo‘q — Lenta’da 🎬 Reels’dan video post joylang!')
     const list = []
     let pi = 0, ti = 0
@@ -815,6 +852,13 @@ async function shortsStart(opt = {}) {
     if (opt.post) idx = list.findIndex((x) => x.t === 'post' && x.p.id === opt.post.id)
     else if (opt.trend) idx = list.findIndex((x) => x.t === 'trend' && x.x.id === opt.trend.id)
     openShorts(list, Math.max(0, idx))
+    // FONDA: trend shorts hali qo'shilmagan bo'lsa — yuklab slaydlar oxiriga qo'shiladi (cheksiz lenta)
+    if (!opt.trend && tr.length < 6) {
+      api('/trend?cat=video&page=1').then((r) => {
+        const more = shNormTrend(r).filter((x) => !list.some((y) => y.t === 'trend' && y.x.id === x.x.id))
+        if (more.length && shWrap) shAppend(more)
+      }).catch(() => {})
+    }
   } catch (e) { toast('⚠️ ' + e.message) }
 }
 function openShorts(list, startIdx = 0) {
