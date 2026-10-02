@@ -589,7 +589,20 @@ function shYTpost(f, func) { try { f.contentWindow.postMessage(JSON.stringify({ 
 function shBindFrame(f) {
   const slide = f.closest('.sh-slide')
   if (!slide) return
-  f.addEventListener('load', () => { slide.dataset.ok = '1'; shFailStreak = 0; const l = qs('.sh-load', slide); if (l) l.style.display = 'none' }, { once: true })
+  f.addEventListener('load', () => { slide.dataset.ok = '1'; const l = qs('.sh-load', slide); if (l) l.style.display = 'none' }, { once: true })
+}
+// YT ijro kuzatuvi: player postMessage yubormasa (bot-devori/bloklangan video) — avto-keyingi slayd
+function shYTMsgBind(w) {
+  if (w._shMsg) return
+  w._shMsg = (e) => {
+    try {
+      const d = typeof e.data === 'string' ? e.data : ''
+      if (!d || (d.indexOf('info_delivery') < 0 && d.indexOf('onStateChange') < 0 && d.indexOf('video:data') < 0)) return
+      const fr = qsa('iframe[data-shyt]', w)
+      for (const f of fr) { try { if (f.contentWindow === e.source) { f.closest('.sh-slide').dataset.playing = '1'; return } } catch {} }
+    } catch {}
+  }
+  window.addEventListener('message', w._shMsg)
 }
 
 function shSlideHTML(it, i) {
@@ -758,6 +771,19 @@ function shActivate(w, slide) {
         } else if (shFailStreak >= 3) toast('⚠️ Bir nechta video yuklanmadi — internetni tekshiring', 3000)
       } else shFailStreak = 0
     }, 5000)
+    // YT IJRO KUZATUVI: iframe yuklandi lekin player 9s ichida o'ynamasa (bloklangan/bot-devor) — avto-keyingi
+    if (ifr.dataset.shyt) {
+      clearTimeout(slide._shytw)
+      slide._shytw = setTimeout(() => {
+        if (shWrap && slide.isConnected && slide.dataset.on === '1' && slide.dataset.ok === '1' && slide.dataset.playing !== '1') {
+          shFailStreak++
+          if (shFailStreak < 3) {
+            slide.classList.add('sh-fail')
+            slide._shauto = setTimeout(() => { if (shWrap && slide.dataset.on === '1' && slide.dataset.playing !== '1') { shGo(+slide.dataset.shi + 1); toast('⏭ Video ochilmadi — keyingi', 1500) } }, 1800)
+          } else toast('⚠️ Videolar ochilmayapti — internetni tekshiring', 3000)
+        } else if (slide.dataset.playing === '1') shFailStreak = 0
+      }, 9000)
+    }
   }
   // PRELOAD: keyingi slayd YT bo'lsa — 1.5s'dan keyin fonda (mute) yuklanadi → scroll qilsa DARHAL ijro
   clearTimeout(w._shpre)
@@ -815,9 +841,10 @@ function shClose() {
   if (!shWrap) return
   try {
     clearInterval(shWtTimer); shObs && shObs.disconnect(); shKeyH && document.removeEventListener('keydown', shKeyH)
+    if (shWrap._shMsg) { window.removeEventListener('message', shWrap._shMsg); shWrap._shMsg = null }
     clearTimeout(shWrap._shpre)
     qsa('video', shWrap).forEach((v) => { try { v.pause(); if (v._shAudio) v._shAudio.pause() } catch {} })
-    qsa('.sh-slide', shWrap).forEach((s) => { clearTimeout(s._shwd); clearTimeout(s._shauto) })
+    qsa('.sh-slide', shWrap).forEach((s) => { clearTimeout(s._shwd); clearTimeout(s._shauto); clearTimeout(s._shytw) })
   } catch {}
   const w = shWrap
   shWrap = null
@@ -872,6 +899,7 @@ function openShorts(list, startIdx = 0) {
   document.body.appendChild(w)
   document.body.classList.add('sh-lock')
   shWrap = w
+  shYTMsgBind(w)
   requestAnimationFrame(() => {
     w.classList.add('on')
     const sc = qs('.sh-scroll', w)
