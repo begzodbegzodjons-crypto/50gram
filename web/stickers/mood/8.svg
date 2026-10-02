@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><defs><linearGradient id="fg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a29bfe"/><stop offset="1" stop-color="#6c5ce7"/></linearGradient><radialGradient id="gl" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffffff" stop-opacity=".85"/><stop offset="100%" stop-color="#ffffff" stop-opacity="0"/></radialGradient></defs><style>
+.an{transform-origin:100px 100px;animation:float}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
+@keyframes wig{0%,100%{transform:rotate(-7deg)}50%{transform:rotate(7deg)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes float{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-9px) rotate(2deg)}}
+@keyframes pop{0%{transform:scale(.4)}60%{transform:scale(1.15)}100%{transform:scale(1)}}
+@keyframes shake{0%,100%{transform:translateX(0) rotate(0)}25%{transform:translateX(-5px) rotate(-4deg)}75%{transform:translateX(5px) rotate(4deg)}}
+.tear1{animation:tfall 1.6s infinite}.tear2{animation:tfall 1.6s .5s infinite}
+@keyframes tfall{0%{opacity:0;transform:translateY(0)}30%{opacity:1}100%{opacity:0;transform:translateY(26px)}}
+</style><ellipse cx="100" cy="184" rx="46" ry="9" fill="#0e1330" opacity=".14"/>
+<circle cx="100" cy="100" r="88" fill="url(#gl)" opacity=".5"/>
+<g class="an">
+<circle cx="100" cy="98" r="66" fill="url(#fg)"/>
+<circle cx="80" cy="72" r="16" fill="#ffffff" opacity=".25"/>
+<path d="M60 86q12 10 24 0" stroke="#26202b" stroke-width="6" fill="none" stroke-linecap="round"/><path d="M116 86q12 10 24 0" stroke="#26202b" stroke-width="6" fill="none" stroke-linecap="round"/>
+<ellipse cx="100" cy="126" rx="17" ry="13" fill="#5b2020"/>
+<text x="146" y="52" font-size="26">💤</text><text x="164" y="34" font-size="18">💤</text>
+</g></svg>

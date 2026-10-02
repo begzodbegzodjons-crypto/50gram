@@ -62,11 +62,56 @@ const normPhone = (p: unknown) => {
 const USERNAME_RE = /^[a-zA-Z][a-zA-Z0-9_]{4,31}$/
 const USER_COLS = "id,phone,first_name,last_name,username,bio,avatar_ver,privacy_phone,privacy_last_seen,last_seen,prefs"
 const CHAT_COLS = "id,type,title,description,username,avatar_ver,owner_id,is_public,invite_hash,join_approval,permissions,settings,member_count,last_msg_at,created_at,pinned_id"
-const PREF_KEYS = new Set(["sounds", "vibrate", "preview", "autoload"])
+const PREF_KEYS = new Set(["sounds", "vibrate", "preview", "autoload", "stickerauto", "livealerts"])
 const DEF_PERMS = { send: 1, media: 1, stickers: 1, links: 1, polls: 1, invite: 1 }
 const DEF_SET = { signatures: 0, comments: 1, reactions: 1, protect: 0, slow: 0 }
 const MSG_KINDS = new Set(["text", "sticker", "gif", "photo", "video", "voice", "round", "file", "contact", "poll", "location"])
 const NOTIFY_CAP = 40
+
+// ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
+// coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
+const GIFTS: Record<string, number> = { star: 5, heart: 10, rose: 25, fire: 49, cake: 149, crown: 199, diamond: 499, rocket: 999 }
+const LEVELS = [
+  { n: "Yangi a'zo", e: "🌱", min: 0 },
+  { n: "Yulduz", e: "⭐", min: 500 },
+  { n: "Bronza", e: "🥉", min: 2000 },
+  { n: "Kumush", e: "🥈", min: 10000 },
+  { n: "Oltin", e: "🥇", min: 30000 },
+  { n: "Platina", e: "💠", min: 100000 },
+  { n: "Brilliant", e: "💎", min: 300000 },
+  { n: "Afsona", e: "👑", min: 1000000 },
+]
+function levelOf(earned: number) {
+  let i = 0
+  for (let k = 0; k < LEVELS.length; k++) if (earned >= LEVELS[k].min) i = k
+  const cur = LEVELS[i], nx = LEVELS[i + 1] || null
+  const pct = nx ? Math.min(100, Math.round(((earned - cur.min) / (nx.min - cur.min)) * 100)) : 100
+  return { i: i + 1, name: cur.n, emoji: cur.e, min: cur.min, next: nx ? nx.min : null, next_name: nx ? nx.n : null, pct }
+}
+async function walletOf(c: C, uid: number) {
+  await ensureSchema(c.db)
+  await c.db.run("INSERT IGNORE INTO wallets(user_id,coins,earned,spent,gifts_sent,gifts_recv,last_daily,updated_at) VALUES(?,500,0,0,0,0,0,?)", [uid, now()])
+  return await c.db.one("SELECT * FROM wallets WHERE user_id=?", [uid])
+}
+// Task 29 sxemasi: yangi jadvallar mavjud emas bo'lsa (migratsiya o'tmagan deploy) — o'z-o'zidan yaratadi.
+// Idempotent: har isolatda bir marta, har bayonot alohida try/catch (ayrimlari allaqachon bo'lsa xato emas).
+let t29ok = false
+async function ensureSchema(db: Db) {
+  if (t29ok) return
+  const stmts = [
+    "CREATE TABLE IF NOT EXISTS wallets (user_id BIGINT PRIMARY KEY, coins BIGINT NOT NULL DEFAULT 500, earned BIGINT NOT NULL DEFAULT 0, spent BIGINT NOT NULL DEFAULT 0, gifts_sent INT NOT NULL DEFAULT 0, gifts_recv INT NOT NULL DEFAULT 0, last_daily BIGINT NOT NULL DEFAULT 0, updated_at BIGINT NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_wallets_earned ON wallets (earned)",
+    "CREATE TABLE IF NOT EXISTS msg_comments (id BIGINT PRIMARY KEY, chat_id BIGINT NOT NULL, message_id BIGINT NOT NULL, user_id BIGINT NOT NULL, body VARCHAR(500) NOT NULL, created_at BIGINT NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_msg_comments_mid ON msg_comments (message_id)",
+    "CREATE INDEX IF NOT EXISTS idx_msg_comments_chat ON msg_comments (chat_id, created_at)",
+    "ALTER TABLE live_viewers ADD COLUMN rewarded INT NOT NULL DEFAULT 0",
+  ]
+  for (const s of stmts) { try { await db.run(s) } catch {} }
+  try {
+    await db.one("SELECT user_id FROM wallets LIMIT 1")
+    t29ok = true // so'rov o'tdi — jadval bor
+  } catch { t29ok = false }
+}
 
 // ------------------------- Realtime -------------------------
 async function notify(env: Env, uids: number[], ev: unknown) {
@@ -281,7 +326,8 @@ async function getUser(c: C) {
   const iBlocked = !!(await c.db.one("SELECT 1 AS x FROM blocks WHERE user_id=? AND blocked_id=?", [c.uid, id]))
   const live = await c.db.one("SELECT id FROM lives WHERE user_id=? AND ended_at=0 AND started_at>?", [id, now() - 12 * 3600000])
   const direct = await c.db.one("SELECT id FROM chats WHERE direct_key=?", [[c.uid, id].sort((a, b) => a - b).join(":")])
-  return json({ ...u, i_blocked: iBlocked, live_id: live?.id || null, chat_id: direct?.id || null })
+  const w = await c.db.one("SELECT earned FROM wallets WHERE user_id=?", [id]).catch(() => null) as any
+  return json({ ...u, lvl: levelOf(Number(w?.earned || 0)), i_blocked: iBlocked, live_id: live?.id || null, chat_id: direct?.id || null })
 }
 
 // ------------------------- Qidiruv -------------------------
@@ -672,10 +718,13 @@ async function enrich(c: C, msgs: any[]) {
   const rx = await c.db.q(`SELECT message_id, user_id, emoji FROM reactions WHERE message_id IN (${ph(ids)})`, ids)
   const polls = msgs.filter((m) => m.kind === "poll").map((m) => m.id)
   const votes = polls.length ? await c.db.q(`SELECT message_id, user_id, opt FROM poll_votes WHERE message_id IN (${ph(polls)})`, polls) : []
+  const cm = await c.db.q(`SELECT message_id, COUNT(*) AS cnt FROM msg_comments WHERE message_id IN (${ph(ids)}) GROUP BY message_id`).catch((): any[] => [])
+  const cmMap = new Map(cm.map((x) => [x.message_id, Number(x.cnt)]))
   for (const m of out) {
     const r: Record<string, number[]> = {}
     for (const x of rx) if (x.message_id === m.id) (r[x.emoji] ||= []).push(x.user_id)
     m.reactions = r
+    m.comment_count = cmMap.get(m.id) || 0
     if (m.kind === "poll") {
       const v: Record<number, number> = {}
       let mine = -1
@@ -1775,7 +1824,11 @@ async function listLives(c: C) {
     [now() - 12 * 3600000, ...ids, ...my],
   )
   const um = await usersByIds(c, rows.map((r) => r.user_id))
-  return json(rows.map((r) => ({ id: r.id, title: r.title, chat_id: r.chat_id, viewers: r.viewers, started_at: r.started_at, user: um.get(r.user_id) })))
+  // Efirchilar martabasi (coin darajalari) — ro'yxatda tega ko'rinsin
+  const hosts = rows.map((r) => r.user_id)
+  const wl = hosts.length ? await c.db.q(`SELECT user_id, earned FROM wallets WHERE user_id IN (${ph(hosts)})`, hosts).catch((): any[] => []) : []
+  const lv = new Map(wl.map((x) => [x.user_id, levelOf(Number(x.earned))]))
+  return json(rows.map((r) => ({ id: r.id, title: r.title, chat_id: r.chat_id, viewers: r.viewers, started_at: r.started_at, user: um.get(r.user_id) ? { ...um.get(r.user_id), lvl: lv.get(r.user_id) || levelOf(0) } : null })))
 }
 async function liveRow(c: C) {
   const l = await c.db.one("SELECT * FROM lives WHERE id=?", [+c.p.id])
@@ -1827,10 +1880,12 @@ async function joinLive(c: C) {
   const um = await usersByIds(c, [c.uid, l.user_id])
   const u = um.get(c.uid)
   const from = { id: c.uid, first_name: u.real_name }
+  // Efirchi martabasi (coin darajasi) — jonli efir yuqori panelida ko'rinsin
+  const hw = await c.db.one("SELECT earned FROM wallets WHERE user_id=?", [l.user_id]).catch(() => null) as any
   const evs: Promise<unknown>[] = [notify(c.env, [par.id], { type: "live_join", live_id: l.id, from, viewers: v, parent: true })]
   if (par.id !== l.user_id && !me) evs.push(notify(c.env, [l.user_id], { type: "live_join", live_id: l.id, from, viewers: v, parent: false }))
   c.wait(Promise.all(evs))
-  return json({ id: l.id, title: l.title, viewers: v, user: um.get(l.user_id), started_at: l.started_at, parent: par.id, depth })
+  return json({ id: l.id, title: l.title, viewers: v, user: um.get(l.user_id) ? { ...um.get(l.user_id), lvl: levelOf(Number(hw?.earned || 0)) } : null, started_at: l.started_at, parent: par.id, depth })
 }
 // Tomoshabin efirni olib bo'lgach, o'zi ham boshqalarga uzata oladi
 async function readyLive(c: C) {
@@ -1861,9 +1916,21 @@ async function liveComment(c: C) {
   const heart = !!c.b.heart
   if (!text && !heart) fail("Bo‘sh")
   const me = (await usersByIds(c, [c.uid])).get(c.uid)
+  // BALL YIG'ISH: efirdagi faollik uchun kichik mukofot — har tomoshabin bir efirda ko'pi bilan 20 marta
+  let rewarded = false
+  if (l.user_id !== c.uid && (heart || text.length > 1)) {
+    await walletOf(c, c.uid)
+    const v = await c.db.one("SELECT rewarded FROM live_viewers WHERE live_id=? AND user_id=?", [l.id, c.uid])
+    if (v && Number(v.rewarded) < 20) {
+      await c.db.run("UPDATE live_viewers SET rewarded=rewarded+1 WHERE live_id=? AND user_id=?", [l.id, c.uid])
+      const add = heart ? 1 : 2
+      await c.db.run("UPDATE wallets SET coins=coins+?, earned=earned+?, updated_at=? WHERE user_id=?", [add, add, now(), c.uid])
+      rewarded = true
+    }
+  }
   // Izoh faqat efirchiga boradi — u daraxt bo'ylab barcha tomoshabinlarga tarqatadi (server yuklanmaydi)
   c.wait(notify(c.env, [l.user_id], { type: "live_comment", live_id: l.id, from: { id: c.uid, first_name: me.real_name }, text, heart }))
-  return json({ ok: true })
+  return json({ ok: true, rewarded, host: l.user_id === c.uid })
 }
 async function endLive(c: C) {
   const l = await liveRow(c)
@@ -1881,6 +1948,97 @@ async function endLive(c: C) {
     ]))
   } catch { c.wait(notify(c.env, top, { type: "live_end", live_id: l.id })) }
   return json({ ok: true, viewers: Math.max(total, l.viewers) })
+}
+
+// ------------------------- Coin / Martaba endpointlari -------------------------
+async function getWallet(c: C) {
+  const w = await walletOf(c, c.uid)
+  const top = await c.db.q("SELECT user_id, earned, gifts_recv FROM wallets ORDER BY earned DESC LIMIT 15")
+  const best = top.filter((x) => Number(x.earned) > 0)
+  const um = await usersByIds(c, best.map((r) => r.user_id))
+  return json({
+    coins: Number(w.coins), earned: Number(w.earned), spent: Number(w.spent),
+    gifts_sent: Number(w.gifts_sent), gifts_recv: Number(w.gifts_recv),
+    level: levelOf(Number(w.earned)),
+    daily_left: Math.max(0, 20 * 3600000 - (now() - Number(w.last_daily))),
+    top: best.map((r, i) => ({ pos: i + 1, user: um.get(r.user_id) || null, earned: Number(r.earned), gifts: Number(r.gifts_recv) })),
+  })
+}
+async function dailyBonus(c: C) {
+  const w = await walletOf(c, c.uid)
+  const left = 20 * 3600000 - (now() - Number(w.last_daily))
+  if (left > 0) fail(`Kunlik bonus allaqachon olindi — ${Math.ceil(left / 3600000)} soatdan keyin yana olasiz`)
+  await c.db.run("UPDATE wallets SET coins=coins+100, last_daily=?, updated_at=? WHERE user_id=?", [now(), now(), c.uid])
+  const w2 = await c.db.one("SELECT coins, earned FROM wallets WHERE user_id=?", [c.uid])
+  return json({ ok: true, added: 100, coins: Number(w2?.coins || 0), level: levelOf(Number(w2?.earned || 0)) })
+}
+async function giftLive(c: C) {
+  const l = await liveRow(c)
+  const gid = str(c.b.gift, 24)
+  const n = Math.min(10, Math.max(1, +c.b.n || 1))
+  const price = GIFTS[gid]
+  if (!price) fail("Sovg‘a topilmadi")
+  if (l.user_id === c.uid) fail("O‘zingizga sovg‘a yubora olmaysiz")
+  const cost = price * n
+  await walletOf(c, c.uid)
+  await walletOf(c, l.user_id)
+  const mine = await c.db.one("SELECT coins FROM wallets WHERE user_id=?", [c.uid])
+  if (Number(mine?.coins || 0) < cost) fail("Coin yetarli emas — kunlik bonus oling yoki efirda izoh bilan ball to‘plang", 402)
+  await c.db.run("UPDATE wallets SET coins=coins-?, spent=spent+?, gifts_sent=gifts_sent+?, updated_at=? WHERE user_id=?", [cost, cost, n, now(), c.uid])
+  await c.db.run("UPDATE wallets SET coins=coins+?, earned=earned+?, gifts_recv=gifts_recv+?, updated_at=? WHERE user_id=?", [cost, cost, n, now(), l.user_id])
+  const hw = await c.db.one("SELECT coins, earned FROM wallets WHERE user_id=?", [l.user_id])
+  const um = await usersByIds(c, [c.uid])
+  const from = um.get(c.uid)
+  c.wait(notify(c.env, [l.user_id], { type: "live_gift", live_id: l.id, from: { id: c.uid, first_name: from?.real_name || "" }, gift: gid, n, cost, host_coins: Number(hw?.coins || 0) }))
+  const mw = await c.db.one("SELECT coins FROM wallets WHERE user_id=?", [c.uid])
+  return json({ ok: true, coins: Number(mw?.coins || 0), cost, host: { coins: Number(hw?.coins || 0), earned: Number(hw?.earned || 0) } })
+}
+
+// ------------------------- Kanal postlari izohlari -------------------------
+async function msgCommentsAllowed(c: C, mid: number) {
+  await ensureSchema(c.db)
+  const m = await c.db.one("SELECT * FROM messages WHERE id=?", [mid])
+  if (!m || m.deleted) fail("Xabar topilmadi", 404)
+  const ch = await needChat(c, m.chat_id)
+  if (ch.type !== "channel") fail("Izohlar faqat kanal postlarida")
+  if (!parse(ch.settings, DEF_SET).comments) fail("Bu kanalda izohlar o‘chirilgan")
+  const mem = await member(c, m.chat_id)
+  if (!mem || mem.status !== "active") fail("Izoh yozish uchun kanal a'zosi bo‘ling", 403)
+  return { m, ch }
+}
+async function listMsgComments(c: C) {
+  const { m, ch } = await msgCommentsAllowed(c, +c.p.id)
+  const mem = await member(c, m.chat_id)
+  const adm = isAdm(mem)
+  const rows = await c.db.q("SELECT * FROM msg_comments WHERE message_id=? ORDER BY id ASC LIMIT 200", [m.id])
+  const um = await usersByIds(c, rows.map((r) => r.user_id))
+  return json({
+    comments: rows.map((r) => ({ id: r.id, user_id: r.user_id, body: r.body, created_at: r.created_at, mine: r.user_id === c.uid, can_del: r.user_id === c.uid || adm })),
+    users: Object.fromEntries(um),
+    count: rows.length,
+    readonly: ch.type === "channel" && !isAdm(await member(c, m.chat_id)) && parse(ch.permissions, DEF_PERMS).send === 0 ? 0 : 1,
+  })
+}
+async function addMsgComment(c: C) {
+  const { m } = await msgCommentsAllowed(c, +c.p.id)
+  const body = str(c.b.text || c.b.body, 500)
+  if (!body) fail("Bo‘sh izoh")
+  const id = newId(), t = now()
+  await c.db.run("INSERT INTO msg_comments(id,chat_id,message_id,user_id,body,created_at) VALUES(?,?,?,?,?,?)", [id, m.chat_id, m.id, c.uid, body, t])
+  const um = await usersByIds(c, [c.uid])
+  const me = um.get(c.uid)
+  // Post muallifiga real vaqt bildirishnoma
+  c.wait(notify(c.env, [m.sender_id], { type: "comment", chat_id: m.chat_id, mid: m.id, from: me }))
+  return json({ ok: true, comment: { id, user_id: c.uid, body, created_at: t, mine: true, can_del: true }, users: Object.fromEntries(um) })
+}
+async function delMsgComment(c: C) {
+  const { m } = await msgCommentsAllowed(c, +c.p.id)
+  const row = await c.db.one("SELECT * FROM msg_comments WHERE id=?", [+c.p.cid])
+  if (!row || row.message_id !== m.id) fail("Izoh topilmadi", 404)
+  const mem = await member(c, m.chat_id)
+  if (row.user_id !== c.uid && !isAdm(mem)) fail("Faqat o‘z izohingizni o‘chirasiz", 403)
+  await c.db.run("DELETE FROM msg_comments WHERE id=?", [row.id])
+  return json({ ok: true })
 }
 
 // ------------------------- P2P tarmoq ("o'rgimchak to'ri") -------------------------
@@ -2163,7 +2321,13 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/lives/:id/leave", leaveLive],
   ["POST", "/lives/:id/ready", readyLive],
   ["POST", "/lives/:id/comment", liveComment],
+  ["POST", "/lives/:id/gift", giftLive],
   ["POST", "/lives/:id/end", endLive],
+  ["GET", "/wallet", getWallet],
+  ["POST", "/wallet/daily", dailyBonus],
+  ["GET", "/messages/:id/comments", listMsgComments],
+  ["POST", "/messages/:id/comments", addMsgComment],
+  ["DELETE", "/messages/:id/comments/:cid", delMsgComment],
 ]
 function match(method: string, path: string) {
   const parts = path.split("/").filter(Boolean)
@@ -2184,6 +2348,7 @@ function match(method: string, path: string) {
 
 async function cleanup(env: Env) {
   const db = env.__db || makeDb(env.DATABASE_URL)
+  try { await ensureSchema(db) } catch {}
   const t = now()
   // O'CHMAS TARIX: xabarlar, fayllar va istoriyalar faqat foydalanuvchi o'zi o'chirmaguncha saqlanadi.
   // Cron faqat texnik chiqindilarni tozalaydi (kodlar, pin joblar, P2P reyestri) — hech qanday yozishmani o'chirmaydi.

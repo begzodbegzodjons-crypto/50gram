@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><defs><linearGradient id="hg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f093fb"/><stop offset="1" stop-color="#f5576c"/></linearGradient><radialGradient id="gl" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffffff" stop-opacity=".85"/><stop offset="100%" stop-color="#ffffff" stop-opacity="0"/></radialGradient></defs><style>
+.an{transform-origin:100px 110px;animation:pulse}
+@keyframes beat{0%,100%{transform:scale(1)}14%{transform:scale(1.18)}28%{transform:scale(1)}42%{transform:scale(1.12)}56%{transform:scale(1)}}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.14)}}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes float{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-10px) rotate(3deg)}}
+</style><ellipse cx="100" cy="182" rx="44" ry="8" fill="#0e1330" opacity=".12"/><circle cx="100" cy="100" r="88" fill="url(#gl)" opacity=".5"/><g class="an"><path d="M100 168C60 132 32 108 32 76c0-22 18-38 38-38 14 0 24 8 30 18 6-10 16-18 30-18 20 0 38 16 38 38 0 32-28 56-68 92z" fill="url(#hg)"/><ellipse cx="66" cy="66" rx="14" ry="10" fill="#fff" opacity=".35" transform="rotate(-25 66 66)"/><rect x="84" y="96" width="32" height="26" rx="8" fill="#fff" opacity=".92"/><path d="M92 96v-6a8 8 0 0116 0v6" stroke="#f5576c" stroke-width="5" fill="none"/></g></svg>

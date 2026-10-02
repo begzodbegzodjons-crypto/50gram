@@ -420,6 +420,35 @@ function closeSheet(el) {
 const closeAllSheets = () => qsa('.shbg').forEach((b) => b.remove())
 const h3 = (t) => `<h3>${t}<button class="x">✕</button></h3>`
 
+// ---------------- To'liq ekran sahifalar (keng sozlamalar) ----------------
+// Telegram-uslubidagi ichma-ichim sahifalar: ochish → chapdan surib chiqadi, orqaga tugmasi bilan yopiladi
+function openPage(title, html, onmount) {
+  const p = document.createElement('div')
+  p.className = 'page'
+  p.innerHTML = `<header class="phead"><button class="ic tr pback" data-pback aria-label="Orqaga">‹</button><b>${esc(title)}</b><div class="sp"></div></header><div class="pbody">${html}</div>`
+  p.addEventListener('click', (e) => { if (e.target.closest('[data-pback]')) closePage(p) })
+  document.body.appendChild(p)
+  requestAnimationFrame(() => requestAnimationFrame(() => p.classList.add('in')))
+  if (onmount) onmount(p)
+  hydrate(p)
+  return p
+}
+function closePage(p) {
+  p = p || qsa('.page').pop()
+  if (!p) return
+  p.classList.remove('in')
+  setTimeout(() => p.remove(), 280)
+}
+const closeAllPages = () => qsa('.page').forEach((p) => p.remove())
+
+// Rangli ikonkali qator (Telegram/iOS Settings uslubi) — keng sozlamalar uchun
+const tile = (emoji, c1, c2) => `<span class="stile" style="background:linear-gradient(145deg,${c1},${c2})">${emoji}</span>`
+// Sahifa ichidagi qatorlar (pageRows) — .rows'dan foydalanadi
+const prow = (key, ticon, c1, c2, title, sub = '', extra = '') =>
+  `<div data-pg="${key}">${tile(ticon, c1, c2)}<div class="rt">${title}${sub ? `<small>${sub}</small>` : ''}</div>${extra || '<span class="rv">›</span>'}</div>`
+const psw = (key, ticon, c1, c2, title, sub = '', on = 0) =>
+  `<div data-psw="${key}">${tile(ticon, c1, c2)}<div class="rt">${title}${sub ? `<small>${sub}</small>` : ''}</div><span class="sw ${on ? 'on' : ''}"></span></div>`
+
 // ---------------- Kanal/guruh logotiplari (tayyor presetlar) ----------------
 const LOGOS = [
   ['📢', '#0A7CFF', '#00C2FF'], ['🔥', '#FF6A3D', '#C8102E'], ['⭐', '#F5A623', '#FF6A3D'],

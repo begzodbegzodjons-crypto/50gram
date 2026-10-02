@@ -15,6 +15,13 @@ const STICKERS = [
   ['👍', 'a-pop'], ['😡', 'a-shake'], ['🤔', 'a-flip'], ['💃', 'a-raqs'], ['🎉', 'a-spin'], ['😴', 'a-float'], ['🙈', 'a-shake'], ['🤗', 'a-pop'],
   ['🐱', 'a-jump'], ['🐶', 'a-wave'], ['🌟', 'a-spin'], ['🚀', 'a-float'], ['🌹', 'a-pop'], ['🍉', 'a-spin'], ['☕', 'a-float'], ['💪', 'a-pulse'],
 ]
+// Task 29: animatsiyali stiker paketlari (SVG fayllar — <img> ichida jonli harakatlanadi)
+const STICKER_PACKS = [
+  { id: 'mood', name: 'Kayfiyat', icon: '😀', c: '#FFB020', items: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => 'mood/' + i + '.svg') },
+  { id: 'love', name: 'Sevgi', icon: '💖', c: '#FF3B5C', items: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => 'love/' + i + '.svg') },
+  { id: 'party', name: 'Bayram', icon: '🎉', c: '#7C5CFF', items: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => 'party/' + i + '.svg') },
+]
+const STICKER_RECENT_KEY = 'g50_rec_stk'
 const GIFS = [
   { k: 'salom', bg: 'linear-gradient(135deg,#FFD86F,#FC6262)', e: '👋', a: 'a-wave', t: 'Salom!' },
   { k: 'kulgi', bg: 'linear-gradient(135deg,#a1c4fd,#c2e9fb)', e: '🤣', a: 'a-jump', t: 'Ha-ha-ha!' },
@@ -148,7 +155,9 @@ async function fetchMessages(id) {
     await loadChatLocal(id)
     // Tez ochilish: serverdagi eng oxirgi 80 xabar BITTA so'rovda (avval 10 so'rov ketardi)
     const locals = S.msgs.get(id) || []
-    if (!locals.some((m) => m.id > 0 && !m.p2p)) {
+    // KAMCHILIK TUZATISHI: lokal nusxa kam bo'lsa (yangi qurilma/tozalangan) ham to'liq yukla —
+    // aks holda eski qism ko'rinmay qolardi ("xabarlar o'chib qolgan" taassuroti)
+    if (locals.filter((m) => m.id > 0 && !m.p2p).length < 40) {
       const r = await api(`/chats/${id}/messages?latest=80`)
       merge(id, r.messages, r.users)
       S.since.set(id, r.now)
@@ -171,6 +180,7 @@ async function fetchMessages(id) {
     saveChatLocal(id)
     if (S.cur === id) renderMsgs()
   } catch (e) {
+    // KAMCHILIK TUZATISHI: tarmoq xatosida mavjud lokal xabarlarni o'chirmaymiz — ro'yxat "bo'shashib qolmasin"
     if (S.cur === id && !(S.msgs.get(id) || []).length) $('msgs').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`
   } finally { fetching.delete(id) }
 }
@@ -269,7 +279,9 @@ function msgHTML(m, c, prev, next) {
     case 'voice': body = voiceHTML(m); break
     case 'round': bare = true; body = `<div class="round" data-round><video ${src('')} playsinline loop preload="metadata"></video><span class="rd">${m.pending ? '⏳' : fmtDur(mt.dur || 0)}</span></div>`; break
     case 'file': body = `<div class="file" data-file="${mt.media_id || ''}" data-name="${esc(mt.name || 'fayl')}"><div class="fi">${m.pending ? '⏳' : '📄'}</div><div><b>${esc(mt.name || 'Fayl')}</b><small class="mut">${fmtSize(mt.fsize || mt.size || 0)}</small></div></div>${cap(m)}`; break
-    case 'sticker': bare = true; body = `<span class="stk ${esc(mt.a || '')}">${esc(mt.e || '🙂')}</span>`; break
+    case 'sticker': bare = true; body = mt.s
+      ? `<img class="stkimg" src="stickers/${esc(mt.s)}" alt="" loading="lazy">`
+      : `<span class="stk ${esc(mt.a || '')}">${esc(mt.e || '🙂')}</span>`; break
     case 'gif': bare = true; body = gifHTML(mt.g); break
     case 'contact': body = `<div class="ccard">${avHTML({ id: mt.user_id || 0, first_name: mt.name }, 44, { noStory: true })}<div><b>${esc(mt.name || '')}</b><small class="mut" style="display:block">${esc(mt.phone || '')}</small></div></div>${mt.user_id ? `<div class="cbtns"><button data-u="${mt.user_id}">Profil</button><button data-dm="${mt.user_id}">Xabar yozish</button></div>` : ''}`; break
     case 'location': body = `<a class="loc" href="https://maps.google.com/?q=${+mt.lat},${+mt.lng}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;display:block"><div class="map"><span>📍</span></div><b>Joylashuv</b><small class="mut" style="display:block">${(+mt.lat).toFixed(5)}, ${(+mt.lng).toFixed(5)}</small></a>`; break
@@ -288,8 +300,11 @@ function msgHTML(m, c, prev, next) {
   const meta = `<span class="meta">${m.p2p ? '<span title="Qurilmalar tarmog‘idan tiklangan">🕸</span>' : ''}${m.edited ? 'tahrirlandi ' : ''}${fmtTime(m.created_at)}${tick}</span>`
   const rx = m.reactions && Object.keys(m.reactions).length
     ? `<div class="rx">${Object.entries(m.reactions).map(([e, us]) => `<span data-rx="${esc(e)}" class="${us.includes(S.me.id) ? 'mine' : ''}">${esc(e)} ${us.length}</span>`).join('')}</div>` : ''
+  // Task 29: kanal postlarining izohlari — post ostida chiroyli tugma (izohlar soni bilan)
+  const cmt = c.type === 'channel' && m.id > 0 && !m.deleted
+    ? `<div class="cmtb" data-cmt="${m.id}"><i>💬</i><b>${m.comment_count ? m.comment_count + ' ta izoh' : 'Izoh qoldirish'}</b></div>` : ''
   const sig = c.type === 'channel' && c.settings?.signatures && u ? `<small class="mut" style="display:block">— ${esc(uname(u))}</small>` : ''
-  return `<div class="mrow ${me ? 'me' : ''}" data-mid="${m.id}" ${m.client_id ? `data-cid="${esc(m.client_id)}"` : ''}>${gav}<div class="m ${bare || emo ? 'bare' : ''} ${emo ? 'emo' : ''} ${sameNext ? '' : 'tail'}">${fwd}${sender}${rp}${body}${sig}${meta}${rx}</div></div>`
+  return `<div class="mrow ${me ? 'me' : ''}" data-mid="${m.id}" ${m.client_id ? `data-cid="${esc(m.client_id)}"` : ''}>${gav}<div class="m ${bare || emo ? 'bare' : ''} ${emo ? 'emo' : ''} ${sameNext ? '' : 'tail'}">${fwd}${sender}${rp}${body}${sig}${meta}${rx}${cmt}</div></div>`
 }
 const findMsg = (id) => (S.msgs.get(S.cur) || []).find((m) => String(m.id) === String(id))
 
@@ -312,6 +327,7 @@ $('msgs').addEventListener('click', async (e) => {
   const vc = t.closest('[data-voice]')
   if (vc && t.closest('.pb')) return playVoice(vc)
   const rx = t.closest('[data-rx]'); if (rx && m) return reactTo(m, rx.dataset.rx)
+  const cbtn = t.closest('[data-cmt]'); if (cbtn && m && m.id > 0) return openMsgComments(m)
   const vo = t.closest('[data-vote]')
   if (vo && m && m.id > 0) { try { merge(S.cur, [await post(`/messages/${m.id}/vote`, { opt: +vo.dataset.vote })]); renderMsgs(); saveChatLocal(S.cur) } catch (er) { toast('⚠️ ' + er.message) } return }
   const cb = t.closest('[data-callback]')
@@ -528,6 +544,13 @@ async function sendFile(file, kind, extra = {}, chatId0) {
   } catch (e) { dropTemp(chatId, temp); toast('⚠️ ' + e.message) }
 }
 const sendSticker = (e, a) => S.cur && sendRaw(S.cur, { kind: 'sticker', meta: withReply({ e, a }) }).catch(() => {})
+// Task 29: paket stikerini yuborish (animatsiyali SVG)
+const sendPack = (path) => {
+  if (!S.cur) return
+  const rec = [path, ...JSON.parse(localStorage.getItem(STICKER_RECENT_KEY) || '[]').filter((x) => x !== path)].slice(0, 12)
+  localStorage.setItem(STICKER_RECENT_KEY, JSON.stringify(rec))
+  return sendRaw(S.cur, { kind: 'sticker', meta: withReply({ s: path }) }).catch(() => {})
+}
 const sendGif = (g) => S.cur && sendRaw(S.cur, { kind: 'gif', meta: withReply({ g }) }).catch(() => {})
 
 // Matn maydoni
@@ -745,19 +768,28 @@ function pollSheet() {
 }
 
 // ---------------- Emoji / stiker / GIF paneli ----------------
-let pkTab = 'emoji'
+let pkTab = 'emoji', pkCur = 'mood'
 function renderPicker() {
   const p = $('picker')
   const recent = JSON.parse(localStorage.getItem('g50_recent_emoji') || '[]')
+  const recStk = JSON.parse(localStorage.getItem(STICKER_RECENT_KEY) || '[]')
   let body = ''
   if (pkTab === 'emoji') body = (recent.length ? `<div class="pk-cat">So‘nggi</div><div class="emg">${recent.map((e) => `<span data-e="${e}">${e}</span>`).join('')}</div>` : '') + Object.entries(EMOJI).map(([k, v]) => `<div class="pk-cat">${k}</div><div class="emg">${v.split(' ').map((e) => `<span data-e="${e}">${e}</span>`).join('')}</div>`).join('')
-  if (pkTab === 'stk') body = `<div class="stkg">${STICKERS.map(([e, a], i) => `<div data-s="${i}"><span class="${a}" style="display:inline-block">${e}</span></div>`).join('')}</div>`
+  if (pkTab === 'stk') {
+    const pk = STICKER_PACKS.find((x) => x.id === pkCur) || STICKER_PACKS[0]
+    body = `<div class="pk-packs">${STICKER_PACKS.map((x) => `<button data-pk="${x.id}" class="${x.id === pk.id ? 'on' : ''}" style="--pkc:${x.c}"><i>${x.icon}</i><span>${esc(x.name)}</span></button>`).join('')}</div>`
+      + (recStk.length ? `<div class="pk-cat">So‘nggi ishlatilgan</div><div class="stkg imgs">${recStk.map((s) => `<div data-sk="${esc(s)}"><img src="stickers/${esc(s)}" alt="" loading="lazy"></div>`).join('')}</div>` : '')
+      + `<div class="pk-cat">${esc(pk.icon)} ${esc(pk.name)} paketi — <b>${pk.items.length} ta jonli stiker</b></div><div class="stkg imgs">${pk.items.map((s) => `<div data-sk="${esc(s)}"><img src="stickers/${esc(s)}" alt="" loading="lazy"></div>`).join('')}</div>`
+      + `<div class="pk-cat">Klassik emoji-stikerlar</div><div class="stkg">${STICKERS.map(([e, a], i) => `<div data-s="${i}"><span class="${a}" style="display:inline-block">${e}</span></div>`).join('')}</div>`
+  }
   if (pkTab === 'gif') body = `<div class="gifg">${GIFS.map((g) => `<div data-g="${g.k}">${gifHTML(g.k)}</div>`).join('')}</div>`
   p.innerHTML = `<div class="pk-tabs"><div data-t="emoji" class="${pkTab === 'emoji' ? 'on' : ''}">😊 Emoji</div><div data-t="stk" class="${pkTab === 'stk' ? 'on' : ''}">🎈 Stiker</div><div data-t="gif" class="${pkTab === 'gif' ? 'on' : ''}">🎞 GIF</div></div><div class="pk-body">${body}</div>`
 }
 $('b-emoji').onclick = () => { const p = $('picker'); if (!p.classList.contains('on')) renderPicker(); p.classList.toggle('on') }
 $('picker').addEventListener('click', (e) => {
   const t = e.target.closest('[data-t]'); if (t) { pkTab = t.dataset.t; return renderPicker() }
+  const pk = e.target.closest('[data-pk]'); if (pk) { pkCur = pk.dataset.pk; return renderPicker() }
+  const sk = e.target.closest('[data-sk]'); if (sk) { $('picker').classList.remove('on'); return sendPack(sk.dataset.sk) }
   const em = e.target.closest('[data-e]')
   if (em) {
     const inp = $('inp'), s = inp.selectionStart ?? inp.value.length
@@ -772,6 +804,58 @@ $('picker').addEventListener('click', (e) => {
   const g = e.target.closest('[data-g]'); if (g) { $('picker').classList.remove('on'); return sendGif(g.dataset.g) }
 })
 $('msgs').addEventListener('pointerdown', () => $('picker').classList.remove('on'))
+
+// ---------------- Task 29: Kanal postlari izohlari ----------------
+async function openMsgComments(m) {
+  const sh = sheet(h3(`💬 Izohlar`)
+    + `<div id="cmt-list" class="cmt-list"><div class="spin"></div></div>`
+    + `<div class="cmt-in"><input id="cmt-t" class="inp" maxlength="500" placeholder="Izoh yozing…"><button class="yb asos" id="cmt-s">➤</button></div>`)
+  let data = null
+  const draw = () => {
+    const box = qs('#cmt-list', sh)
+    if (!data?.comments?.length) { box.innerHTML = '<div class="empty">Hali izoh yo‘q — birinchi bo‘ling! ✍️</div>'; return }
+    box.innerHTML = data.comments.map((k) => {
+      const u = (data.users || {})[k.user_id] || { first_name: 'Foydalanuvchi' }
+      return `<div class="cmtrow" data-cid="${k.id}">${avHTML(u, 36, { noStory: true })}<div class="mid"><div class="t1"><b data-u="${k.user_id}">${esc(uname(u))}</b><small>${fmtAgo(k.created_at)}</small></div><div class="t2">${linkify(k.body)}</div></div>${k.can_del ? '<button class="cdel" data-cdel="' + k.id + '">✕</button>' : ''}</div>`
+    }).join('')
+    hydrate(box)
+  }
+  try { data = await api(`/messages/${m.id}/comments`); draw() } catch (e) { qs('#cmt-list', sh).innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>` }
+  const send = async () => {
+    const inp = qs('#cmt-t', sh), text = inp.value.trim()
+    if (!text) return
+    inp.value = ''
+    try {
+      const r = await post(`/messages/${m.id}/comments`, { text })
+      data = data || { comments: [], users: {} }
+      data.comments.push(r.comment)
+      if (r.users) Object.assign(data.users, r.users)
+      S.users.set(r.comment.user_id, { ...S.users.get(r.comment.user_id), ...r.users[r.comment.user_id] })
+      draw()
+      // Postdagi hisoblagichni yangilash
+      m.comment_count = (m.comment_count || 0) + 1
+      renderMsgs()
+      qs('#cmt-list', sh).scrollTop = 99999
+    } catch (e) { toast('⚠️ ' + e.message) }
+  }
+  qs('#cmt-s', sh).onclick = send
+  qs('#cmt-t', sh).onkeydown = (e) => { if (e.key === 'Enter') send() }
+  sh.onclick = async (e) => {
+    const del = e.target.closest('[data-cdel]')
+    if (del) {
+      try {
+        await del('/messages/' + m.id + '/comments/' + del.dataset.cdel)
+        data.comments = data.comments.filter((k) => k.id !== +del.dataset.cdel)
+        m.comment_count = Math.max(0, (m.comment_count || 1) - 1)
+        draw(); renderMsgs()
+        toast('Izoh o‘chirildi')
+      } catch (er) { toast('⚠️ ' + er.message) }
+      return
+    }
+    const u = e.target.closest('.cmtrow [data-u]')
+    if (u) openUser(+u.dataset.u)
+  }
+}
 
 // ---------------- Foydalanuvchi profili ----------------
 async function openDirectWith(uid) {

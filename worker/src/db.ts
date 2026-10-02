@@ -12,6 +12,7 @@ const NUM = new Set([
   "mid", "uid", "keep", "gone", "dropped", "next_check", "replicas", "pinned", "quota", "used", "views", "pinned_id",
   "online_ms", "score", "first_beat", "last_beat", "jobs", "free", "kids", "depth", "ready", "host_kids", "parent_id", "parent",
   "imp", "clk", "wt", "upd",
+  "coins", "earned", "spent", "gifts_sent", "gifts_recv", "last_daily", "rewarded", "daily_left",
 ])
 
 function fix(row: Record<string, unknown>) {

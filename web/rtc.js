@@ -257,24 +257,111 @@ function ringTone(on) {
 // ---------------- Jonli efir ----------------
 // "O‘rgimchak to‘ri" daraxti: efirchi efirni 4 ta tomoshabinga uzatadi, har bir tomoshabin olgan efirini
 // yana 3 ta tomoshabinga uzatadi. Shu sababli tomoshabinlar soni cheklanmaydi (10 000 ta ~8 bosqich).
-// Izohlar, yuraklar va tomoshabinlar soni ham shu daraxt bo‘ylab (DataChannel) tarqaladi.
+// Izohlar, yuraklar, SOVG'ALAR va tomoshabinlar soni ham shu daraxt bo‘ylab (DataChannel) tarqaladi.
 let LIVE = null
+// Task 29: sovg'alar — coin iqtisodiyoti (serverdagi GIFTS narxlari bilan bir xil)
+const LIVE_GIFTS = [
+  { id: 'star', name: 'Yulduz', p: 5 }, { id: 'heart', name: 'Yurak', p: 10 },
+  { id: 'rose', name: 'Gul', p: 25 }, { id: 'fire', name: 'Olov', p: 49 },
+  { id: 'cake', name: 'Tort', p: 149 }, { id: 'crown', name: 'Toj', p: 199 },
+  { id: 'diamond', name: 'Olmos', p: 499 }, { id: 'rocket', name: 'Raketa', p: 999 },
+]
+const giftImg = (id) => 'stickers/gifts/' + id + '.svg'
+let WALLET = null
+async function refreshWallet() { try { WALLET = await api('/wallet') } catch {} return WALLET }
+// Efir TOP sovg‘achilari (shu efir davomi uchun)
+const LTOP = new Map()
+function liveTopAdd(name, cost) {
+  if (!LIVE || !cost) return
+  const k = name || '?'
+  LTOP.set(k, (LTOP.get(k) || 0) + cost)
+  const box = qs('#l-top', LIVE.el); if (!box) return
+  const arr = [...LTOP.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+  box.innerHTML = arr.map(([n, c], i) => `<span class="lt ${i === 0 ? 'l1' : ''}">${['🥇','🥈','🥉'][i] || ''} ${esc(n)} · ${c}</span>`).join('')
+}
+function ballFloat(el, txt) {
+  const f = document.createElement('div'); f.className = 'ballf'; f.textContent = txt + ' ball'
+  el.appendChild(f); setTimeout(() => f.remove(), 1500)
+}
+function heartBurst(el) {
+  for (let i = 0; i < 5; i++) {
+    const f = document.createElement('div'); f.className = 'fly'
+    f.textContent = '❤️'; f.style.left = (74 + Math.random() * 16) + '%'
+    f.style.animationDelay = (i * 0.12) + 's'
+    el.appendChild(f); setTimeout(() => f.remove(), 1900)
+  }
+}
+function flyGift(el, gid, name, from) {
+  if (!el) return
+  const f = document.createElement('div')
+  f.className = 'flygift'
+  f.innerHTML = `<img src="${giftImg(gid)}" alt=""><span><b>${esc(from || '')}</b>${esc(name || '')}</span>`
+  el.appendChild(f)
+  setTimeout(() => f.remove(), 3400)
+}
+async function updateGiftPanel(el) {
+  const bal = qs('#lg-bal', el), daily = qs('#lg-daily', el)
+  if (!bal) return
+  await refreshWallet()
+  if (WALLET) bal.innerHTML = `🪙 <b>${fmtN(WALLET.coins)}</b> coin`
+  if (daily && WALLET) {
+    const ready = WALLET.daily_left <= 0
+    daily.innerHTML = ready ? '<button class="btn gh" id="lg-db">🎁 Kunlik bonus olish: +100 coin</button>' : `<small class="mut">Kunlik bonus: ${Math.ceil(WALLET.daily_left / 3600000)} soatdan yana</small>`
+    const db = qs('#lg-db', daily)
+    if (db) db.onclick = async () => { try { const r = await post('/wallet/daily'); toast('🎉 +' + r.added + ' coin!'); await refreshWallet(); updateGiftPanel(el) } catch (e) { toast('⚠️ ' + e.message) } }
+  }
+}
 function liveUI(user, title, host) {
   const el = document.createElement('div')
-  el.className = 'over live'
+  el.className = 'over live v2'
   el.innerHTML = `<video class="lv" autoplay playsinline ${host ? 'muted' : ''}></video>
-    <div class="lhd">${avHTML(user, 36, { noStory: true })}<div><b>${esc(uname(user))}</b><small>${esc(title || 'Jonli efir')}</small></div><span class="lb">🔴 EFIR · <span class="lvc">0</span> 👁</span><button class="ic" data-lx>✕</button></div>
+    <div class="lhd"><div class="lh-u">${avHTML(user, 40, { noStory: true })}<div class="lh-t"><b>${esc(uname(user))}</b>${user.lvl ? `<span class="lvlbadge mini" style="background:linear-gradient(135deg,#a5d8ff,#4dabf7)">${user.lvl.emoji} ${esc(user.lvl.name)}</span>` : ''}</div></div><span class="lb">🔴 EFIR · <span class="lvc">0</span> 👁</span><button class="ic" data-lx>✕</button></div>
+    ${host ? '<div class="learn">🪙 <b id="l-coins">0</b> coin · <small>tomoshabinlar sovg‘alari</small></div>' : ''}
+    <div class="ltop" id="l-top"></div>
     ${host ? '' : '<div class="wait">⏳ Efirga ulanmoqda…</div>'}
     <div class="lcm"></div>
-    <div class="lbot"><input class="inp" maxlength="300" placeholder="Izoh yozing…"><button class="cb" data-lh>❤️</button>${host ? '<button class="cb" data-lf>🔄</button><button class="cb end" data-le>Tugatish</button>' : ''}</div>`
+    <div class="lrail">
+      <button class="rb" data-lh title="Yurak — +1 ball">❤️</button>
+      <button class="rb gift" data-lg title="Sovg‘a yuborish">🎁</button>
+    </div>
+    <div class="lbot"><input class="inp" maxlength="300" placeholder="Izoh yozing… +2 ball"><button class="cb" data-ls>➤</button>${host ? '<button class="cb" data-lf>🔄</button><button class="cb end" data-le>Tugatish</button>' : ''}</div>
+    <div class="lgift hide" id="l-gift">
+      <div class="lg-h"><b>🎁 Sovg‘a yuborish</b><span class="lg-bal" id="lg-bal">…</span><button class="ic" data-lgx>✕</button></div>
+      <div class="lg-daily" id="lg-daily"></div>
+      <div class="lg-grid">${LIVE_GIFTS.map((g) => `<button class="gcard" data-g="${g.id}"><img src="${giftImg(g.id)}" alt="" loading="lazy"><b>${g.name}</b><span>🪙 ${g.p}</span></button>`).join('')}</div>
+      <div class="hint">Sovg‘a coin bilan olinadi — efirchining balli va coin’i oshadi, ekraningizda chiroyli animatsiya uchadi!</div>
+    </div>`
   document.body.appendChild(el)
   const inp = qs('.lbot input', el)
-  const send = (text, heart) => LIVE && post(`/lives/${LIVE.id}/comment`, { text, heart }).catch((e) => toast('⚠️ ' + e.message))
+  const send = async (text, heart) => {
+    if (!LIVE) return
+    try {
+      const r = await post(`/lives/${LIVE.id}/comment`, { text, heart })
+      if (r && r.rewarded) ballFloat(el, heart ? '+1' : '+2')
+    } catch (e) { toast('⚠️ ' + e.message) }
+  }
   inp.onkeydown = (e) => { if (e.key === 'Enter' && inp.value.trim()) { send(inp.value.trim(), false); inp.value = '' } }
-  qs('[data-lh]', el).onclick = () => send('', true)
+  qs('[data-ls]', el).onclick = () => { if (inp.value.trim()) { send(inp.value.trim(), false); inp.value = '' } }
+  qs('[data-lh]', el).onclick = () => { send('', true); heartBurst(el) }
   qs('[data-lx]', el).onclick = () => (host ? endLive() : leaveLive())
   const le = qs('[data-le]', el); if (le) le.onclick = endLive
   const lf = qs('[data-lf]', el); if (lf) lf.onclick = liveFlip
+  // Sovg‘a paneli (TikTok-uslubi)
+  const gp = qs('#l-gift', el)
+  qs('[data-lg]', el).onclick = () => { gp.classList.toggle('hide'); if (!gp.classList.contains('hide')) updateGiftPanel(el) }
+  qs('[data-lgx]', el).onclick = () => gp.classList.add('hide')
+  gp.onclick = async (e) => {
+    const g = e.target.closest('[data-g]'); if (!g || !LIVE) return
+    const gi = LIVE_GIFTS.find((x) => x.id === g.dataset.g)
+    try {
+      const r = await post(`/lives/${LIVE.id}/gift`, { gift: gi.id, n: 1 })
+      gp.classList.add('hide')
+      flyGift(el, gi.id, gi.name, S.me.first_name)
+      if (WALLET) WALLET.coins = r.coins
+      toast(`🎁 ${gi.name} yuborildi — efirchi +${r.cost} ball oldi`)
+    } catch (e2) { toast('⚠️ ' + e2.message) }
+  }
+  if (host) refreshWallet().then(() => { const c = qs('#l-coins', el); if (c && WALLET) c.textContent = fmtN(WALLET.coins) })
   return el
 }
 function liveComment(name, text, heart) {
@@ -303,6 +390,7 @@ function liveMsg(m) {
   if (!LIVE || !m) return
   if (m.t === 'c') liveComment(m.n, m.x, m.h)
   if (m.t === 'n') liveSetCount(m.v)
+  if (m.t === 'g') { flyGift(LIVE.el, m.g, '×' + (m.gn || 1), m.n); liveTopAdd(m.n, m.cost || 0) }
   liveRelay(m)
   if (m.t === 'end') liveEnded()
 }
@@ -327,10 +415,11 @@ function limitBitrate(pc) {
 }
 function startLive(chatId = 0) {
   if (LIVE || CALL) return toast('Avval joriy efir/qo‘ng‘iroqni tugating')
+  LTOP.clear()
   const chans = [...S.chats.values()].filter((c) => c.type !== 'direct' && (c.role === 'owner' || c.role === 'admin'))
   const sh = sheet(h3('🔴 Jonli efir') + `<input class="inp" id="lv-t" maxlength="200" placeholder="Efir mavzusi">
     <label class="mut">Kimga ko‘rsatiladi</label><select class="inp" id="lv-c"><option value="0">👥 Kontaktlarim va suhbatdoshlarim</option>${chans.map((c) => `<option value="${c.id}" ${c.id === chatId ? 'selected' : ''}>${c.type === 'channel' ? '📢' : '👥'} ${esc(c.title)}</option>`).join('')}</select>
-    <div class="hint">Tomoshabinlar soni cheklanmagan: har bir tomoshabin efirni keyingi tomoshabinlarga uzatadi (o‘rgimchak to‘ri).</div><button class="btn big" id="lv-s">Efirni boshlash</button>`)
+    <div class="hint">Tomoshabinlar soni cheklanmagan (o‘rgimchak to‘ri). Ular izoh/yurak bilan <b>ball yig‘adi</b>, sovg‘a yuborsa — sizga <b>coin</b> va <b>martaba</b> qo‘shiladi. 🎁</div><button class="btn big" id="lv-s">Efirni boshlash</button>`)
   qs('#lv-s', sh).onclick = async () => {
     const title = qs('#lv-t', sh).value.trim(), cid = +qs('#lv-c', sh).value
     closeSheet(sh)
@@ -378,6 +467,7 @@ function armRetry(L) {
 }
 async function watchLive(id) {
   if (LIVE) { if (LIVE.id === id) return; if (LIVE.host) return toast('Avval efiringizni tugating'); await leaveLive() }
+  LTOP.clear()
   try {
     const r = await post(`/lives/${id}/join`)
     LIVE = { id, host: false, hostId: r.user.id, parentId: r.parent, ice: [], kids: new Map(), stream: new MediaStream(), viewers: r.viewers, tries: 0 }
@@ -488,6 +578,14 @@ on('live_comment', (ev) => {
   const L = LIVE; if (!L?.host || L.id !== ev.live_id) return
   liveComment(ev.from.first_name, ev.text, ev.heart)
   liveRelay({ t: 'c', n: ev.from.first_name, x: ev.text, h: ev.heart })
+})
+on('live_gift', (ev) => {
+  const L = LIVE; if (!L || !L.host || L.id !== ev.live_id) return
+  flyGift(L.el, ev.gift, '×' + (ev.n || 1), ev.from?.first_name)
+  liveTopAdd(ev.from?.first_name, ev.cost || 0)
+  const c = qs('#l-coins', L.el); if (c) c.textContent = fmtN(ev.host_coins || 0)
+  // Barcha tomoshabinlarga ham ko‘rinsin — daraxt bo‘ylab
+  liveRelay({ t: 'g', n: ev.from?.first_name, g: ev.gift, gn: ev.n, cost: ev.cost })
 })
 on('live_end', (ev) => { if (LIVE && LIVE.id === ev.live_id && !LIVE.host) { liveRelay({ t: 'end' }); liveEnded() } })
 window.addEventListener('beforeunload', () => { if (CALL) endCall('ended', true); if (LIVE && !LIVE.host) fetch(`${API}/lives/${LIVE.id}/leave`, { method: 'POST', keepalive: true, headers: { authorization: 'Bearer ' + S.token } }) })

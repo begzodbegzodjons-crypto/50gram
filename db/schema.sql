@@ -280,3 +280,32 @@ CREATE TABLE IF NOT EXISTS push_subs (
 );
 CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subs (user_id);
 CREATE INDEX IF NOT EXISTS idx_push_subs_upd ON push_subs (updated_at);
+
+-- ============================================================
+-- Task 29: Coin/Martaba iqtisodiyoti + Kanal izohlari
+-- ============================================================
+
+-- Hamyon: coin (sarflanadigan) + earned (umumiy yig'ilgan ball — martaba, kamaymaydi)
+CREATE TABLE IF NOT EXISTS wallets (
+  user_id BIGINT PRIMARY KEY,
+  coins BIGINT NOT NULL DEFAULT 500,       -- boshlang'ich sovg'a: 500 coin
+  earned BIGINT NOT NULL DEFAULT 0,
+  spent BIGINT NOT NULL DEFAULT 0,
+  gifts_sent INT NOT NULL DEFAULT 0,
+  gifts_recv INT NOT NULL DEFAULT 0,
+  last_daily BIGINT NOT NULL DEFAULT 0,    -- kunlik +100 bonus vaqti
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wallets_earned ON wallets (earned);
+
+-- Kanal postlarining izohlari (a'zolar admin postiga izoh yozadi)
+CREATE TABLE IF NOT EXISTS msg_comments (
+  id BIGINT PRIMARY KEY,
+  chat_id BIGINT NOT NULL,
+  message_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  body VARCHAR(500) NOT NULL,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_msg_comments_mid ON msg_comments (message_id);
+CREATE INDEX IF NOT EXISTS idx_msg_comments_chat ON msg_comments (chat_id, created_at);

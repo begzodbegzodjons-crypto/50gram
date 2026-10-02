@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><defs></defs><style>
+.an{animation:wob 2.2s infinite;transform-origin:100px 170px}
+@keyframes wob{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
+.fl{animation:flick .5s infinite alternate;transform-origin:100px 78px}
+@keyframes flick{from{transform:scale(1) rotate(-3deg)}to{transform:scale(1.15) rotate(3deg)}}
+</style><ellipse cx="100" cy="182" rx="50" ry="8" fill="#0e1330" opacity=".12"/><g class="an"><rect x="40" y="118" width="120" height="52" rx="12" fill="#ff6b81"/><rect x="40" y="138" width="120" height="12" fill="#fff" opacity=".55"/><path d="M40 120q30 22 60 0q30 22 60 0v-8a10 10 0 00-10-10H50a10 10 0 00-10 10z" fill="#fff8f0"/><rect x="94" y="78" width="12" height="32" rx="6" fill="#4dd0e1"/><g class="fl"><ellipse cx="100" cy="66" rx="8" ry="13" fill="#ffd93d"/><ellipse cx="100" cy="70" rx="4" ry="7" fill="#ff9f0a"/></g></g></svg>
