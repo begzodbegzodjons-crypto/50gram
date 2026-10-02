@@ -1204,30 +1204,37 @@ async function fT(url: string, ms: number, cacheTtl = 600): Promise<Response | n
     return r.ok ? r : null
   } catch { return null }
 }
+async function pipedMap(base: string, region: string, pass: number): Promise<any[]> {
+  const r = await fT(base + "/trending?region=" + region, 8000)
+  if (!r) return []
+  try {
+    const j: any = await r.json()
+    const list = Array.isArray(j) ? j : j.items || []
+    return (list || []).map((v: any) => {
+      const id = String(v.url || "").split("v=")[1]
+      if (!id) return null
+      return {
+        kind: "video", vid: "yt", yt: id.split("&")[0],
+        title: String(v.title || ""), image: String(v.thumbnail || ""),
+        views: +v.views || 0, duration: +v.duration || 0,
+        time: +v.uploaded > 0 ? +v.uploaded : now(),
+        url: "https://www.youtube.com/watch?v=" + id.split("&")[0], cat: "video",
+      }
+    }).filter((v: any) => v && v.title)
+  } catch { return [] }
+}
 async function youtubeTrending(): Promise<any[]> {
-  // 1) Piped instance'lar (2 urinish: vaqtincha sekinlik bo'lishi mumkin)
+  // Piped: US + TR parallel, 2 pass (vaqtincha sekinlik bo'lishi mumkin). duration=-1 = LIVE — ular ham qo'shiladi.
   for (let pass = 0; pass < 2; pass++) {
-    for (const base of PIPED_APIS) {
-      const r = await fT(base + "/trending?region=US", 8000)
-      if (!r) continue
-      try {
-        const j: any = await r.json()
-        const list = Array.isArray(j) ? j : j.items || []
-        const out = (list || []).map((v: any) => {
-          const id = String(v.url || "").split("v=")[1]
-          if (!id) return null
-          return {
-            kind: "video", vid: "yt", yt: id.split("&")[0],
-            title: String(v.title || ""), image: String(v.thumbnail || ""),
-            views: +v.views || 0, duration: +v.duration || 0,
-            time: +v.uploaded > 0 ? +v.uploaded : now(),
-            url: "https://www.youtube.com/watch?v=" + id.split("&")[0], cat: "video",
-          }
-        }).filter((v: any) => v && v.title)
-        if (out.length >= 5) return out
-      } catch {}
+    const res = await Promise.allSettled(PIPED_APIS.flatMap((b) => [pipedMap(b, "US", pass), pipedMap(b, "TR", pass)]))
+    const merged: any[] = []
+    const seen = new Set<string>()
+    for (const r of res) {
+      if (r.status !== "fulfilled") continue
+      for (const v of r.value) { if (v && !seen.has(v.yt)) { seen.add(v.yt); merged.push(v) } }
     }
-    if (pass === 0) await new Promise((res) => setTimeout(res, 400))
+    if (merged.length >= 5) return merged
+    if (pass === 0) await new Promise((res2) => setTimeout(res2, 400))
   }
   // 3) Invidious instance'lar
   for (const base of INVID_APIS) {
@@ -1251,22 +1258,24 @@ async function youtubeTrending(): Promise<any[]> {
 // Reddit (403: serverdan bloklangan) va TikTok (O'zbekistonda VPN'siz ishlamaydi) manbalari olib tashlandi.
 // --- Yagona video hovuzi (edge-kesh 10 daq): Shorts + uzun videolar ---
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  const ck = "https://trend.50gram.internal/poolv4"
+  const ck = "https://trend.50gram.internal/poolv5"
   try {
     const hit = await caches.default.match(ck)
     if (hit) return await hit.json()
   } catch {}
   const [yt, dmLong, dmS] = await Promise.all([youtubeTrending(), dailymotion(1), dmShorts()])
-  // Live streamlar (dur<0) chiqariladi; dur 1..90 — Shorts, qolgani uzun videolar
-  const ytShorts = yt.filter((v: any) => v.duration > 0 && v.duration <= 90)
-  const ytLong = yt.filter((v: any) => v.duration > 90 || v.duration === 0)
-  // YouTube birinchi o'rinda (O'zbekistonda ishonchli ijro etiladi), Dailymotion 1:1 aralashtiriladi
+  // YT: dur 1..90 — Shorts; dur=-1 — LIVE (embed'da yaxshi ijro etiladi, kind='short'); qolgani uzun videolar
+  const ytShorts = yt.filter((v: any) => v.duration >= 1 && v.duration <= 90)
+  const ytLive = yt.filter((v: any) => v.duration < 0).map((v: any) => ({ ...v, kind: "short", live: true, duration: 0 }))
+  const ytLong = yt.filter((v: any) => v.duration > 90)
+  // Shorts: YouTube (shorts+live) birinchi o'rinda (O'zbekistonda ishonchli), Dailymotion 1:1 aralashtiriladi
   ytShorts.sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
+  const ytMix = [...ytShorts, ...ytLive]
   const shorts: any[] = []
   let yi = 0, di = 0
-  while (yi < ytShorts.length || di < dmS.length) {
-    if (yi < ytShorts.length) shorts.push(ytShorts[yi++])
-    if (yi < ytShorts.length) shorts.push(ytShorts[yi++])
+  while (yi < ytMix.length || di < dmS.length) {
+    if (yi < ytMix.length) shorts.push(ytMix[yi++])
+    if (yi < ytMix.length) shorts.push(ytMix[yi++])
     if (di < dmS.length) shorts.push(dmS[di++])
   }
   const vids = [...ytLong, ...dmLong]
@@ -1444,7 +1453,7 @@ async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  const cacheKey = "https://trend.50gram.internal/t9?p=" + page + "&cat=" + onlyCat
+  const cacheKey = "https://trend.50gram.internal/t10?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
