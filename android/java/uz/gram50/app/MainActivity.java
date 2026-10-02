@@ -28,10 +28,13 @@ import android.widget.TextView;
 import org.json.JSONObject;
 
 /**
- * 50 Gram — native Android ilova (v2.1, professional).
+ * 50 Gram — native Android ilova (v2.2, professional).
  * - To'liq ekran splash (logotip bilan) — sahifa yuklanguncha brend ko'rinadi
  * - Qo'ng'iroqlar: JS bridge (Android50) — fonida ham to'liq ekran javob oynasi
  * - Kamera/mikrofon, fayl tanlash, fonda ishlash — hammasi brauzer cheklovisiz
+ * - v2.2: ruxsatlar oqimi tubdan tuzatildi — ayrim telefonlarda (MIUI/ColorOS/OneUI)
+ *   kamera/mikrofon oynasi umuman chiqmasdi: onPermissionRequest endi OS darajasidagi
+ *   ruxsatni tekshirib, haqiqiy Android oynasini chiqaradi + "Sozlamalar" zaxirasi
  */
 public class MainActivity extends Activity {
 
@@ -44,6 +47,7 @@ public class MainActivity extends Activity {
   FrameLayout root;
   View splash;
   ValueCallback<Uri[]> fileCb;
+  volatile PermissionRequest pendingWebReq; // OS ruxsat javobi kutilayotgan web so'rovi
   final Handler main = new Handler(Looper.getMainLooper());
 
   /** JS <-> Native ko'prik: qo'ng'iroqlar fon rejimida native oyna ko'rsatadi */
@@ -65,7 +69,15 @@ public class MainActivity extends Activity {
     }
 
     @JavascriptInterface
-    public String version() { return "2.1"; }
+    public String version() { return "2.2"; }
+
+    /** Web tomondan ruxsatlarni ataylab so'rash (masalan qo'ng'iroq tugmasi bosilganda). */
+    @JavascriptInterface
+    public void ensurePerms() {
+      runOnUiThread(new Runnable() {
+        @Override public void run() { ensureOsMediaPerms(null); }
+      });
+    }
   }
 
   @Override
@@ -91,7 +103,7 @@ public class MainActivity extends Activity {
     s.setCacheMode(WebSettings.LOAD_DEFAULT);
     s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     s.setJavaScriptCanOpenWindowsAutomatically(true);
-    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.1");
+    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.2");
     web.addJavascriptInterface(new Bridge(), "Android50");
 
     web.setWebViewClient(new WebViewClient() {
@@ -110,11 +122,13 @@ public class MainActivity extends Activity {
     });
 
     web.setWebChromeClient(new WebChromeClient() {
-      // Kamera/mikrofon — qo'ng'iroqlar va jonli efir uchun brauzer cheklovisiz
+      // Kamera/mikrofon: avval ANDROID TIZIM ruxsatini tekshiramiz. Ruxsat berilgan
+      // bo'lsa web so'rovini darhol qo'ydamiz; berilmagan bo'lsa HAQIQIY Android ruxsat
+      // oynasini chiqaramiz (request.grant() ruxsatsiz holda jim ishlamay qolardi).
       @Override
       public void onPermissionRequest(final PermissionRequest request) {
         runOnUiThread(new Runnable() {
-          @Override public void run() { request.grant(request.getResources()); }
+          @Override public void run() { handleWebPermRequest(request); }
         });
       }
 
@@ -137,13 +151,12 @@ public class MainActivity extends Activity {
     if (Build.VERSION.SDK_INT >= 33) {
       requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
     }
-    // Kamera va mikrofon — qo'ng'iroqlar birinchi ochilishdan ishlashi uchun
-    if (Build.VERSION.SDK_INT >= 23) {
-      if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
-          || checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-        requestPermissions(new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO}, MEDIA_REQ);
-      }
-    }
+    // Kamera/mikrofonni OLDINDAN so'rash — lekin 1.2s KECHIKTIRIB: ayrim ROM'lar
+    // (MIUI, ColorOS, OneUI) onCreate ichidagi oynani yutib yuboradi. Kechiktirilgan
+    // so'rov ishonchli ko'rinadi va ilova tizim ruxsatlar ro'yxatida ko'rina boshlaydi.
+    main.postDelayed(new Runnable() {
+      @Override public void run() { if (web != null) ensureOsMediaPerms(null); }
+    }, 1200);
 
     // SPLASH: logotip bilan to'liq ekran — sahifa tayyor bo'lgach silliq yo'qoladi
     splash = makeSplash();
@@ -241,10 +254,100 @@ public class MainActivity extends Activity {
     });
   }
 
+  // ---------------- RUXSATLAR (kamera/mikrofon) — v2.2 tuzatish ----------------
+
+  /** OS darajasida ruxsat berilganmi? */
+  boolean osPermGranted(String p) {
+    return Build.VERSION.SDK_INT < 23
+        || checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED;
+  }
+
+  /** OS darajasida kamera/mikrofon yetishmasa haqiqiy tizim oynasini chiqaradi.
+   *  done — javob kelganda qo'yiladigan web so'rovi (null bo'lishi mumkin). */
+  void ensureOsMediaPerms(final PermissionRequest done) {
+    if (Build.VERSION.SDK_INT < 23) {
+      if (done != null) { try { done.grant(done.getResources()); } catch (Exception ignored) { } }
+      return;
+    }
+    boolean needCam = !osPermGranted(Manifest.permission.CAMERA);
+    boolean needMic = !osPermGranted(Manifest.permission.RECORD_AUDIO);
+    if (!needCam && !needMic) {
+      if (done != null) { try { done.grant(done.getResources()); } catch (Exception ignored) { } }
+      return;
+    }
+    if (done != null) {
+      // kutayotgan boshqa so'rov bo'lsa — tozalaymiz (sahifa qayta so'raydi)
+      if (pendingWebReq != null) { try { pendingWebReq.deny(); } catch (Exception ignored) { } }
+      pendingWebReq = done;
+    }
+    java.util.List<String> need = new java.util.ArrayList<>();
+    if (needCam) need.add(Manifest.permission.CAMERA);
+    if (needMic) need.add(Manifest.permission.RECORD_AUDIO);
+    try {
+      requestPermissions(need.toArray(new String[0]), MEDIA_REQ);
+    } catch (Exception e) {
+      pendingWebReq = null;
+      if (done != null) { try { done.deny(); } catch (Exception ignored) { } }
+    }
+  }
+
+  /** Web (getUserMedia) so'rovini OS ruxsatlari bilan moslaydi. */
+  void handleWebPermRequest(final PermissionRequest request) {
+    boolean needCam = false, needMic = false;
+    for (String r : request.getResources()) {
+      if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r)) needCam = true;
+      if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r)) needMic = true;
+    }
+    boolean camOk = !needCam || osPermGranted(Manifest.permission.CAMERA);
+    boolean micOk = !needMic || osPermGranted(Manifest.permission.RECORD_AUDIO);
+    if (camOk && micOk) {
+      try { request.grant(request.getResources()); } catch (Exception ignored) { }
+      return;
+    }
+    // OS ruxsati yetishmaydi — haqiqiy tizim oynasi chiqadi, javob kelgach qo'yiladi
+    ensureOsMediaPerms(request);
+  }
+
+  /** "Boshqa so'ramaslik" bosilgan bo'lsa — ilova sozlamalariga olib boruvchi oyna. */
+  void openAppSettingsDialog() {
+    try {
+      new android.app.AlertDialog.Builder(this)
+          .setTitle("Ruxsat kerak")
+          .setMessage("Video qo'ng'iroqlar, ovozli xabarlar va jonli efir uchun Kamera va Mikrofon ruxsati kerak. Sozlamalarda yoqib bering.")
+          .setPositiveButton("Sozlamalarga o'tish", new android.content.DialogInterface.OnClickListener() {
+            @Override public void onClick(android.content.DialogInterface d, int w) {
+              try {
+                startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + getPackageName())));
+              } catch (Exception ignored) { }
+            }
+          })
+          .setNegativeButton("Keyinroq", null)
+          .show();
+    } catch (Exception ignored) { }
+  }
+
   @Override
   public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
     super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-    // Rad etilsa ham ilova ishlaydi — keyin qo'ng'iroqda WebView o'zi qayta so'raydi
+    if (requestCode != MEDIA_REQ) return; // POST_NOTIFICATIONS (code 1) o'z oqimida
+    boolean allGranted = true;
+    boolean permanent = false;
+    for (int i = 0; i < permissions.length; i++) {
+      if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
+        allGranted = false;
+        // Rad etishdan keyin rationale ko'rinmasa — "boshqa so'ramaslik" tanlangan
+        if (!shouldShowRequestPermissionRationale(permissions[i])) permanent = true;
+      }
+    }
+    final PermissionRequest pr = pendingWebReq;
+    pendingWebReq = null;
+    if (pr != null) {
+      try {
+        if (allGranted) pr.grant(pr.getResources()); else pr.deny();
+      } catch (Exception ignored) { }
+    }
+    if (!allGranted && permanent) openAppSettingsDialog();
   }
 
   @Override
