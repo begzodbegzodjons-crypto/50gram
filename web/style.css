@@ -30,12 +30,14 @@ input,textarea,select{font:inherit;color:var(--matn)}
 .mut{color:var(--xira);font-size:13.5px}
 .sp{flex:1}
 a{color:var(--asos)}
-#app{position:fixed;inset:0;display:flex;max-width:1400px;margin:0 auto;background:var(--fon)}
+#app{position:fixed;inset:0;display:flex;background:var(--fon)}
 .scr{position:relative;height:100%}
 
 /* ---------- AUTH — aurora fon + shisha karta ---------- */
-#auth{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--fon);overflow:hidden}
-#auth::before,#auth::after{content:"";position:absolute;border-radius:50%;filter:blur(70px);opacity:.55;pointer-events:none;animation:aurora 14s ease-in-out infinite alternate}
+#auth{flex:1;display:flex;padding:24px;background:var(--fon);overflow-y:auto;overflow-x:hidden}
+.auth-hero{position:relative;z-index:1;margin:auto;width:100%;display:flex;align-items:center;justify-content:center}
+.auth-brand{display:none}
+#auth::before,#auth::after{content:"";position:fixed;border-radius:50%;filter:blur(70px);opacity:.55;pointer-events:none;animation:aurora 14s ease-in-out infinite alternate}
 #auth::before{width:520px;height:520px;left:-140px;top:-160px;background:radial-gradient(circle at 35% 35%,#7CC0FF,#2E7BFF 62%,transparent 72%)}
 #auth::after{width:560px;height:560px;right:-160px;bottom:-180px;background:radial-gradient(circle at 60% 55%,#C9B3FF,#7C5CFF 60%,transparent 72%);animation-delay:-7s}
 @keyframes aurora{0%{transform:translate(0,0) scale(1)}50%{transform:translate(40px,26px) scale(1.12)}100%{transform:translate(-26px,40px) scale(.95)}}
@@ -449,20 +451,47 @@ body.dark .chead{background:rgba(16,23,42,.86);box-shadow:0 1px 0 rgba(255,255,2
   html,body{max-width:100vw;overflow-x:hidden}
   #app{width:100%;max-width:100%;left:0;right:0;margin:0}
   #auth{padding:16px}
+  .auth-hero{min-height:100%}
   .auth-box{max-width:min(390px,100%)}
   .dlg{width:100%;max-width:100%}
   .top{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
 }
 
+/* ---------- DESKTOP: AUTH HERO — brauzerni to'liq egallaydi ---------- */
+@media (min-width:900px){
+  .auth-hero{gap:clamp(28px,6vw,96px);max-width:1240px}
+  .auth-brand{display:flex;flex-direction:column;align-items:flex-start;text-align:left;flex:1 1 380px;min-width:0;max-width:470px;animation:fadein .5s ease}
+  .brand-logo{height:92px;margin:0 0 20px;filter:drop-shadow(0 16px 36px rgba(46,123,255,.42))}
+  .auth-brand h1{margin:0 0 12px;font-size:clamp(40px,4.2vw,56px);font-weight:900;letter-spacing:-1.6px;line-height:1.02;color:var(--asos);background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .brand-tag{margin:0 0 28px;font-size:17px;line-height:1.6;color:var(--xira);max-width:440px}
+  .brand-feats{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%}
+  .bf{background:rgba(255,255,255,.66);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.85);border-radius:18px;padding:14px 15px;box-shadow:var(--soya)}
+  .bf i{font-style:normal;font-size:21px;display:block;margin-bottom:6px}
+  .bf b{display:block;font-size:14.5px;letter-spacing:-.2px}
+  .bf span{display:block;margin-top:3px;font-size:12.5px;line-height:1.45;color:var(--xira)}
+  body.dark .bf{background:rgba(20,28,49,.62);border-color:rgba(255,255,255,.08)}
+  .auth-box{flex:0 1 440px;max-width:440px;padding:36px 30px}
+  .auth-box .logo{display:none}
+  .step h2{font-size:24px}
+}
+
 /* ---------- DESKTOP ---------- */
 @media (min-width:900px) and (pointer:fine){
-  #main{width:400px;flex-shrink:0;border-right:1px solid var(--chiziq)}
+  #main{width:clamp(360px,30vw,520px);flex-shrink:0;border-right:1px solid var(--chiziq)}
   .dlg{position:relative;inset:auto;flex:1;transform:none;visibility:visible;transition:none}
   .dlg:not(.open)>*:not(.nochat){display:none!important}
   .dlg:not(.open) .nochat{display:flex}
   #d-back{display:none}
   .shbg{align-items:center}
   .sheet{border-radius:28px;max-height:86vh}
+}
+
+/* ---------- KENG EKRANLAR: xabarlar ustuni markazda ---------- */
+@media (min-width:1400px) and (pointer:fine){
+  .msgs{padding-left:calc(50% - 400px);padding-right:calc(50% - 400px)}
+  .yoz{padding-left:calc(50% - 412px);padding-right:calc(50% - 412px)}
+  .replybar,.pinbar{padding-left:calc(50% - 412px);padding-right:calc(50% - 412px)}
+  .m{max-width:min(72%,560px)}
 }
 
 /* ---------- Qadalgan xabar paneli ---------- */
