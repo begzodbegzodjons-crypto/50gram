@@ -12,13 +12,23 @@ const S = {
   chats: new Map(), contacts: [], stories: [], lives: [], users: new Map(),
   cur: null, msgs: new Map(), since: new Map(), typing: new Map(),
   ws: null, wsOk: false, serverNow: 0, handlers: {}, tab: 't-chats', sha: new Map(), mk: new Map(),
-  prefs: { sounds: 1, vibrate: 1, preview: 1, autoload: 1, ...JSON.parse(localStorage.getItem('g50_prefs') || '{}') },
+  prefs: { sounds: 1, vibrate: 1, preview: 1, autoload: 1, push: 1, ...JSON.parse(localStorage.getItem('g50_prefs') || '{}') },
 }
 // Sozlamalar: lokal + serverga sinxron (barcha qurilmalarda bir xil)
 function savePrefs(patch, sync = true) {
   S.prefs = { ...S.prefs, ...patch }
   localStorage.setItem('g50_prefs', JSON.stringify(S.prefs))
   if (sync && S.token) patch('/me', { prefs: S.prefs }).catch(() => {})
+  sendPrefsToSW()
+}
+// Service worker'ga push sozlamalarini yetkazish (bildirishnomada matn/tovush boshqaruvi uchun)
+function sendPrefsToSW() {
+  try {
+    if (!('serviceWorker' in navigator)) return
+    const p = { push: S.prefs.push !== 0, preview: S.prefs.preview !== 0, sounds: S.prefs.sounds !== 0 }
+    navigator.serviceWorker.ready.then((r) => { try { r.active && r.active.postMessage({ type: 'prefs', prefs: p }) } catch {} })
+    navigator.serviceWorker.controller && navigator.serviceWorker.controller.postMessage({ type: 'prefs', prefs: p })
+  } catch {}
 }
 const on = (type, fn) => ((S.handlers[type] ||= []).push(fn))
 
@@ -52,6 +62,50 @@ function fmtAgo(t) {
   return fmtDay(t) + ' ' + fmtTime(t)
 }
 const fmtDur = (s) => Math.floor(s / 60) + ':' + pad(Math.floor(s % 60))
+// ---------------- Web Push (Telegram-uslubidagi bildirishnomalar) ----------------
+function urlB64ToU8(s) {
+  s = String(s || '').replace(/-/g, '+').replace(/_/g, '/')
+  while (s.length % 4) s += '='
+  const b = atob(s), u = new Uint8Array(b.length)
+  for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i)
+  return u
+}
+async function pushCapable() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
+}
+async function pushSubscribeNow() {
+  if (!(await pushCapable())) return false
+  const reg = await navigator.serviceWorker.register('sw.js').catch(() => null)
+  if (!reg) return false
+  await navigator.serviceWorker.ready
+  let key = ''
+  try { key = (await api('/push/vapid', { method: 'GET' })).key || '' } catch { return false }
+  if (!key) return false // serverda VAPID sozlanmagan
+  let sub = await reg.pushManager.getSubscription()
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToU8(key) })
+  const j = sub.toJSON()
+  if (!j.endpoint || !j.keys) return false
+  await post('/push/subscribe', { endpoint: j.endpoint, keys: j.keys })
+  localStorage.setItem('g50_push', '1')
+  sendPrefsToSW()
+  return true
+}
+async function pushOff() {
+  try {
+    const reg = await navigator.serviceWorker.getRegistration()
+    if (reg) {
+      const sub = await reg.pushManager.getSubscription()
+      if (sub) { try { await post('/push/unsubscribe', { endpoint: sub.endpoint }) } catch {}; await sub.unsubscribe().catch(() => {}) }
+    }
+  } catch {}
+  localStorage.setItem('g50_push', '0')
+}
+async function initPush() {
+  try {
+    if (S.prefs.push === 0 || localStorage.getItem('g50_push') !== '1') return // faqat ruxsat berilganlar
+    await pushSubscribeNow()
+  } catch {}
+}
 function fmtSize(b) { return b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(0) + ' KB' : (b / 1048576).toFixed(1) + ' MB' }
 function lastSeen(u) {
   if (!u) return ''
@@ -667,7 +721,18 @@ async function startApp() {
   setInterval(() => { if (!document.hidden) { loadStories().catch(() => {}); loadLives() } }, 60000)
   setInterval(() => { for (const [k, t] of S.typing) if (t.until < Date.now()) { S.typing.delete(k); scheduleChats(); if (S.cur === k) renderHeader() } }, 1500)
   handleHash()
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {})
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {})
+    sendPrefsToSW()
+    try {
+      navigator.serviceWorker.addEventListener('message', (e) => {
+        const d = e.data || {}
+        if (d.type === 'openchat' && d.chat_id) { try { openChat(d.chat_id) } catch {} }
+        if (d.type === 'pushmsg' && d.data) { if (S.prefs.sounds) beep(660, 0.08) } // ilova ekranda — WS allaqachon ko'rsatadi
+      })
+    } catch {}
+  }
+  initPush()
 }
 window.addEventListener('online', () => { setConn(); if (!S.wsOk) wsConnect() })
 window.addEventListener('offline', setConn)
@@ -684,6 +749,8 @@ async function handleHash() {
       const c = await api('/invite/' + h.slice(5))
       if (c.joined) return openChat(c.id)
       chatPreview(c, c.invite_hash)
+    } else if (h.startsWith('chat/')) {
+      openChat(+h.slice(5))
     } else if (h.startsWith('@')) {
       const r = await api('/resolve/' + encodeURIComponent(h.slice(1)))
       if (r.user) openUser(r.user.id)

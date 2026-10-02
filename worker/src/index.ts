@@ -5,6 +5,7 @@
 import { makeDb, ph, type Db } from "./db"
 import { signJwt, verifyJwt, sha256, randomStr, randomCode, hmacHex } from "./auth"
 import { sendSms, smsConfigured } from "./sms"
+import { pushUsers } from "./push"
 export { UserSocket } from "./realtime"
 
 export interface Env {
@@ -18,6 +19,9 @@ export interface Env {
   SMS_TEXT?: string
   TURN_KEY_ID?: string
   TURN_KEY_TOKEN?: string
+  // Web Push (VAPID): public = base64url(65-baytli P-256 nuqta), private = base64url(JSON {d,x,y})
+  VAPID_PUBLIC_KEY?: string
+  VAPID_PRIVATE_KEY?: string
   USER_SOCKET: any
   AI?: any
   __db?: Db
@@ -765,6 +769,7 @@ async function sendMessage(c: C) {
   const out = (await enrich(c, [await c.db.one("SELECT * FROM messages WHERE id=?", [mid])]))[0]
   out.client_id = c.b.client_id || null
   notifyChat(c, id, { type: "message", chat_id: id, message: out })
+  c.wait(pushChatMsg(c, id, ch, out)) // qurilmasi yopiq a'zolarga Web Push
   return json(out)
 }
 async function ownMsg(c: C, needOwner = true) {
@@ -839,6 +844,48 @@ async function typing(c: C) {
   const ids = (await memberIds(c, id)).filter((x) => x !== c.uid)
   c.wait(notify(c.env, ids, { type: "typing", chat_id: id, user_id: c.uid, action: str(c.b.action, 10) || "text" }))
   return json({ ok: true })
+}
+
+// ------------------------- Web Push (Telegram-uslubidagi bildirishnomalar) -------------------------
+const PUSH_PREVIEW: Record<string, string> = {
+  photo: "📷 Rasm", video: "🎬 Video", voice: "🎤 Ovozli xabar", round: "📹 Video xabar",
+  file: "📎 Fayl", sticker: "🙂 Stiker", gif: "GIF", poll: "📊 So‘rovnoma",
+  location: "📍 Joylashuv", contact: "👤 Kontakt",
+}
+async function pushSubscribe(c: C) {
+  const ep = str(c.b.endpoint, 768)
+  const p256dh = str(c.b.keys?.p256dh, 255)
+  const auth = str(c.b.keys?.auth, 120)
+  if (!/^https:\/\//.test(ep) || !p256dh || !auth) fail("Push ma‘lumotlari noto‘g‘ri")
+  const h = await sha256(ep)
+  const t = now()
+  await c.db.run("REPLACE INTO push_subs(endpoint_hash,user_id,endpoint,p256dh,auth,ua,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+    [h, c.uid, ep, p256dh, auth, str(c.req.headers.get("user-agent") || "", 200), t, t])
+  return json({ ok: true })
+}
+async function pushUnsubscribe(c: C) {
+  const ep = str(c.b.endpoint, 768)
+  if (ep) await c.db.run("DELETE FROM push_subs WHERE endpoint_hash=? AND user_id=?", [await sha256(ep), c.uid])
+  else await c.db.run("DELETE FROM push_subs WHERE user_id=?", [c.uid])
+  return json({ ok: true })
+}
+// Yangi xabarni offline a'zolarga push qilish (ovoz uchirilganlar va push o'chirganlar chiqariladi)
+async function pushChatMsg(c: C, chatId: number, ch: any, m: any) {
+  try {
+    const rows = await c.db.q("SELECT user_id, muted FROM chat_members WHERE chat_id=? AND status='active' AND user_id<>? LIMIT " + NOTIFY_CAP, [chatId, c.uid])
+    let ids = rows.filter((r) => !r.muted).map((r) => r.user_id as number)
+    if (!ids.length) return
+    const pr = await c.db.q(`SELECT id, prefs FROM users WHERE id IN (${ph(ids)})`, ids)
+    const off = new Set(pr.filter((r) => { try { return JSON.parse(String(r.prefs || "{}")).push === 0 } catch { return false } }).map((r) => Number(r.id)))
+    ids = ids.filter((id) => !off.has(id))
+    if (!ids.length) return
+    const sender = await c.db.one("SELECT first_name, last_name FROM users WHERE id=?", [c.uid])
+    const nm = ((sender?.first_name || "") + " " + (sender?.last_name || "")).trim() || "Foydalanuvchi"
+    const prev = m.kind === "text" ? String(m.body || "") : (PUSH_PREVIEW[m.kind] || "Yangi xabar")
+    const title = ch.type === "direct" ? nm : ch.title || (ch.type === "channel" ? "Kanal" : "Guruh")
+    const body = ch.type === "group" ? `${nm}: ${prev}` : prev
+    await pushUsers(c.env, ids, { t: title.slice(0, 80), b: body.slice(0, 240), c: chatId, tag: "g50c" + chatId }, { db: c.db, ttl: 3600 })
+  } catch (e) { console.log("push xato", String(e)) }
 }
 
 // ------------------------- Media (bo'laklab) -------------------------
@@ -1590,6 +1637,7 @@ async function startCall(c: C) {
   const me = (await usersByIds(c, [c.uid])).get(c.uid)
   // qo'ng'iroq qiluvchi qabul qiluvchining kontakt nomini ko'rmaydi — haqiqiy ismi yuboriladi
   c.wait(notify(c.env, [to], { type: "call", call_id: id, video: !!c.b.video, from: { ...me, first_name: me.real_name, last_name: "" } }))
+  c.wait(pushUsers(c.env, [to], { t: `${me?.real_name || "50 Gram"} qo‘ng‘iroq qilmoqda`, b: c.b.video ? "📹 Video qo‘ng‘iroq" : "📞 Audio qo‘ng‘iroq", c: 0, tag: "g50call" + id, call: 1 }, { urgency: "high", ttl: 60 }))
   return json({ call_id: id })
 }
 async function signal(c: C) {
@@ -2020,6 +2068,9 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/posts/:id/like", likePost],
   ["GET", "/posts/:id/comments", listComments],
   ["POST", "/posts/:id/comments", addComment],
+  ["GET", "/push/vapid", async (c) => json({ key: c.env.VAPID_PUBLIC_KEY || "" }), true],
+  ["POST", "/push/subscribe", pushSubscribe],
+  ["POST", "/push/unsubscribe", pushUnsubscribe],
   ["GET", "/ice", ice],
   ["POST", "/calls", startCall],
   ["POST", "/calls/:id/status", callStatus],
@@ -2067,6 +2118,7 @@ async function cleanup(env: Env) {
   await db.run("DELETE FROM pin_jobs WHERE created_at<?", [t - 2 * DAY])
   await planReplicas(db, 300)
   await db.run("DELETE FROM otp WHERE expires_at<?", [t])
+  await db.run("DELETE FROM push_subs WHERE updated_at<?", [t - 90 * DAY]) // 90 kun ishlatilmagan obunalar
   await db.run("DELETE FROM peer_have WHERE updated_at<?", [t - 120 * DAY])
   await db.run("UPDATE lives SET ended_at=? WHERE ended_at=0 AND started_at<?", [t, t - 12 * 3600000])
 }

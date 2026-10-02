@@ -389,7 +389,7 @@ $('feedlist').addEventListener('click', async (e) => {
     const tn = e.target.closest('[data-tn]')
     if (tn) { const x = trendItems.find((v) => v.id === tn.dataset.tn); if (x) openTrendNews(x) }
     const tv = e.target.closest('[data-tv]')
-    if (tv) { const x = trendItems.find((v) => v.id === tv.dataset.tv); if (x) openTrendVideo(x) }
+    if (tv) { const x = trendItems.find((v) => v.id === tv.dataset.tv); if (x) { if (x.kind === 'short') return shortsStart({ trend: x }); openTrendVideo(x) } }
     return
   }
   if (feedMode === 'reels') {
@@ -413,9 +413,8 @@ $('feedlist').addEventListener('click', async (e) => {
     }
     const w = e.target.closest('[data-who]')
     if (w) { const v = w.dataset.who; if (v[0] === 'u') openUser(+v.slice(1)); else { const c = S.chats.get(+v.slice(1)); c && c.joined !== false ? openChat(c.id) : chatPreview(p.chat) } ; return }
-    const v = qs('video', reel)
-    if (v) v.paused ? v.play().catch(() => {}) : v.pause()
-    return
+    // To'liq ekran Shorts rejimi (TikTok uslubi)
+    return shortsStart({ post: p })
   }
   if (e.target.closest('[data-more]')) return loadFeed()
   const el = e.target.closest('[data-post]'); if (!el) return
@@ -539,3 +538,265 @@ $('b-cimport').onclick = async () => {
     loadContacts()
   } catch {}
 }
+
+// ============ ⚡ SHORTS: TikTok-uslubida to'liq ekran vertikal rejim ============
+// Platform Reels (shifrlangan media) + dunyo trend Shorts'lari bitta cheksiz vertikal lentada.
+let shMuted = localStorage.getItem('g50_shmute') !== '0'
+let shList = [], shWrap = null, shObs = null, shKeyH = null, shWtTimer = null
+let shPostsEnd = false, shTrPage = 0, shBusyMore = false, shLastTap = 0, shTapTimer = null
+
+const shNormPosts = (list) => (Array.isArray(list) ? list : []).filter((p) => p.media_kind === 'video').map((p) => ({ t: 'post', p }))
+const shNormTrend = (list) => (Array.isArray(list) ? list : []).filter((x) => x && (x.kind === 'short' || x.kind === 'video')).map((x) => ({ t: 'trend', x }))
+
+function shSlideHTML(it, i) {
+  if (it.t === 'post') {
+    const p = it.p
+    const who = p.chat ? `<div class="sh-who" data-shwho="c${p.chat.id}">${avHTML(p.chat, 38, { chat: true })}<b>${esc(p.chat.title)}</b></div>`
+      : `<div class="sh-who" data-shwho="u${p.author?.id || 0}">${avHTML(p.author, 38)}<b>${esc(uname(p.author))}</b></div>`
+    return `<div class="sh-slide" data-shi="${i}">
+      <video data-media="${p.media_id}" loop playsinline preload="metadata"></video>
+      <div class="sh-shade"></div>
+      <div class="sh-bot">${who}${p.views ? `<small class="sh-vw">👁 ${p.views}</small>` : ''}${p.text_body ? `<div class="sh-cap">${linkify(p.text_body)}</div>` : ''}</div>
+      <div class="sh-acts">
+        <button data-slike class="${p.liked ? 'on' : ''}">${p.liked ? '❤️' : '🤍'}<i>${p.like_count || 0}</i></button>
+        <button data-scmt>💬<i>${p.comment_count || 0}</i></button>
+        <button data-ssh>↗️</button>
+        ${p.can_delete ? '<button data-sdel>🗑</button>' : ''}
+      </div>
+      <div class="sh-prog"><i></i></div>
+      <div class="sh-play">▶</div>
+    </div>`
+  }
+  const x = it.x
+  let pl = ''
+  if (x.mp4) pl = `<video src="${esc(x.mp4)}" loop playsinline preload="metadata" data-shaudio="${esc(x.audio || '')}"></video>`
+  else if (x.yt) pl = `<iframe src="https://www.youtube-nocookie.com/embed/${esc(x.yt)}?autoplay=1&playsinline=1&rel=0&loop=1&playlist=${esc(x.yt)}&mute=${shMuted ? 1 : 0}" allow="autoplay; encrypted-media" allowfullscreen frameborder="0"></iframe>`
+  else pl = `<iframe src="https://geo.dailymotion.com/player.html?video=${esc(x.embed)}&autoplay=1&mute=${shMuted ? 1 : 0}" allow="autoplay; fullscreen; encrypted-media" allowfullscreen frameborder="0"></iframe>`
+  return `<div class="sh-slide" data-shi="${i}" data-ttrend="1">
+    ${pl}
+    <div class="sh-shade"></div>
+    <div class="sh-bot"><b>${esc(x.title)}</b><small>${x.views ? '👁 ' + fmtN(x.views) : ''}${x.duration ? ' · ' + fmtDur(x.duration) : ''}</small></div>
+    <div class="sh-acts"><button data-ssh>↗️</button></div>
+    <div class="sh-prog"><i></i></div>
+    <div class="sh-play">▶</div>
+  </div>`
+}
+
+function shBindVideo(v) {
+  v.muted = shMuted
+  const slide = v.closest('.sh-slide')
+  const prog = qs('.sh-prog i', slide)
+  v.addEventListener('timeupdate', () => { if (prog && v.duration) prog.style.width = (v.currentTime / v.duration) * 100 + '%' })
+  v.addEventListener('play', () => slide.classList.remove('paused'))
+  v.addEventListener('pause', () => slide.classList.add('paused'))
+  v.addEventListener('canplay', () => { if (slide.dataset.on === '1') v.play().catch(() => {}) })
+  // Reddit mp4: audio treksi alohida faylda — sinxron oqim
+  const aurl = v.dataset.shaudio
+  if (aurl) {
+    const a = new Audio()
+    const AURLS = [aurl, aurl.replace('AUDIO_128', 'AUDIO_64'), aurl.replace(/DASH_AUDIO_\d+\.mp4/, 'DASH_audio.mp4')]
+    let tr = 0
+    const setA = () => { if (tr < AURLS.length) { a.src = AURLS[tr++]; return true } return false }
+    setA()
+    a.onerror = () => { if (setA()) a.load() }
+    v.addEventListener('play', () => { if (a.src) { try { a.currentTime = v.currentTime; if (!shMuted) a.play().catch(() => {}) } catch {} } })
+    v.addEventListener('pause', () => { try { a.pause() } catch {} })
+    v.addEventListener('seeked', () => { try { a.currentTime = v.currentTime } catch {} })
+    const syncM = () => { a.muted = v.muted; if (!v.muted && !v.paused) a.play().catch(() => {}) }
+    v.addEventListener('volumechange', syncM)
+    v.addEventListener('play', syncM)
+    v._shAudio = a
+  }
+  v.addEventListener('click', () => shTap(slide, v))
+}
+function shTap(slide, v) {
+  const t = Date.now()
+  if (t - shLastTap < 300) {
+    clearTimeout(shTapTimer); shLastTap = 0
+    const it = shList[+slide.dataset.shi]
+    if (it && it.t === 'post') shLike(it.p, slide, true) // ikki marta bosish = like
+    return
+  }
+  shLastTap = t
+  shTapTimer = setTimeout(() => {
+    if (!v || !v.src) return
+    v.paused ? v.play().catch(() => {}) : v.pause()
+  }, 260)
+}
+async function shLike(p, slide, burst) {
+  try {
+    const r = await post(`/posts/${p.id}/like`)
+    p.liked = r.liked; p.like_count = r.like_count
+    const b = qs('[data-slike]', slide)
+    if (b) { b.className = p.liked ? 'on' : ''; b.innerHTML = `${p.liked ? '❤️' : '🤍'}<i>${p.like_count || 0}</i>` }
+    if (p.liked && burst !== false) { const f = document.createElement('span'); f.className = 'sh-heart'; f.textContent = '❤️'; slide.appendChild(f); setTimeout(() => f.remove(), 900); vibrate(10) }
+  } catch (e) { toast('⚠️ ' + e.message) }
+}
+function shSetMuted(m) {
+  shMuted = m
+  localStorage.setItem('g50_shmute', m ? '1' : '0')
+  if (!shWrap) return
+  qs('#sh-m', shWrap).textContent = m ? '🔇' : '🔊'
+  qsa('video', shWrap).forEach((v) => { v.muted = m; if (v._shAudio) { v._shAudio.muted = m; if (!m && !v.paused) v._shAudio.play().catch(() => {}) } })
+  // iframe'lar (yt/dailymotion) faqat qayta yuklanganda ovoz holatini oladi: faol slaydni yangilaymiz
+  const on = qs('.sh-slide[data-on="1"] iframe', shWrap)
+  if (on) { on.dataset.src = on.src; on.src = on.src }
+}
+function shActivate(w, slide) {
+  slide.dataset.on = '1'
+  const i = +slide.dataset.shi
+  const it = shList[i]
+  if (it && it.t === 'trend') tev('video', 'imp') // analiz tizimiga ko'rish
+  const v = qs('video', slide)
+  if (v) {
+    v.muted = shMuted
+    if (v.preload !== 'auto') v.preload = 'auto'
+    v.play().catch(() => {})
+  }
+  const nx = qs(`.sh-slide[data-shi="${i + 1}"] video`, w)
+  if (nx) nx.preload = 'auto'
+  // iframeli slayd: faqat faol bo'lganda yuklanadi (boshqalar trafik va ovoz sarflamasin)
+  qsa('.sh-slide', w).forEach((s) => {
+    if (s === slide) return
+    s.querySelectorAll('iframe').forEach((f) => { if (f.src !== location.href) { if (!f.dataset.src) f.dataset.src = f.src; f.src = 'about:blank' } })
+    const vv = qs('video', s)
+    if (vv) { vv.pause(); if (vv._shAudio) { try { vv._shAudio.pause() } catch {} } }
+  })
+  const ifr = qs('iframe', slide)
+  if (ifr) {
+    if (!ifr.dataset.src) ifr.dataset.src = ifr.src
+    if (ifr.src !== ifr.dataset.src) ifr.src = ifr.dataset.src
+  }
+}
+function shDeactivate(slide) {
+  slide.dataset.on = ''
+  const v = qs('video', slide)
+  if (v) { v.pause(); if (v._shAudio) { try { v._shAudio.pause() } catch {} } }
+}
+function shAppend(items) {
+  if (!items.length || !shWrap) return
+  const sc = qs('.sh-scroll', shWrap)
+  const base = shList.length
+  shList.push(...items)
+  sc.insertAdjacentHTML('beforeend', items.map((it, k) => shSlideHTML(it, base + k)).join(''))
+  const fresh = qsa('.sh-slide', sc).slice(base)
+  fresh.forEach((s) => { shObs && shObs.observe(s); qsa('video', s).forEach(shBindVideo) })
+  hydrate(sc)
+}
+async function shMore() {
+  if (shBusyMore) return
+  shBusyMore = true
+  try {
+    const posts = shList.filter((x) => x.t === 'post')
+    if (!shPostsEnd) {
+      const before = posts.length ? Math.min(...posts.map((x) => x.p.id)) : 0
+      const r = await api('/reels' + (before ? '?before=' + before : ''))
+      const items = shNormPosts(r)
+      if (items.length < 10) shPostsEnd = true
+      shAppend(items)
+    } else {
+      shTrPage++
+      const r = await api('/trend?cat=video&page=' + shTrPage)
+      const items = shNormTrend(r)
+      if (!items.length) { shPostsEnd = false; shTrPage = 0 } // cheksiz lenta: qaytadan boshlaydi
+      shAppend(items)
+    }
+  } catch {} finally { shBusyMore = false }
+}
+function shGo(idx) {
+  if (!shWrap) return
+  const s = qs(`.sh-slide[data-shi="${idx}"]`, shWrap)
+  if (s) s.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+function shClose() {
+  if (!shWrap) return
+  try {
+    clearInterval(shWtTimer); shObs && shObs.disconnect(); shKeyH && document.removeEventListener('keydown', shKeyH)
+    qsa('video', shWrap).forEach((v) => { try { v.pause(); if (v._shAudio) v._shAudio.pause() } catch {} })
+  } catch {}
+  const w = shWrap
+  shWrap = null
+  w.classList.remove('on')
+  document.body.classList.remove('sh-lock')
+  setTimeout(() => w.remove(), 220)
+}
+async function shortsStart(opt = {}) {
+  try {
+    let posts = shNormPosts(feedPosts)
+    if (opt.post && !posts.some((x) => x.p.id === opt.post.id)) posts.unshift({ t: 'post', p: opt.post })
+    if (!posts.length) { try { posts = shNormPosts(await api('/reels')) } catch {} }
+    let tr = shNormTrend(trendItems.filter((x) => x.kind === 'short'))
+    if (!tr.length) { try { tr = shNormTrend(await api('/trend?cat=video&page=1')) } catch {} }
+    if (opt.trend && !tr.some((x) => x.x.id === opt.trend.id)) tr.unshift({ t: 'trend', x: opt.trend })
+    if (!posts.length && !tr.length) return toast('Hali video yo‘q — Lenta’da 🎬 Reels’dan video post joylang!')
+    const list = []
+    let pi = 0, ti = 0
+    while (pi < posts.length || ti < tr.length) {
+      if (ti < tr.length) list.push(tr[ti++])
+      if (ti < tr.length) list.push(tr[ti++])
+      if (pi < posts.length) list.push(posts[pi++])
+    }
+    let idx = 0
+    if (opt.post) idx = list.findIndex((x) => x.t === 'post' && x.p.id === opt.post.id)
+    else if (opt.trend) idx = list.findIndex((x) => x.t === 'trend' && x.x.id === opt.trend.id)
+    openShorts(list, Math.max(0, idx))
+  } catch (e) { toast('⚠️ ' + e.message) }
+}
+function openShorts(list, startIdx = 0) {
+  shClose()
+  shList = list
+  shPostsEnd = false; shTrPage = 1
+  const w = document.createElement('div')
+  w.id = 'shorts'
+  w.innerHTML = `<div class="sh-top"><button class="sh-x" id="sh-x">✕</button><b>⚡ Shorts</b><div class="sh-sp"></div><button class="sh-mute" id="sh-m">${shMuted ? '🔇' : '🔊'}</button></div>
+  <div class="sh-scroll">${list.map(shSlideHTML).join('')}</div>`
+  document.body.appendChild(w)
+  document.body.classList.add('sh-lock')
+  shWrap = w
+  requestAnimationFrame(() => {
+    w.classList.add('on')
+    const sc = qs('.sh-scroll', w)
+    hydrate(sc)
+    qsa('video', sc).forEach(shBindVideo)
+    // Boshqaruv
+    w.addEventListener('click', async (e) => {
+      if (e.target.closest('#sh-x')) return shClose()
+      if (e.target.closest('#sh-m')) return shSetMuted(!shMuted)
+      const slide = e.target.closest('.sh-slide')
+      if (!slide) return
+      const it = shList[+slide.dataset.shi]
+      if (!it) return
+      if (e.target.closest('[data-slike]')) return shLike(it.p, slide)
+      if (e.target.closest('[data-scmt]')) return commentsSheet(it.p, null)
+      if (e.target.closest('[data-ssh]')) return it.t === 'post' ? share((it.p.text_body || '50 Gram Shorts').slice(0, 100), location.origin + location.pathname) : share((it.x.title || 'Shorts').slice(0, 80), it.x.url || location.origin)
+      if (e.target.closest('[data-sdel]')) {
+        if (!(await confirmBox('Video o‘chirilsinmi?', 'O‘chirish'))) return
+        try { await del('/posts/' + it.p.id); if (it.p.media_id) Store.remove([String(it.p.media_id)]); shList.splice(+slide.dataset.shi, 1); slide.remove(); qsa('.sh-slide', sc).forEach((s, i) => (s.dataset.shi = i)); toast('O‘chirildi') } catch (er) { toast('⚠️ ' + er.message) }
+        return
+      }
+      const who = e.target.closest('[data-shwho]')
+      if (who) { const q = who.dataset.shwho; if (q[0] === 'u') openUser(+q.slice(1)); else { const ch = S.chats.get(+q.slice(1)); ch && ch.joined !== false ? openChat(ch.id) : chatPreview(it.p.chat) } }
+    })
+    if ('IntersectionObserver' in window) {
+      shObs = new IntersectionObserver((es) => {
+        for (const en of es) {
+          if (en.isIntersecting && en.intersectionRatio > 0.6) shActivate(w, en.target)
+          else shDeactivate(en.target)
+        }
+      }, { root: sc, threshold: [0, 0.6, 1] })
+      qsa('.sh-slide', sc).forEach((s) => shObs.observe(s))
+    }
+    sc.addEventListener('scroll', () => { if (sc.scrollHeight - sc.scrollTop - sc.clientHeight < innerHeight * 1.5) shMore() }, { passive: true })
+    shKeyH = (e) => {
+      if (e.key === 'Escape') shClose()
+      if (e.key === 'ArrowDown') { e.preventDefault(); shGo(Math.min(shList.length - 1, +(qs('.sh-slide[data-on="1"]', w) || { dataset: { shi: 0 } }).dataset.shi + 1)) }
+      if (e.key === 'ArrowUp') { e.preventDefault(); shGo(Math.max(0, +(qs('.sh-slide[data-on="1"]', w) || { dataset: { shi: 0 } }).dataset.shi - 1)) }
+    }
+    document.addEventListener('keydown', shKeyH)
+    // Analiz: ko'rish vaqti (har 5s)
+    shWtTimer = setInterval(() => { if (shWrap && qs('.sh-slide[data-on="1"][data-ttrend]', w)) tev('video', 'wt', 5000) }, 5000)
+    const first = qs(`.sh-slide[data-shi="${Math.max(0, startIdx)}"]`, w)
+    if (first) { first.scrollIntoView({ block: 'start' }); shActivate(w, first) }
+  })
+}
+$('b-shorts').onclick = () => shortsStart({})

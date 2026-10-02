@@ -265,3 +265,18 @@ CREATE TABLE IF NOT EXISTS pin_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_pin_jobs_user ON pin_jobs (user_id);
 CREATE INDEX IF NOT EXISTS idx_pin_jobs_time ON pin_jobs (created_at);
+
+-- Web Push obunalari: brauzer/service worker push endpoint'lari.
+-- Xabar ilova yopiq bo'lsa ham qurilmaga yetadi (Telegram-uslubidagi bildirishnoma).
+CREATE TABLE IF NOT EXISTS push_subs (
+  endpoint_hash CHAR(64) PRIMARY KEY,      -- sha256(endpoint): juda uzun URL'ni indekslamaymiz
+  user_id BIGINT NOT NULL,
+  endpoint VARCHAR(768) NOT NULL,
+  p256dh VARCHAR(255) NOT NULL,
+  auth VARCHAR(120) NOT NULL,
+  ua VARCHAR(255) NULL,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subs (user_id);
+CREATE INDEX IF NOT EXISTS idx_push_subs_upd ON push_subs (updated_at);

@@ -553,3 +553,39 @@ body.noauto video[data-media]{background:#0b1524 url("data:image/svg+xml,%3Csvg 
 .msgs{transition:background .3s ease}
 .sh .pv .m{font-size:inherit}
 .tcard .tnoimg{width:100%;aspect-ratio:16/10;display:flex;align-items:center;justify-content:center;font-size:46px;background:linear-gradient(135deg,var(--asos-och),transparent 70%),var(--sirt2)}
+
+/* ============ ⚡ SHORTS: to'liq ekran vertikal rejim (TikTok uslubi) ============ */
+body.sh-lock{overflow:hidden}
+#shorts{position:fixed;inset:0;z-index:260;background:#000;opacity:0;transition:opacity .22s ease}
+#shorts.on{opacity:1}
+#shorts .sh-top{position:absolute;top:0;left:0;right:0;z-index:6;display:flex;align-items:center;gap:10px;padding:calc(10px + env(safe-area-inset-top)) 14px 10px;background:linear-gradient(rgba(0,0,0,.65),transparent);pointer-events:none}
+#shorts .sh-top>*{pointer-events:auto}
+#shorts .sh-top b{color:#fff;font-size:16px;text-shadow:0 1px 6px rgba(0,0,0,.6)}
+#shorts .sh-sp{flex:1}
+#shorts .sh-x,#shorts .sh-mute{width:40px;height:40px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+#shorts .sh-x:active,#shorts .sh-mute:active{transform:scale(.92)}
+#shorts .sh-scroll{height:100%;overflow-y:scroll;scroll-snap-type:y mandatory;scrollbar-width:none;-ms-overflow-style:none;overscroll-behavior-y:contain}
+#shorts .sh-scroll::-webkit-scrollbar{display:none}
+.sh-slide{position:relative;height:100%;width:100%;scroll-snap-align:start;scroll-snap-stop:always;background:#000;overflow:hidden}
+.sh-slide video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+.sh-slide iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
+.sh-slide .sh-shade{position:absolute;left:0;right:0;bottom:0;height:34%;background:linear-gradient(transparent,rgba(0,0,0,.72));z-index:2;pointer-events:none}
+.sh-slide .sh-bot{position:absolute;left:12px;right:78px;bottom:calc(30px + env(safe-area-inset-bottom));color:#fff;z-index:3;display:flex;flex-direction:column;gap:5px;text-shadow:0 1px 4px rgba(0,0,0,.5)}
+.sh-slide .sh-bot b{font-size:15px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sh-slide .sh-who{display:flex;align-items:center;gap:9px;cursor:pointer}
+.sh-slide .sh-who b{font-size:14px}
+.sh-slide .sh-cap{font-size:13.5px;line-height:1.4;max-height:4.2em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 75%,transparent)}
+.sh-slide .sh-vw,.sh-slide .sh-bot small{font-size:12px;opacity:.85}
+.sh-slide .sh-acts{position:absolute;right:8px;bottom:calc(34px + env(safe-area-inset-bottom));z-index:4;display:flex;flex-direction:column;gap:18px}
+.sh-slide .sh-acts button{border:0;background:none;color:#fff;font-size:26px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;text-shadow:0 1px 4px rgba(0,0,0,.5);transition:transform .12s ease}
+.sh-slide .sh-acts button:active{transform:scale(1.18)}
+.sh-slide .sh-acts button i{font-size:11.5px;font-style:normal;font-weight:600;opacity:.95}
+.sh-slide .sh-acts button.on{color:#ff3b5c}
+.sh-slide .sh-prog{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.16);z-index:5}
+.sh-slide .sh-prog i{display:block;height:100%;width:0;background:var(--asos,#0A7CFF);transition:width .15s linear}
+.sh-slide .sh-play{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:3;font-size:58px;color:rgba(255,255,255,.92);text-shadow:0 2px 14px rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .18s ease}
+.sh-slide.paused .sh-play{opacity:1}
+.sh-heart{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(.6);font-size:96px;color:#ff3b5c;z-index:5;pointer-events:none;animation:shHeart .9s ease forwards;text-shadow:0 4px 24px rgba(255,59,92,.55)}
+@keyframes shHeart{0%{opacity:0;transform:translate(-50%,-50%) scale(.4)}25%{opacity:1;transform:translate(-50%,-50%) scale(1.15)}70%{opacity:1;transform:translate(-50%,-60%) scale(1)}100%{opacity:0;transform:translate(-50%,-120%) scale(.9)}}
+/* Kichik ekranlarda */
+@media (max-height:640px){.sh-slide .sh-acts{gap:13px}.sh-slide .sh-acts button{font-size:22px}}

@@ -325,7 +325,7 @@ async function renderMe() {
   </div>
   ${rowsHTML([row('backup', '🗜', 'Butun tarixni zaxiralash', 'Barcha chatlar bitta faylga saqlanadi'), row('clear', '🧹', 'Keshni tozalash', 'Qurilmadagi media fayllar o‘chiriladi', 'red')])}
   <div class="sec">Ilova</div>
-  <div class="rows">${swRow('dark', 'Tungi rejim', document.documentElement.classList.contains('dark'))}${swRow('notif', 'Bildirishnomalar', typeof Notification !== 'undefined' && Notification.permission === 'granted')}</div>
+  <div class="rows">${swRow('dark', 'Tungi rejim', document.documentElement.classList.contains('dark'))}${swRow('notif', 'Push bildirishnomalar', typeof Notification !== 'undefined' && Notification.permission === 'granted' && localStorage.getItem('g50_push') === '1', 'Ilova yopiq bo‘lsa ham xabar va qo‘ng‘iroqlar yetadi')}</div>
   ${rowsHTML([row('about', 'ℹ️', '50 Gram haqida', 'Versiya 1.1'), row('logout', '🚪', 'Chiqish', '', 'red')])}`
   const r = $('gb-r')
   r.oninput = () => ($('gb-v').textContent = r.value + ' GB')
@@ -339,7 +339,21 @@ $('melist').addEventListener('click', async (e) => {
     const k = s.dataset.sw, w = qs('.sw', s)
     if (k === 'share') { const on = localStorage.getItem('g50_share') === '0'; localStorage.setItem('g50_share', on ? '1' : '0'); w.classList.toggle('on', on) }
     if (k === 'dark') { const on = !document.documentElement.classList.contains('dark'); document.documentElement.classList.toggle('dark', on); localStorage.setItem('g50_dark', on ? '1' : '0'); w.classList.toggle('on', on) }
-    if (k === 'notif') { if (typeof Notification === 'undefined') return toast('Brauzer qo‘llamaydi'); const p = await Notification.requestPermission(); w.classList.toggle('on', p === 'granted'); if (p !== 'granted') toast('Brauzer sozlamalaridan ruxsat bering') }
+    if (k === 'notif') {
+      if (typeof Notification === 'undefined' || !(await pushCapable())) { w.classList.remove('on'); return toast('Brauzer push‘ni qo‘llamaydi') }
+      const wasOn = Notification.permission === 'granted' && localStorage.getItem('g50_push') === '1'
+      if (!wasOn) {
+        const p = await Notification.requestPermission()
+        if (p !== 'granted') { w.classList.remove('on'); return toast('Brauzer sozlamalaridan ruxsat bering') }
+        const ok = await pushSubscribeNow().catch(() => false)
+        w.classList.toggle('on', !!ok)
+        toast(ok ? '✅ Push yoqildi — qurilma yopiq bo‘lsa ham xabar yetadi' : '⚠️ Push ishlamadi (brauzer qo‘llab-quvvatlamasligi mumkin)')
+      } else {
+        await pushOff()
+        w.classList.remove('on')
+        toast('Push bildirishnomalar o‘chirildi')
+      }
+    }
     if (k.startsWith('p-')) { const key = k.slice(2); savePrefs({ [key]: S.prefs[key] ? 0 : 1 }); w.classList.toggle('on', !!S.prefs[key]); if (key === 'autoload') document.body.classList.toggle('noauto', !S.prefs.autoload) }
     return
   }
