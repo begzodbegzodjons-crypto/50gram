@@ -9,8 +9,39 @@ async function iceServers() {
 const sig = (to, data) => post('/signal', { to, data }).catch(() => {})
 async function getMedia(video) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('Brauzer qo‘ng‘iroqni qo‘llamaydi (HTTPS kerak)')
-  try { return await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: video ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } : false }) }
-  catch (e) { throw new Error(video ? 'Kamera/mikrofonga ruxsat bering' : 'Mikrofonga ruxsat bering') }
+  const con = { audio: { echoCancellation: true, noiseSuppression: true }, video: video ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } : false }
+  let last = null
+  for (let i = 0; i < 2; i++) {
+    try { return await navigator.mediaDevices.getUserMedia(con) }
+    catch (e) {
+      last = e
+      if (e && (e.name === 'NotFoundError' || e.name === 'OverconstrainedError')) throw new Error(video ? 'Kamera topilmadi' : 'Mikrofon topilmadi')
+      if (e && (e.name === 'NotReadableError' || e.name === 'AbortError')) { await new Promise((r) => setTimeout(r, 450)); continue } // qurilma band — bir marta qayta urinamiz
+      break
+    }
+  }
+  // MUHIM: Chrome ruxsat bir marta rad etilsa boshqa hech qachon oyna ko'rsatmaydi —
+  // shuning uchun foydalanuvchiga aniq yo'nalish beramiz (🔒 belgi orqali yoqish)
+  if (last && (last.name === 'NotAllowedError' || last.name === 'SecurityError')) {
+    throw new Error('Ruxsat berilmagan — manzil satridagi 🔒 belgi orqali Kamera va Mikrofonga “Ruxsat berilgan” qiling')
+  }
+  throw new Error(video ? 'Kamera/mikrofon ochilmadi — qayta urinib ko‘ring' : 'Mikrofon ochilmadi — qayta urinib ko‘ring')
+}
+// ---------------- AVTOMATIK RUXSAT (brauzer/PWA) ----------------
+// Bir marta ruxsat berilsa — keyingi barcha qo'ng'iroqlar, ovozli/video xabarlar va
+// jonli efir HECH QANDAY oynasiz ishlaydi (brauzer ruxsatni eslab qoladi). Ruxsat hali
+// so'ralmagan bo'lsa — birinchi bosishda bir marta so'raymiz; rad etilgan bo'lsa zeriktirmaymiz.
+window.__50warmup = async () => {
+  if (!navigator.mediaDevices?.getUserMedia) return
+  let cam = null, mic = null
+  try { cam = await navigator.permissions.query({ name: 'camera' }) } catch {}
+  try { mic = await navigator.permissions.query({ name: 'microphone' }) } catch {}
+  if ((cam && cam.state === 'denied') || (mic && mic.state === 'denied')) return
+  if (cam && mic && cam.state === 'granted' && mic.state === 'granted') return
+  document.addEventListener('pointerdown', () => {
+    navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user', width: { ideal: 640 } } })
+      .then((s) => s.getTracks().forEach((t) => t.stop())).catch(() => {})
+  }, { once: true })
 }
 async function newPC(onIce) {
   const pc = new RTCPeerConnection({ iceServers: await iceServers() })

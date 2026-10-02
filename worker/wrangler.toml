@@ -5,7 +5,9 @@ compatibility_date = "2025-09-01"
 # Frontend (web/) shu Worker bilan birga joylanadi: https://50gram.<sizning-subdomen>.workers.dev
 [assets]
 directory = "../web"
-run_worker_first = ["/api/*"]
+binding = "ASSETS"
+# /50gram.apk worker orqali o'tadi — Content-Disposition: attachment qo'shiladi (majburiy yuklab olish)
+run_worker_first = ["/api/*", "/50gram.apk"]
 
 # Real-time: har foydalanuvchiga bitta Durable Object (Free planda SQLite backend bilan ishlaydi)
 [[durable_objects.bindings]]

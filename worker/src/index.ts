@@ -25,6 +25,8 @@ export interface Env {
   USER_SOCKET: any
   AI?: any
   __db?: Db
+  // Statik assetlar binlash (wrangler.toml [assets] binding) — APK yuklab olish uchun
+  ASSETS?: { fetch: (req: Request) => Promise<Response> }
 }
 
 type C = {
@@ -2369,6 +2371,15 @@ async function cleanup(env: Env) {
 export default {
   async fetch(req: Request, env: Env, ctx?: { waitUntil: (p: Promise<unknown>) => void }): Promise<Response> {
     const url = new URL(req.url)
+    // APK: majburiy yuklab olish (attachment) — ba'zi brauzerlar download atributiga
+    // e'tibor bermaydi yoki faylni ochishga harakat qiladi; sarlavha buni hal qiladi
+    if (url.pathname === "/50gram.apk") {
+      const asset = await env.ASSETS!.fetch(new Request(url.toString(), { method: "GET" }))
+      const h = new Headers(asset.headers)
+      h.set("Content-Disposition", 'attachment; filename="50gram.apk"')
+      h.set("Cache-Control", "public, max-age=3600")
+      return new Response(asset.body, { status: asset.status, headers: h })
+    }
     if (!url.pathname.startsWith("/api/")) return new Response("Not found", { status: 404 })
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS })
     const path = url.pathname.slice(4).replace(/\/+$/, "") || "/"

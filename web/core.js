@@ -744,6 +744,9 @@ async function startApp() {
   try { setMe(await api('/me')) } catch (e) { if (!S.token) return }
   if (!S.me.first_name) { $('auth').classList.remove('hide'); $('main').classList.add('hide'); step('a-prof'); return }
   post('/ping').catch(() => {})
+  // Avtomatik ruxsat: birinchi bosishda kamera/mikrofonni bir marta so'raymiz —
+  // shundan keyin qo'ng'iroqlar va ovozli xabarlar oynasiz ishlaydi (rtc.js)
+  try { window.__50warmup && window.__50warmup() } catch {}
   await Promise.all([loadChats().catch((e) => toast(e.message)), loadStories().catch(() => {}), loadContactsQuiet(), loadLives()])
   wsConnect()
   setInterval(poll, 4000)

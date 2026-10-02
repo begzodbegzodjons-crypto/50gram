@@ -607,7 +607,7 @@ async function startVoice() {
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { recPending = null; return toast('Bu brauzer ovoz yozishni qo‘llamaydi') }
   let stream = null
   try {
-    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }) } catch { recPending = null; return toast('🎤 Mikrofonga ruxsat bering') }
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }) } catch { recPending = null; return toast('🎤 Mikrofon ruxsati berilmagan — manzil satridagi 🔒 belgi orqali yoqing') }
     const mr = pickRecorder(stream, ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/webm'])
     const chunks = [], wave = []
     let an = null, ac = null, waveT = 0
@@ -662,7 +662,7 @@ async function startRound() {
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { recPending = null; return toast('Bu brauzer video yozishni qo‘llamaydi') }
   let stream = null, o = null
   try {
-    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 480 } }, audio: true }) } catch { recPending = null; return toast('📷 Kamera va mikrofonga ruxsat bering') }
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 480 } }, audio: true }) } catch { recPending = null; return toast('📷 Kamera/mikrofon ruxsati berilmagan — manzil satridagi 🔒 belgi orqali yoqing') }
     o = document.createElement('div')
     o.className = 'over roundrec'
     o.innerHTML = `<div class="rr"><video autoplay muted playsinline></video><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="2"/><circle id="rr-c" cx="50" cy="50" r="48" fill="none" stroke="#0A7CFF" stroke-width="2.5" stroke-dasharray="301.6" stroke-dashoffset="301.6" stroke-linecap="round"/></svg></div><div class="rt" id="rr-t">0:00</div><div class="rbar"><button class="cb end" data-x>✕</button><button class="cb ok" data-s>➤</button></div><p class="mut" style="color:#ccc">Qo‘yib yuborsangiz — yuboriladi (60 soniyagacha)</p>`

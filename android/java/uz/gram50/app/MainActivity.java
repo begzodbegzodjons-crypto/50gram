@@ -28,13 +28,15 @@ import android.widget.TextView;
 import org.json.JSONObject;
 
 /**
- * 50 Gram — native Android ilova (v2.2, professional).
+ * 50 Gram — native Android ilova (v2.3, professional).
  * - To'liq ekran splash (logotip bilan) — sahifa yuklanguncha brend ko'rinadi
  * - Qo'ng'iroqlar: JS bridge (Android50) — fonida ham to'liq ekran javob oynasi
  * - Kamera/mikrofon, fayl tanlash, fonda ishlash — hammasi brauzer cheklovisiz
  * - v2.2: ruxsatlar oqimi tubdan tuzatildi — ayrim telefonlarda (MIUI/ColorOS/OneUI)
  *   kamera/mikrofon oynasi umuman chiqmasdi: onPermissionRequest endi OS darajasidagi
  *   ruxsatni tekshirib, haqiqiy Android oynasini chiqaradi + "Sozlamalar" zaxirasi
+ * - v2.3: saytdagi .apk yuklab olish havolasi ilova ichida ishlashi uchun DownloadListener
+ *   qo'shildi — tizim brauzeri orqali yuklanadi
  */
 public class MainActivity extends Activity {
 
@@ -69,7 +71,7 @@ public class MainActivity extends Activity {
     }
 
     @JavascriptInterface
-    public String version() { return "2.2"; }
+    public String version() { return "2.3"; }
 
     /** Web tomondan ruxsatlarni ataylab so'rash (masalan qo'ng'iroq tugmasi bosilganda). */
     @JavascriptInterface
@@ -103,7 +105,7 @@ public class MainActivity extends Activity {
     s.setCacheMode(WebSettings.LOAD_DEFAULT);
     s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     s.setJavaScriptCanOpenWindowsAutomatically(true);
-    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.2");
+    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.3");
     web.addJavascriptInterface(new Bridge(), "Android50");
 
     web.setWebViewClient(new WebViewClient() {
@@ -118,6 +120,14 @@ public class MainActivity extends Activity {
       @Override
       public void onPageFinished(WebView v, String url) {
         hideSplash();
+      }
+    });
+
+    // FAYL YUKLAB OLISH: saytdagi .apk havolasi (yoki boshqa fayl) bosilsa —
+    // tizim brauzeri/DifferentialManager orqali yuklanadi (WebView o'zi yuklamaydi)
+    web.setDownloadListener(new android.webkit.DownloadListener() {
+      @Override public void onDownloadStart(String url, String ua, String cd, String mime, long len) {
+        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception ignored) { }
       }
     });
 
