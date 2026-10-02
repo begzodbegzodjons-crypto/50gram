@@ -444,6 +444,9 @@ body.dark .sheet .grab{background:linear-gradient(90deg,#31415F,#42527A);box-sha
 .live .lbot input{flex:1;border:0;background:rgba(255,255,255,.18);color:#fff;border-radius:22px;padding:11px 16px;outline:0;min-width:0}
 .live .lbot input::placeholder{color:rgba(255,255,255,.7)}
 .live .wait{position:relative;z-index:2;text-align:center;opacity:.9}
+/* Task 34: ulanish holati oynasi — qayta urinish tugmasi va kichik fon (PRIZMA 3D dizaynga tegilmadi) */
+.live .wait{background:rgba(12,17,38,.55);border-radius:18px;padding:12px 16px;max-width:82%;margin:0 auto;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.live .wait .btn{margin-top:10px}
 /* "Ovozni yoqish" tugmasi — brauzer autoplay'ni bloklab, video ovozsiz boshlanganda chiqadi (Task 33) */
 .l-un{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);z-index:6;background:rgba(14,19,48,.88);color:#fff;border:1px solid rgba(255,255,255,.22);border-radius:26px;padding:13px 26px;font-size:15.5px;font-weight:800;letter-spacing:.2px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 10px 34px rgba(10,16,32,.5);animation:fadein .25s ease;cursor:pointer}
 .l-un:active{transform:translate(-50%,-50%) scale(.96)}

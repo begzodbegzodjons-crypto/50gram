@@ -3,11 +3,10 @@
 let iceCache = null, iceAt = 0
 async function iceServers() {
   if (iceCache && Date.now() - iceAt < 30 * 60000) return iceCache
-  try { iceCache = (await api('/ice')).iceServers; iceAt = Date.now() } catch { iceCache = [{ urls: 'stun:stun.l.google.com:19302' }] }
-  // MUHIM (Task 33): ba'zi tarmoqlar (mobil operator CGNAT, korporativ NAT) faqat STUN orqali
-  // P2P ulanmaydi — efir "qotib qoladi", izohlar esa ishlaydi. Ochiq TURN zaxirasi qo'shamiz.
-  const hasTurn = (iceCache || []).some((s) => [].concat(s?.urls || []).some((u) => String(u).indexOf('turn') === 0))
-  if (!hasTurn) iceCache.push({ urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443'], username: 'openrelayproject', credential: 'openrelayproject' })
+  try { iceCache = (await api('/ice')).iceServers; iceAt = Date.now() } catch { iceCache = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }] }
+  // Task 34: openrelay.metered.ca o‘lgan (sinovda 400 TURN allocate error) — soxta zaxira olib tashlandi.
+  // Serverda Cloudflare TURN sozlangan (/ice → turn.cloudflare.com UDP/TCP/TLS-443, TTL 24h) — relay test o‘tdi.
+  // TURN bo‘lmasa ham soxta TURN BERMAYMIZ: ulanmasa tomoshabin watchdog‘i aniq holat ko‘rsatadi.
   return iceCache
 }
 const sig = (to, data) => post('/signal', { to, data }).catch(() => {})
@@ -172,6 +171,10 @@ window.__50wsOpen = async () => {
     const r = await api('/calls/pending')
     if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, from: r.call.from })
   } catch {}
+  // Task 34: WS uzilib-tiklanganda efir signalari (offer/ICE) YO‘QOLGAN bo‘lishi mumkin —
+  // tomoshabin hali ulanmagan bo‘lsa darhol qayta ulanishni so‘raymiz.
+  const L = LIVE
+  if (L && !L.host && !L.rejoining && (!L.pc || L.pc.connectionState !== 'connected')) liveRejoin()
 }
 async function acceptCall() {
   const C = CALL; if (!C) return
@@ -432,7 +435,7 @@ function liveMsg(m) {
 function liveEnded() {
   const L = LIVE; if (!L || L.host) return
   LIVE = null
-  clearTimeout(L.retry); clearTimeout(L.dropT)
+  clearTimeout(L.retry); clearTimeout(L.dropT); clearTimeout(L.connT)
   try { L.pc?.close() } catch {}
   for (const k of L.kids.values()) try { k.pc.close() } catch {}
   const w = document.createElement('div'); w.className = 'wait'; w.textContent = '⬛ Efir tugadi'; L.el.appendChild(w)
@@ -490,7 +493,23 @@ async function addChild(uid) {
   for (const t of L.stream.getTracks()) k.pc.addTrack(t, L.stream)
   k.dc = k.pc.createDataChannel('live')
   k.dc.onopen = () => { try { k.dc.send(JSON.stringify({ t: 'n', v: L.viewers || 0 })) } catch {} }
-  k.pc.onconnectionstatechange = () => { if (['failed', 'closed'].includes(k.pc.connectionState) && L.kids.get(uid) === k) L.kids.delete(uid) }
+  // Task 34: efirchi tomonda ham watchdog — farzand PC 10s ichida ulanmasa ICE restart,
+  // yana 10s da ulanmasa o‘chiriladi (tomoshabin o‘zi qayta ulanishni so‘raydi).
+  k.pc.onconnectionstatechange = () => {
+    const st = k.pc.connectionState
+    if (st === 'connected') clearTimeout(k.watchT)
+    if (['failed', 'closed'].includes(st) && L.kids.get(uid) === k) { clearTimeout(k.watchT); L.kids.delete(uid) }
+  }
+  k.watchT = setTimeout(() => {
+    if (LIVE !== L || L.kids.get(uid) !== k || k.pc.connectionState === 'connected') return
+    try { k.pc.restartIce() } catch {}
+    setTimeout(() => {
+      if (LIVE === L && L.kids.get(uid) === k && k.pc.connectionState !== 'connected') {
+        try { k.pc.close() } catch {}
+        if (L.kids.get(uid) === k) L.kids.delete(uid)
+      }
+    }, 10000)
+  }, 10000)
   const o = await k.pc.createOffer()
   await k.pc.setLocalDescription(o)
   limitBitrate(k.pc)
@@ -500,6 +519,25 @@ function armRetry(L) {
   clearTimeout(L.retry)
   L.retry = setTimeout(() => { if (LIVE === L && !L.gotUp) liveRejoin() }, 15000)
 }
+// Task 34 (QORA EKRAN ildizi): oldin ontrack kelganda .wait o‘chib retry BEKOR qilinardi —
+// ICE keyin ulanmasa abadiy qora ekran (izoh/layk ishlayverardi, chunki ular HTTP orqali).
+// Endi .wait haqiqiy 'connected' holatigacha ko‘rinadi va bosqichma-bosqich yangilanadi.
+function liveWait(L, mode) {
+  if (LIVE !== L || L.host) return
+  let w = qs('.wait', L.el)
+  if (mode === 'ok') { if (w) w.remove(); return }
+  if (!w) { w = document.createElement('div'); w.className = 'wait'; L.el.appendChild(w) }
+  const t = L.tries || 0
+  if (t >= 4) {
+    if (!qs('#l-retry', w)) {
+      w.innerHTML = '🚫 Bu tarmoq efir oqimini o‘tkazmayapti — boshqa tarmoq (Wi-Fi / mobil) sinab ko‘ring<br><button class="btn big" id="l-retry">🔄 Qayta urinish</button>'
+      const b = qs('#l-retry', w)
+      if (b) b.onclick = (ev) => { ev.stopPropagation(); L.tries = 0; liveWait(L); liveRejoin() }
+    }
+  } else {
+    w.textContent = t > 0 ? `📶 Ulanish sekin — qayta ulanmoqda… (${t})` : mode === 'media' ? '📶 Media ulanmoqda…' : '⏳ Efirga ulanmoqda…'
+  }
+}
 async function watchLive(id) {
   if (LIVE) { if (LIVE.id === id) return; if (LIVE.host) return toast('Avval efiringizni tugating'); await leaveLive() }
   LTOP.clear()
@@ -508,6 +546,7 @@ async function watchLive(id) {
     LIVE = { id, host: false, hostId: r.user.id, parentId: r.parent, ice: [], kids: new Map(), stream: new MediaStream(), viewers: r.viewers, tries: 0 }
     LIVE.el = liveUI(r.user, r.title, false)
     liveSetCount(r.viewers)
+    liveWait(LIVE)
     armRetry(LIVE)
   } catch (e) { toast('⚠️ ' + e.message); loadLives() }
 }
@@ -516,6 +555,7 @@ async function liveRejoin() {
   const L = LIVE; if (!L || L.host || L.rejoining) return
   L.rejoining = true
   const old = L.parentId
+  clearTimeout(L.connT); clearTimeout(L.dropT)
   const pc = L.pc; L.pc = null; L.gotUp = false; L.ice = []
   try { pc?.close() } catch {}
   try {
@@ -523,7 +563,7 @@ async function liveRejoin() {
     if (LIVE !== L) return
     L.parentId = r.parent
     L.tries++
-    if (L.tries > 3) { const w = qs('.wait', L.el); if (w) w.textContent = '⏳ Ulanish sekin, kutilmoqda…' }
+    liveWait(L)
     armRetry(L)
   } catch (e) {
     if (LIVE === L && /tugagan/i.test(e.message || '')) liveEnded()
@@ -563,14 +603,16 @@ function onUpTrack(L, e) {
   // Yangi manbadan kelgan treklarni farzandlarga ham almashtirib beramiz
   for (const k of L.kids.values()) { const s = k.pc.getSenders().find((x) => x.track?.kind === tr.kind); if (s && s.track !== tr) s.replaceTrack(tr).catch(() => {}) }
   livePlay(L)
-  L.gotUp = true; L.tries = 0; clearTimeout(L.retry)
-  qs('.wait', L.el)?.remove()
+  L.gotUp = true; clearTimeout(L.retry)
+  // Task 34: .wait shu yerda O‘CHMAYDI — ontrack SDP bosqichida keladi, ICE hali ulanmagan
+  // bo‘lishi mumkin. Oyna faqat haqiqiy 'connected' da o‘chadi (pastda onconnectionstatechange).
+  liveWait(L, L.pc && L.pc.connectionState === 'connected' ? 'ok' : 'media')
   if (!L.ready && L.stream.getVideoTracks().length) { L.ready = true; post(`/lives/${L.id}/ready`).catch(() => {}) }
 }
 async function leaveLive() {
   const L = LIVE; if (!L) return
   LIVE = null
-  clearTimeout(L.retry); clearTimeout(L.dropT)
+  clearTimeout(L.retry); clearTimeout(L.dropT); clearTimeout(L.connT)
   try { L.pc?.close() } catch {}
   for (const k of L.kids.values()) try { k.pc.close() } catch {}
   L.el.remove()
@@ -602,6 +644,7 @@ async function liveSignal(from, d) {
     if (d.k === 'loffer') {
       const old = L.pc; L.pc = null; L.ice = []
       try { old?.close() } catch {}
+      clearTimeout(L.connT); clearTimeout(L.dropT)
       const pc = await newPC((c) => sig(from, { k: 'lice', live_id: L.id, c }))
       L.pc = pc
       pc.ontrack = (e) => onUpTrack(L, e)
@@ -609,7 +652,14 @@ async function liveSignal(from, d) {
       pc.onconnectionstatechange = () => {
         if (L.pc !== pc || LIVE !== L) return
         const st = pc.connectionState
-        if (st === 'failed') liveRejoin()
+        if (st === 'connected') {
+          // Task 34: haqiqiy ulanish — holat oynasi o‘chadi, watchdoglar to‘xtaydi, video o‘ynaydi
+          clearTimeout(L.connT)
+          L.tries = 0; L.gotUp = true
+          liveWait(L, 'ok')
+          livePlay(L)
+        }
+        else if (st === 'failed') { clearTimeout(L.connT); liveRejoin() }
         else if (st === 'disconnected') { clearTimeout(L.dropT); L.dropT = setTimeout(() => { if (L.pc === pc && pc.connectionState !== 'connected') liveRejoin() }, 5000) }
       }
       await pc.setRemoteDescription(d.sdp)
@@ -617,6 +667,10 @@ async function liveSignal(from, d) {
       const a = await pc.createAnswer()
       await pc.setLocalDescription(a)
       sig(from, { k: 'lanswer', live_id: L.id, sdp: pc.localDescription.toJSON() })
+      // Task 34: ULANISH WATCHDOG — javob yuborilgach 12s ichida 'connected' bo‘lmasa,
+      // yangi ota bilan qayta ulanamiz (eski yo‘nalish o‘lgan bo‘lishi mumkin).
+      clearTimeout(L.connT)
+      L.connT = setTimeout(() => { if (LIVE === L && L.pc === pc && pc.connectionState !== 'connected') liveRejoin() }, 12000)
     }
     if (d.k === 'lice') { if (L.pc?.remoteDescription) await L.pc.addIceCandidate(d.c).catch(() => {}); else L.ice.push(d.c) }
   } catch (e) { console.warn('live', e) }
