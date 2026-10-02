@@ -718,7 +718,7 @@ async function enrich(c: C, msgs: any[]) {
   const rx = await c.db.q(`SELECT message_id, user_id, emoji FROM reactions WHERE message_id IN (${ph(ids)})`, ids)
   const polls = msgs.filter((m) => m.kind === "poll").map((m) => m.id)
   const votes = polls.length ? await c.db.q(`SELECT message_id, user_id, opt FROM poll_votes WHERE message_id IN (${ph(polls)})`, polls) : []
-  const cm = await c.db.q(`SELECT message_id, COUNT(*) AS cnt FROM msg_comments WHERE message_id IN (${ph(ids)}) GROUP BY message_id`).catch((): any[] => [])
+  const cm = await c.db.q(`SELECT message_id, COUNT(*) AS cnt FROM msg_comments WHERE message_id IN (${ph(ids)}) GROUP BY message_id`, ids).catch((): any[] => [])
   const cmMap = new Map(cm.map((x) => [x.message_id, Number(x.cnt)]))
   for (const m of out) {
     const r: Record<string, number[]> = {}
@@ -2011,17 +2011,11 @@ async function listMsgComments(c: C) {
   const mem = await member(c, m.chat_id)
   const adm = isAdm(mem)
   const rows = await c.db.q("SELECT * FROM msg_comments WHERE message_id=? ORDER BY id ASC LIMIT 200", [m.id])
-  // VAQTINCHA debug (Task 29 test): enrich agregatini to'g'ridan-to'g'ri tekshirish
-  let dbg: any = null
-  try {
-    dbg = await c.db.q(`SELECT message_id, COUNT(*) AS cnt FROM msg_comments WHERE message_id IN (${ph([m.id])}) GROUP BY message_id`)
-  } catch (e: any) { dbg = { err: String(e?.message || e) } }
   const um = await usersByIds(c, rows.map((r) => r.user_id))
   return json({
     comments: rows.map((r) => ({ id: r.id, user_id: r.user_id, body: r.body, created_at: r.created_at, mine: r.user_id === c.uid, can_del: r.user_id === c.uid || adm })),
     users: Object.fromEntries(um),
     count: rows.length,
-    dbg,
     readonly: ch.type === "channel" && !isAdm(await member(c, m.chat_id)) && parse(ch.permissions, DEF_PERMS).send === 0 ? 0 : 1,
   })
 }
