@@ -438,14 +438,14 @@ function pgAppearance() {
     <div class="sec">Aksent rang</div>
     <div class="accgrid">${ACCTS.map((a, i) => `<button data-acc="${i}" class="${i === acc ? 'on' : ''}" style="background:linear-gradient(135deg,${a[1]},${a[2]})" title="${a[0]}"><i>${i === acc ? '✓' : ''}</i></button>`).join('')}</div>
     <div class="sec">Chat</div>
-    ${rowsHTML([row('chatview', '💬', '#00C2E0', '#2E7BFF', 'Chat ko‘rinishi', 'Shrift hajmi va suhbat foni'), row('trendset', '🔥', '#FF6A3D', '#C8102E', 'Trend qiziqishlarim', 'Lentada nima ko‘p chiqishini tanlang')])}
+    ${rowsHTML([prow('chatview', '💬', '#00C2E0', '#2E7BFF', 'Chat ko‘rinishi', 'Shrift hajmi va suhbat foni'), prow('trendset', '🔥', '#FF6A3D', '#C8102E', 'Trend qiziqishlarim', 'Lentada nima ko‘p chiqishini tanlang')])}
     <div class="hint">Aksent rang tugmalar, xabar pufaklari va havolalarni bo‘yaydi — tanlash bilan darhol qo‘llanadi.</div>`,
   (p) => {
     p.onclick = async (e) => {
       const dk = e.target.closest('[data-sw2="dark"]')
       if (dk) { const on = !document.documentElement.classList.contains('dark'); document.documentElement.classList.toggle('dark', on); localStorage.setItem('g50_dark', on ? '1' : '0'); qs('.sw', dk).classList.toggle('on', on); return }
-      const it = e.target.closest('[data-a]')
-      if (it) { if (it.dataset.a === 'chatview') chatViewSheet(); if (it.dataset.a === 'trendset') trendInterestsSheet(); return }
+      const it = e.target.closest('[data-a],[data-pg]')
+      if (it) { const kk = it.dataset.a || it.dataset.pg; if (kk === 'chatview') chatViewSheet(); if (kk === 'trendset') trendInterestsSheet(); return }
       const ac = e.target.closest('[data-acc]')
       if (ac) { applyAcc(+ac.dataset.acc); qsa('[data-acc]', p).forEach((b) => { b.classList.toggle('on', b === ac); qs('i', b).textContent = b === ac ? '✓' : '' }); toast('✅ Rang: ' + ACCTS[+ac.dataset.acc][0]) }
     }
@@ -502,7 +502,7 @@ async function pgData() {
       <div><div class="rt">Hozir band<small>${st ? `${fmtSize(st.used || 0)} / ${st.limitGB} GB · boshqalar uchun ${st.pinned || 0} ta nusxa (${fmtSize(st.pinnedBytes || 0)})` : '—'}</small></div><div class="rt" id="net-st"><small>Tarmoq tekshirilmoqda…</small></div></div>
     </div>
     <div class="sec">Zaxira va tozalash</div>
-    ${rowsHTML([row('backup', '🗜', '#4dabf7', '#2E7BFF', 'Butun tarixni zaxiralash', 'Barcha chatlar bitta faylga saqlanadi'), row('clear', '🧹', '#FF6B81', '#E52550', 'Keshni tozalash', 'Qurilmadagi media fayllar o‘chiriladi')])}`,
+    ${rowsHTML([prow('backup', '🗜', '#4dabf7', '#2E7BFF', 'Butun tarixni zaxiralash', 'Barcha chatlar bitta faylga saqlanadi'), prow('clear', '🧹', '#FF6B81', '#E52550', 'Keshni tozalash', 'Qurilmadagi media fayllar o‘chiriladi')])}`,
   (p) => {
     const r = qs('#gb-r', p)
     r.oninput = () => { const v = qs('#gb-v', p); if (v) v.textContent = r.value + ' GB' }
@@ -511,9 +511,10 @@ async function pgData() {
     p.onclick = async (e) => {
       const sw = e.target.closest('[data-sw2="share"]')
       if (sw) { const on = localStorage.getItem('g50_share') === '0'; localStorage.setItem('g50_share', on ? '1' : '0'); qs('.sw', sw).classList.toggle('on', on); return }
-      const it = e.target.closest('[data-a]'); if (!it) return
-      if (it.dataset.a === 'clear') { if (await confirmBox('Qurilmadagi barcha media fayllar o‘chirilsinmi? Xabarlar matni saqlanib qoladi.', 'Tozalash')) tryDo(async () => { await Store.clearAll(); mediaCache.clear() }, '🧹 Tozalandi') }
-      if (it.dataset.a === 'backup') {
+      const it = e.target.closest('[data-a],[data-pg]'); if (!it) return
+      const ak = it.dataset.a || it.dataset.pg
+      if (ak === 'clear') { if (await confirmBox('Qurilmadagi barcha media fayllar o‘chirilsinmi? Xabarlar matni saqlanib qoladi.', 'Tozalash')) tryDo(async () => { await Store.clearAll(); mediaCache.clear() }, '🧹 Tozalandi') }
+      if (ak === 'backup') {
         if (!(await confirmBox('Barcha chatlar tarixi bitta faylga yuklab olinadi. Davom etamizmi?', 'Zaxiralash', false))) return
         toast('⏳ Zaxira tayyorlanmoqda…')
         try {
