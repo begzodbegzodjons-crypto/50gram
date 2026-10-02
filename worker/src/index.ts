@@ -1392,6 +1392,14 @@ async function trendSrcDbg(c: C) {
     trySrc("invid_nerdvpn", "https://invidious.nerdvpn.de/api/v1/trending?region=US"),
     trySrc("dm_api", "https://api.dailymotion.com/videos?fields=id&sort=trending&limit=3"),
   ])
+  // cf.cacheEverything opsiyasi bilan (fT xuddi shunday so'raydi) — farqni ko'rish uchun
+  const t0 = Date.now()
+  try {
+    const r = await fetch("https://api.piped.private.coffee/trending?region=US", { headers: TREND_UA, signal: AbortSignal.timeout(8000), cf: { cacheTtl: 600, cacheEverything: true } } as any)
+    const txt = await r.text()
+    let n = 0; try { n = JSON.parse(txt).length } catch {}
+    st.piped_coffee_cf = { status: r.status, ms: Date.now() - t0, items: n, head: txt.slice(0, 80).replace(/\s+/g, " ") }
+  } catch (e: any) { st.piped_coffee_cf = { err: String(e?.message || e).slice(0, 90), ms: Date.now() - t0 } }
   return json(st)
 }
 async function trendInsights(c: C) {
