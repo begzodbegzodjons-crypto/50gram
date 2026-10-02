@@ -1085,7 +1085,7 @@ async function gnewsFetch(src: string, url: string, n: number): Promise<any[]> {
 }
 // KRITIK TUZATISH: eski UZ_MARK /​[oʻ‘’gʻʼ]/ belgilar to'plami har qanday "o"/"g" harfini moslab,
 // deyarli BARCHA inglizcha sarlavhalarni "o'zbekcha" deb tasniflab yuborardi (tarjima o'tkazib yuborilardi).
-const EN_STOP = /\b(the|and|of|in|for|with|to|on|at|from|by|after|before|over|into|about|new|how|why|what|who|top|best|first|vs|amid|says|said|will|would|can|could|should|may|might|must|as|is|are|was|were|be|been|has|have|had|his|her|its|their|this|that|these|those|more|most|than|not|but|or|if|when|while|during|against|out|up|down|off|back|just|now|day|days|year|years|world|us|uk|video|watch|live|report|reports|did|does|do|get|got|make|made|take|took|see|seen|show|showed|reveal|revealed|claim|claims|warn|warned|hit|killed|died|death|major|huge|big|police|man|woman|people|old|time|win|wins|lost|lose|beat|wins|open|opens|new|amid|here|there|still|again|back)\b/i
+const EN_STOP = /\b(the|and|of|in|for|with|to|on|at|from|by|after|before|over|into|about|new|how|why|what|who|top|best|first|vs|amid|says|said|will|would|can|could|should|may|might|must|as|is|are|was|were|be|been|has|have|had|his|her|its|their|this|that|these|those|more|most|than|not|but|or|if|when|while|during|against|out|up|down|off|back|just|now|day|days|year|years|world|us|uk|video|watch|live|report|reports|did|does|do|get|got|make|made|take|took|see|seen|show|showed|reveal|revealed|claim|claims|warn|warned|hit|killed|died|death|major|huge|big|police|man|woman|people|old|time|win|wins|lost|lose|beat|wins|open|opens|amid|here|there|still|again|der|die|das|und|ist|mit|von|auf|fur|für|im|den|dem|ein|eine|einen|nicht|sich|zur|zum|aus|werden|wurde|nach|bei|als|auch|zu|le|la|les|des|une|dans|sur|est|pour|avec|pas|plus|ce|cette|que|qui|el|los|las|por|con|para|del|como|pero|más|ile|için|daha|çok|cin|film|official|video|music|shorts|part)\b/i
 const UZ_MARK = /[oO]['ʻʼ‘’][a-z]|\w+moq(da)?\b|\b(ning|bilan|uchun|yangi|haqida|bo‘yicha|yili|keldi|berdi|ayti|deya|qilmoq|birinchi|katta|yana|ham|va|bu|emas|qarshi|taxmin|xabar|tashrif|bayon|prezident|vazir|davlat|talab)\b/i
 function needsTr(s: string): boolean {
   if (!s || s.length < 3) return false
@@ -1224,7 +1224,7 @@ async function pipedMap(base: string, region: string, pass: number): Promise<any
   } catch { return [] }
 }
 // O'zbeklarga xos kontentni aniqlash (sarlavha bo'yicha) — ular lenta boshiga suriladi
-const UZ_RE = /(o['ʻ‘ʼ]?zbek|uzbek|Ўзбек|Ӯзбек|узбек|toshkent|tashkent|tashkend|samarqand|samarkand|buxoro|bukhara|andijon|namangan|nukus|termiz|qarshi|jizzax|navoiy|urganch|qo['ʻ‘ʼ]qon|kokand|farg['ʻ‘ʼ]ona|fergana|xorazm|surxondaryo|sirdaryo|qashqadaryo|andijon|chilonzor|yunusobod|zbekiston|zbekiston|o'zbekcha|oʻzbekcha)/i
+const UZ_RE = /(o['ʻ‘ʼ]?zbek|uzbek|Ўзбек|Ӯзбек|узбек|Узбек|ткент|Тошкент|Ташкент|тошкент|ткент|samarqand|samarkand|Самарканд|buxoro|bukhara|Бухара|andijon|Андижон|namangan|Наманган|nukus|Нукус|termiz|Термез|qarshi|Карши|jizzax|Жиззах|navoiy|Навои|urganch|Урганч|qo['ʻ‘ʼ]qon|Коканд|kokand|farg['ʻ‘ʼ]ona|fergana|Фергана|xorazm|Хоразм|surxondaryo|sirdaryo|qashqadaryo|chilonzor|yunusobod|zbekiston|zbekiston|Ўзбекистон|Узбекистон|o'zbekcha|oʻzbekcha)/i
 async function youtubeTrending(): Promise<any[]> {
   // Piped: UZ (O'zbekiston — birinchi navbat) + US parallel, 2 pass. LIVE (duration=-1) qo'shilmaydi — ular qotib sekin ishlaydi.
   for (let pass = 0; pass < 2; pass++) {
@@ -1274,7 +1274,7 @@ async function uzSearch(): Promise<any[]> {
         const dur = +v.duration || 0
         if (!id || dur < 1 || dur > 90) return null // FAQAT haqiqiy Shorts uzunligi — uzun video va jonli efir yo'q
         return {
-          kind: "short", vid: "yt", yt: id.split("&")[0], uz: 1,
+          kind: "short", vid: "yt", yt: id.split("&")[0], uz: UZ_RE.test(String(v.title || "")) ? 1 : 0,
           title: String(v.title || ""), image: String(v.thumbnail || ""),
           views: +v.views || 0, duration: dur,
           time: +v.uploaded > 0 ? +v.uploaded : now(),
@@ -1295,7 +1295,7 @@ async function uzSearch(): Promise<any[]> {
 // Reddit (403: serverdan bloklangan) va TikTok (O'zbekistonda VPN'siz ishlamaydi) manbalari olib tashlandi.
 // --- Yagona video hovuzi (edge-kesh 10 daq): Shorts + uzun videolar ---
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  const ck = "https://trend.50gram.internal/poolv6"
+  const ck = "https://trend.50gram.internal/poolv7"
   try {
     const hit = await caches.default.match(ck)
     if (hit) return await hit.json()
@@ -1308,7 +1308,7 @@ async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
   for (const v of [...uz, ...yt]) { if (v && v.yt && !mSeen.has(v.yt)) { mSeen.add(v.yt); merged.push(v) } }
   const ytShorts = merged.filter((v: any) => v.duration >= 1 && v.duration <= 90)
   const ytLong = yt.filter((v: any) => v.duration > 90)
-  // Qidiruvdan kelganlar uz=1 (sarlavhada kalit so'z bo'lmasa ham o'zbek manbadan), qolganlari sarlavha bo'yicha
+  // uz belgisi: sarlavhada o'zbekcha kalit so'z (qidiruvdan kelganlar ham shu yo'l bilan tekshiriladi)
   for (const v of ytShorts) if (!(v as any).uz) (v as any).uz = UZ_RE.test(String(v.title || "")) ? 1 : 0
   const uzList = ytShorts.filter((v: any) => v.uz).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
   const otherList = ytShorts.filter((v: any) => !v.uz).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
