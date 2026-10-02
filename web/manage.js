@@ -345,8 +345,8 @@ async function refreshMeBadges() {
 }
 $('melist').addEventListener('click', async (e) => {
   if (e.target.closest('[data-cam]')) { e.stopPropagation(); return changeMyAvatar() }
-  const it = e.target.closest('[data-a]'); if (!it) return
-  const a = it.dataset.a
+  const it = e.target.closest('[data-a],[data-pg]'); if (!it) return
+  const a = it.dataset.a || it.dataset.pg
   if (a === 'acc') pgAccount()
   if (a === 'notif') pgNotifications()
   if (a === 'priv') pgPrivacy()
