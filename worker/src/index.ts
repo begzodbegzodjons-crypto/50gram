@@ -2187,6 +2187,9 @@ async function cleanup(env: Env) {
   const t = now()
   // O'CHMAS TARIX: xabarlar, fayllar va istoriyalar faqat foydalanuvchi o'zi o'chirmaguncha saqlanadi.
   // Cron faqat texnik chiqindilarni tozalaydi (kodlar, pin joblar, P2P reyestri) — hech qanday yozishmani o'chirmaydi.
+  // MIGRATSIYA-HIMOYA: eskirgan qisqa-TTL yozishmalar (eski versiya qoldiqlari) tasodifan tozalanib qolmasin.
+  await db.run("UPDATE messages SET expires_at=? WHERE expires_at>0 AND expires_at<?", [t + 100 * 365 * DAY, t + 30 * DAY])
+  await db.run("UPDATE media SET expires_at=?, keep=1, next_check=0 WHERE expires_at>0 AND expires_at<? AND dropped=0 AND gone=0 AND (keep=1 OR chat_id>0)", [t + 100 * 365 * DAY, t + 30 * DAY])
   await db.run("DELETE FROM media_chunks WHERE media_id IN (SELECT id FROM media WHERE ((expires_at>0 AND expires_at<?) OR dropped=1) AND gone=0)", [t])
   await db.run("DELETE FROM media WHERE expires_at>0 AND expires_at<? AND keep=0", [t])
   await db.run("DELETE FROM media WHERE dropped=1 AND created_at<? AND id NOT IN (SELECT media_id FROM peer_have)", [t - 30 * DAY])
