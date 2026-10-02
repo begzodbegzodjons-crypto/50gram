@@ -1368,6 +1368,27 @@ async function trendTrDbg(c: C) {
   } catch (e: any) { st.ai = { err: String(e?.message || e).slice(0, 120) } }
   return json(st)
 }
+// Diagnostika: video manbalariga worker'dan kirish holati (status/ms/hajm)
+async function trendSrcDbg(c: C) {
+  const st: any = {}
+  const trySrc = async (name: string, url: string) => {
+    const t0 = Date.now()
+    try {
+      const r = await fetch(url, { headers: TREND_UA, signal: AbortSignal.timeout(8000) })
+      const txt = await r.text()
+      let n = 0
+      try { const j = JSON.parse(txt); n = (Array.isArray(j) ? j.length : (j.items?.length || (j.list?.length || 0))) } catch {}
+      st[name] = { status: r.status, ms: Date.now() - t0, bytes: txt.length, items: n, head: txt.slice(0, 90).replace(/\s+/g, " ") }
+    } catch (e: any) { st[name] = { err: String(e?.message || e).slice(0, 90), ms: Date.now() - t0 } }
+  }
+  await Promise.all([
+    trySrc("piped_coffee", "https://api.piped.private.coffee/trending?region=US"),
+    trySrc("piped_kavin", "https://pipedapi.kavin.rocks/trending?region=US"),
+    trySrc("invid_nerdvpn", "https://invidious.nerdvpn.de/api/v1/trending?region=US"),
+    trySrc("dm_api", "https://api.dailymotion.com/videos?fields=id&sort=trending&limit=3"),
+  ])
+  return json(st)
+}
 async function trendInsights(c: C) {
   const rows = await c.db.q("SELECT cat, imp, clk, wt FROM trend_stats ORDER BY clk DESC").catch(() => [])
   let imp = 0, clk = 0, wt = 0
@@ -2032,6 +2053,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/trend/ev", trendEv],
   ["GET", "/trend/insights", trendInsights],
   ["GET", "/trend/trdbg", trendTrDbg],
+  ["GET", "/trend/srcdbg", trendSrcDbg, true],
   ["POST", "/posts", createPost],
   ["DELETE", "/posts/:id", deletePost],
   ["POST", "/posts/:id/like", likePost],
