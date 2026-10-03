@@ -107,6 +107,12 @@ async function ensureSchema(db: Db) {
     "CREATE INDEX IF NOT EXISTS idx_msg_comments_mid ON msg_comments (message_id)",
     "CREATE INDEX IF NOT EXISTS idx_msg_comments_chat ON msg_comments (chat_id, created_at)",
     "ALTER TABLE live_viewers ADD COLUMN rewarded INT NOT NULL DEFAULT 0",
+    // Task 39: izohlar — javob-replies, stiker izohlar va reaksiyalar (baholash)
+    "ALTER TABLE post_comments ADD COLUMN parent_id BIGINT NOT NULL DEFAULT 0",
+    "ALTER TABLE post_comments ADD COLUMN sticker VARCHAR(64) NOT NULL DEFAULT ''",
+    "CREATE INDEX IF NOT EXISTS idx_pc_parent ON post_comments (parent_id)",
+    "CREATE TABLE IF NOT EXISTS comment_reacts (comment_id BIGINT NOT NULL, user_id BIGINT NOT NULL, emoji VARCHAR(8) NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY(comment_id,user_id,emoji))",
+    "CREATE INDEX IF NOT EXISTS idx_creacts_c ON comment_reacts (comment_id)",
   ]
   for (const s of stmts) { try { await db.run(s) } catch {} }
   try {
@@ -1758,20 +1764,78 @@ async function reels(c: C) {
   if (list.length) await c.db.run(`UPDATE posts SET views=views+1 WHERE id IN (${ph(list.map((x) => x.id))})`, list.map((x) => x.id))
   return json(await postsOut(c, list))
 }
+// Task 39: izohlar — ildiz + javoblar (chuqurlik 1, Telegram uslubi), reaksiyalar, stiker izohlar
+const REACT_EMOJIS = ["❤️", "👍", "🔥", "😮", "😂", "🥰", "👏", "😢"]
 async function listComments(c: C) {
-  const rows = await c.db.q("SELECT * FROM post_comments WHERE post_id=? ORDER BY id LIMIT 200", [+c.p.id])
-  const um = await usersByIds(c, rows.map((r) => r.user_id))
-  return json(rows.map((r) => ({ id: r.id, text_body: r.text_body, created_at: r.created_at, user: um.get(r.user_id) || null })))
+  const rows = await c.db.q("SELECT id,parent_id,user_id,text_body,sticker,created_at FROM post_comments WHERE post_id=? ORDER BY id LIMIT 300", [+c.p.id])
+  const um = await usersByIds(c, [...new Set(rows.map((r) => r.user_id))])
+  const agg = new Map<number, any[]>(), mine = new Set<string>()
+  const ids = rows.map((r) => r.id as number)
+  if (ids.length) {
+    const rg = await c.db.q(`SELECT comment_id,emoji,COUNT(*) AS n FROM comment_reacts WHERE comment_id IN (${ph(ids)}) GROUP BY comment_id,emoji`, ids).catch((): any[] => [])
+    for (const r of rg) { const a = agg.get(Number(r.comment_id)) || []; a.push({ emoji: r.emoji, n: Number(r.n), mine: false }); agg.set(Number(r.comment_id), a) }
+    const mr = await c.db.q(`SELECT comment_id,emoji FROM comment_reacts WHERE user_id=? AND comment_id IN (${ph(ids)})`, [c.uid, ...ids]).catch((): any[] => [])
+    for (const r of mr) mine.add(Number(r.comment_id) + "\u0000" + String(r.emoji))
+    for (const [cid, a] of agg) for (const x of a) if (mine.has(cid + "\u0000" + x.emoji)) x.mine = true
+  }
+  const nodes = rows.map((r) => ({ id: r.id, parent_id: Number(r.parent_id || 0), text_body: r.text_body || "", sticker: r.sticker || "", created_at: r.created_at, user: um.get(r.user_id) || null, mine: r.user_id === c.uid, reacts: agg.get(r.id) || [], reply_count: 0, replies: [] as any[] }))
+  const map = new Map(nodes.map((n) => [n.id, n]))
+  const roots: any[] = []
+  for (const n of nodes) { if (n.parent_id && map.has(n.parent_id)) map.get(n.parent_id)!.replies.push(n); else roots.push(n) }
+  for (const r of roots) r.reply_count = r.replies.length
+  return json({ roots, total: rows.length, emojis: REACT_EMOJIS })
 }
 async function addComment(c: C) {
   const text = str(c.b.text_body, 1000)
-  if (!text) fail("Izoh bo‘sh")
-  const p = await c.db.one("SELECT chat_id FROM posts WHERE id=?", [+c.p.id])
+  const sticker = str(c.b.sticker, 64)
+  if (!text && !sticker) fail("Izoh bo‘sh")
+  let parentId = Math.max(0, +c.b.parent_id || 0)
+  const p = await c.db.one("SELECT id,author_id,chat_id FROM posts WHERE id=?", [+c.p.id])
   if (!p) fail("Post topilmadi", 404)
   if (p.chat_id) { const ch = await needChat(c, p.chat_id); if (!parse(ch.settings, DEF_SET).comments) fail("Izohlar o‘chirilgan") }
-  await c.db.run("INSERT INTO post_comments(id,post_id,user_id,text_body,created_at) VALUES(?,?,?,?,?)", [newId(), +c.p.id, c.uid, text, now()])
+  let parent: any = null
+  if (parentId) {
+    parent = await c.db.one("SELECT id,parent_id,user_id FROM post_comments WHERE id=? AND post_id=?", [parentId, +c.p.id])
+    if (!parent) fail("Javob beriladigan izoh topilmadi", 404)
+    if (+parent.parent_id) parentId = +parent.parent_id // javob javobga — ildiz ostiga (chuqurlik 1)
+  }
+  const id = newId(), t = now()
+  await c.db.run("INSERT INTO post_comments(id,post_id,parent_id,user_id,text_body,sticker,created_at) VALUES(?,?,?,?,?,?,?)", [id, +c.p.id, parentId, c.uid, text, sticker, t])
   await c.db.run("UPDATE posts SET comment_count=comment_count+1 WHERE id=?", [+c.p.id])
-  return listComments(c)
+  const target = parent ? +parent.user_id : +p.author_id
+  if (target && target !== c.uid) c.wait(notify(c.env, [target], { type: "comment", post_id: +c.p.id, comment_id: id, reply: !!parent }))
+  const um = await usersByIds(c, [c.uid])
+  return json({ id, parent_id: parentId, text_body: text, sticker, created_at: t, user: um.get(c.uid) || null, mine: true, reacts: [], reply_count: 0, replies: [] })
+}
+// Izohga emoji-reaksiya qo‘yish/olib tashlash (toggle)
+async function reactComment(c: C) {
+  const id = +c.p.id
+  const emoji = str(c.b.emoji, 8)
+  if (!REACT_EMOJIS.includes(emoji)) fail("Emoji qo‘llanmaydi")
+  const row = await c.db.one("SELECT id FROM post_comments WHERE id=?", [id])
+  if (!row) fail("Izoh topilmadi", 404)
+  const ex = await c.db.one("SELECT 1 AS x FROM comment_reacts WHERE comment_id=? AND user_id=? AND emoji=?", [id, c.uid, emoji])
+  if (ex) await c.db.run("DELETE FROM comment_reacts WHERE comment_id=? AND user_id=? AND emoji=?", [id, c.uid, emoji])
+  else await c.db.run("INSERT INTO comment_reacts(comment_id,user_id,emoji,created_at) VALUES(?,?,?,?)", [id, c.uid, emoji, now()])
+  const n = await c.db.one("SELECT COUNT(*) AS cnt FROM comment_reacts WHERE comment_id=? AND emoji=?", [id, emoji])
+  return json({ on: !ex, emoji, n: Number(n?.cnt || 0) })
+}
+// Izohni o'chirish: muallif, post egasi yoki kanal admini (javoblari bilan birga)
+async function deleteComment(c: C) {
+  const row = await c.db.one("SELECT id,user_id,post_id FROM post_comments WHERE id=?", [+c.p.id])
+  if (!row) fail("Izoh topilmadi", 404)
+  const p = await c.db.one("SELECT author_id,chat_id FROM posts WHERE id=?", [+row.post_id])
+  let can = row.user_id === c.uid || !!(p && +p.author_id === c.uid)
+  if (!can && p && +p.chat_id > 0) {
+    const m = await c.db.one("SELECT role FROM chat_members WHERE chat_id=? AND user_id=?", [+p.chat_id, c.uid])
+    can = !!m && ["owner", "admin"].includes(String(m.role))
+  }
+  if (!can) fail("Ruxsat yo‘q", 403)
+  await c.db.run(`DELETE FROM comment_reacts WHERE comment_id IN (SELECT id FROM post_comments WHERE id=? OR parent_id=?)`, [row.id, row.id]).catch(() => {})
+  const cnt = await c.db.one("SELECT COUNT(*) AS cnt FROM post_comments WHERE id=? OR parent_id=?", [row.id, row.id])
+  await c.db.run("DELETE FROM post_comments WHERE id=? OR parent_id=?", [row.id, row.id])
+  await c.db.run("UPDATE posts SET comment_count=GREATEST(0,comment_count-?) WHERE id=?", [Number(cnt?.cnt || 1), +row.post_id])
+  return json({ ok: true })
 }
 
 // ------------------------- Qo'ng'iroqlar (WebRTC signalizatsiya) -------------------------
@@ -2351,6 +2415,8 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/posts/:id/like", likePost],
   ["GET", "/posts/:id/comments", listComments],
   ["POST", "/posts/:id/comments", addComment],
+  ["POST", "/comments/:id/react", reactComment],
+  ["DELETE", "/comments/:id", deleteComment],
   ["GET", "/push/vapid", async (c) => json({ key: c.env.VAPID_PUBLIC_KEY || "" }), true],
   ["POST", "/push/subscribe", pushSubscribe],
   ["POST", "/push/unsubscribe", pushUnsubscribe],
@@ -2415,6 +2481,23 @@ async function cleanup(env: Env) {
   await db.run("DELETE FROM push_subs WHERE updated_at<?", [t - 90 * DAY]) // 90 kun ishlatilmagan obunalar
   await db.run("DELETE FROM peer_have WHERE updated_at<?", [t - 120 * DAY])
   await db.run("UPDATE lives SET ended_at=? WHERE ended_at=0 AND started_at<?", [t, t - 12 * 3600000])
+  // TiDB XOTIRA POSBONI (Task 39): server — faqat ko'prik. Asosiy xotira — foydalanuvchilar
+  // qurilmalari (planReplicas kamida 15 nusxa yig'adi, P2P o'rgimchak to'ri yetkazadi).
+  // Serverdagi shifrlangan media keshi chegaradan oshsa — eng eski va kamida 2 ta qurilmada
+  // ishonchli nusxasi bor fayllar serverdan bo'shatiladi (dropped=1 → chunklar sweep'da o'chadi).
+  // Keyin ham fayl qurilmalar orasidan topiladi; server joyi abadiy o'smaydi.
+  try {
+    const MEDIA_KEEP_BYTES = 2.5 * 1024 * 1024 * 1024 // ~2.5 GB — TiDB bepul limit xavfsiz zonasida
+    const msz = await db.one("SELECT COALESCE(SUM(size),0) AS n FROM media WHERE dropped=0 AND gone=0 AND keep=1")
+    if (Number(msz?.n || 0) > MEDIA_KEEP_BYTES) {
+      const cands = await db.q("SELECT id FROM media WHERE dropped=0 AND gone=0 AND keep=1 AND replicas>=2 ORDER BY created_at LIMIT 100")
+      if (cands.length) {
+        const ids = cands.map((x) => x.id)
+        await db.run(`UPDATE media SET dropped=1 WHERE id IN (${ph(ids)})`, ids)
+        console.log("Xotira posboni:", ids.length, "fayl serverdan bo'shatildi (nusxalari qurilmalarda)")
+      }
+    }
+  } catch (e) { console.log("Xotira posboni xatosi", String(e)) }
 }
 
 export default {
@@ -2427,6 +2510,14 @@ export default {
       const h = new Headers(asset.headers)
       h.set("Content-Disposition", 'attachment; filename="50gram.apk"')
       h.set("Cache-Control", "public, max-age=3600")
+      return new Response(asset.body, { status: asset.status, headers: h })
+    }
+    // index.html: HAR SAFAR qayta tasdiqlansin — APK WebView va brauzer hech qachon eski
+    // qobiqni (masalan TEST rejimi bannerisiz nusxani) xotirasidan qaytarmasin (Task 39)
+    if (url.pathname === "/" || url.pathname === "/index.html") {
+      const asset = await env.ASSETS!.fetch(new Request(url.toString(), { method: "GET" }))
+      const h = new Headers(asset.headers)
+      h.set("Cache-Control", "no-cache, must-revalidate")
       return new Response(asset.body, { status: asset.status, headers: h })
     }
     if (!url.pathname.startsWith("/api/")) return new Response("Not found", { status: 404 })

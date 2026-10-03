@@ -418,6 +418,58 @@ body.dark .sheet .grab{background:linear-gradient(90deg,#31415F,#42527A);box-sha
 .inrow{display:flex;gap:8px;align-items:center}
 .inrow .inp{margin:0}
 
+/* ---------- IZOHLAR 2.0 (Task 39) — Telegram uslubi: javoblar, reaksiyalar, stiker izohlar ---------- */
+.cm-sort{display:flex;gap:8px;margin:2px 0 8px}
+.cm-sort button{border:1px solid var(--chiziq);background:var(--sirt2);border-radius:20px;padding:5px 13px;font-size:12.5px;font-weight:700;color:var(--xira);transition:transform .12s,background .15s}
+.cm-sort button.on{background:linear-gradient(135deg,#0A7CFF,#3D5AFE);border-color:transparent;color:#fff;box-shadow:0 3px 10px rgba(10,124,255,.3)}
+.cm-sort button:active{transform:scale(.94)}
+.cm-total{font-style:normal;color:var(--xira);font-weight:700;font-size:13px;margin-left:4px}
+.cm-list{max-height:52vh;overflow-y:auto;overscroll-behavior:contain;padding:2px 2px 6px;min-height:80px;scroll-behavior:smooth}
+.cmskel{display:flex;flex-direction:column;gap:14px;padding:8px 2px}
+.cmskel i{height:44px;border-radius:14px;background:linear-gradient(90deg,var(--sirt2) 25%,rgba(125,140,180,.18) 50%,var(--sirt2) 75%);background-size:200% 100%;animation:cmsk 1.1s infinite}
+.cmskel i:nth-child(2){width:78%}.cmskel i:nth-child(3){width:88%}.cmskel i:nth-child(4){width:64%}
+@keyframes cmsk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.cmt2{display:flex;gap:9px;padding:7px 0;animation:cmIn .22s ease both}
+@keyframes cmIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.cmt2 .cm-bw{flex:1;min-width:0}
+.cmt2 .cm-bub{position:relative;background:var(--sirt2);border:1px solid var(--chiziq);border-radius:16px 16px 16px 5px;padding:7px 12px 8px;box-shadow:0 1px 2px rgba(18,28,68,.05);font-size:13.5px;line-height:1.45;word-wrap:break-word;transition:box-shadow .15s}
+.cmt2 .cm-bub b{font-size:12.5px;margin-right:4px}
+.cmt2 .cm-bub small{font-size:11px}
+.cmt2.rep{padding-left:14px;position:relative}
+.cmt2.rep .cm-bub{border-radius:14px 14px 14px 4px;padding:5px 10px 6px;font-size:13px;background:var(--sirt2)}
+.cmt2.rep .avw{margin-top:2px}
+.cm-sub{margin-top:4px;padding-left:10px;border-left:2px solid var(--chiziq);display:flex;flex-direction:column;gap:2px}
+.cm-tx{margin-top:1px}
+.cm-stk{width:84px;height:84px;display:block;margin-top:3px}
+.cm-stk.e{font-size:54px;line-height:1.2;width:auto;height:auto}
+.cmt2.rep .cm-stk{width:64px;height:64px}
+.cmt2.rep .cm-stk.e{font-size:40px}
+.cm-chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
+.cm-chip{border:1px solid var(--chiziq);background:var(--yuz);border-radius:14px;padding:2px 9px;font-size:12px;font-weight:700;box-shadow:0 1px 3px rgba(18,28,68,.08);transition:transform .14s,background .15s,border-color .15s;animation:chipPop .25s ease both}
+@keyframes chipPop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+.cm-chip:active{transform:scale(.86)}
+.cm-chip.on{background:linear-gradient(135deg,#FFE3EE,#FFD1E3);border-color:#FF7BAE}
+.cm-more{font-size:11px;color:var(--xira);align-self:center;font-weight:700}
+.cm-act{display:flex;gap:14px;padding:3px 6px 0 8px}
+.cm-act b{font-size:11.5px;color:var(--xira);font-weight:700;cursor:pointer}
+.cm-act b:active{color:var(--asos)}
+.cm-pend{opacity:.6}
+.cm-fail{color:var(--qizil);font-weight:700;cursor:pointer}
+.cm-failb{position:absolute;left:-1px;top:-1px;bottom:-1px;width:3px;border-radius:3px;background:var(--qizil)}
+.cm-rv{display:flex;align-items:center;gap:8px;background:var(--sirt2);border:1px solid var(--chiziq);border-radius:12px;padding:7px 10px;margin:6px 0 0;font-size:12.5px}
+.cm-rvi{font-size:16px}
+.cm-rvt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--xira)}
+.cm-rvt b{color:var(--matn)}
+.cm-stkp{border-top:1px solid var(--chiziq);margin-top:8px;padding-top:8px;max-height:230px;overflow-y:auto;overscroll-behavior:contain}
+.cm-in{margin-top:8px}
+.cm-in .avw{flex:none}
+.cm-emoji{font-size:22px;padding:4px 7px}
+.cm-pick{position:fixed;z-index:290;display:flex;gap:2px;background:var(--yuz);border:1px solid var(--chiziq);border-radius:24px;padding:6px 8px;box-shadow:0 10px 34px rgba(18,28,68,.3);animation:pickIn .18s ease both;align-items:center}
+@keyframes pickIn{from{opacity:0;transform:translateY(10px) scale(.85)}to{opacity:1;transform:none}}
+.cm-pick button{border:0;background:none;font-size:25px;padding:4px 5px;border-radius:50%;transition:transform .13s}
+.cm-pick button:active{transform:scale(1.35)}
+.cm-pick button.del{font-size:17px;opacity:.55}
+
 /* ---------- STORY VIEWER ---------- */
 .over{position:fixed;inset:0;z-index:80;background:#000;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .sv{position:relative;width:100%;max-width:480px;height:100%;overflow:hidden;background:#111}

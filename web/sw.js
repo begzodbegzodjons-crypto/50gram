@@ -1,9 +1,11 @@
 // 50 Gram service worker: ilova qobig'ini keshlaydi (oflayn ochiladi) + Telegram-uslubidagi Web Push.
-const V = '50gram-v28'
+const V = '50gram-v29'
 const SHELL = ['./', 'index.html', 'style.css', 'config.js', 'core.js', 'p2p.js', 'storage.js', 'chat.js', 'manage.js', 'social.js', 'rtc.js', 'logo.png', 'icon-192.png', 'icon-512.png', 'maskable-192.png', 'maskable-512.png', 'apple-touch-icon.png', 'favicon.png', 'manifest.json',
   // Task 29: Manrope shrifti + animatsiyali stiker paketlari + sovg'alar
   'fonts/manrope-latin.woff2', 'fonts/manrope-latin-ext.woff2',
-].concat(['mood/1', 'mood/2', 'mood/3', 'mood/4', 'mood/5', 'mood/6', 'mood/7', 'mood/8', 'love/1', 'love/2', 'love/3', 'love/4', 'love/5', 'love/6', 'love/7', 'love/8', 'party/1', 'party/2', 'party/3', 'party/4', 'party/5', 'party/6', 'party/7', 'party/8', 'gifts/star', 'gifts/heart', 'gifts/rose', 'gifts/fire', 'gifts/cake', 'gifts/crown', 'gifts/diamond', 'gifts/rocket'].map((p) => 'stickers/' + p + '.svg'))
+].concat(['mood/1', 'mood/2', 'mood/3', 'mood/4', 'mood/5', 'mood/6', 'mood/7', 'mood/8', 'love/1', 'love/2', 'love/3', 'love/4', 'love/5', 'love/6', 'love/7', 'love/8', 'party/1', 'party/2', 'party/3', 'party/4', 'party/5', 'party/6', 'party/7', 'party/8', 'gifts/star', 'gifts/heart', 'gifts/rose', 'gifts/fire', 'gifts/cake', 'gifts/crown', 'gifts/diamond', 'gifts/rocket',
+  // Task 39: yangi paketlar — his-tuyg'ular, hayvonlar, ovqatlar, tabiat
+  'his/1', 'his/2', 'his/3', 'his/4', 'his/5', 'his/6', 'his/7', 'his/8', 'hayvonlar/1', 'hayvonlar/2', 'hayvonlar/3', 'hayvonlar/4', 'hayvonlar/5', 'hayvonlar/6', 'hayvonlar/7', 'hayvonlar/8', 'ovqat/1', 'ovqat/2', 'ovqat/3', 'ovqat/4', 'ovqat/5', 'ovqat/6', 'ovqat/7', 'ovqat/8', 'tabiat/1', 'tabiat/2', 'tabiat/3', 'tabiat/4', 'tabiat/5', 'tabiat/6', 'tabiat/7', 'tabiat/8'].map((p) => 'stickers/' + p + '.svg'))
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(V).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())) })
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== V).map((k) => caches.delete(k)))).then(() => self.clients.claim())) })
 self.addEventListener('fetch', (e) => {

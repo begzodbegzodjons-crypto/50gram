@@ -15,11 +15,15 @@ const STICKERS = [
   ['👍', 'a-pop'], ['😡', 'a-shake'], ['🤔', 'a-flip'], ['💃', 'a-raqs'], ['🎉', 'a-spin'], ['😴', 'a-float'], ['🙈', 'a-shake'], ['🤗', 'a-pop'],
   ['🐱', 'a-jump'], ['🐶', 'a-wave'], ['🌟', 'a-spin'], ['🚀', 'a-float'], ['🌹', 'a-pop'], ['🍉', 'a-spin'], ['☕', 'a-float'], ['💪', 'a-pulse'],
 ]
-// Task 29: animatsiyali stiker paketlari (SVG fayllar — <img> ichida jonli harakatlanadi)
+// Task 29/39: paket stikerini yuborish (animatsiyali SVG) — 7 paket, 56+ jonli stiker
 const STICKER_PACKS = [
   { id: 'mood', name: 'Kayfiyat', icon: '😀', c: '#FFB020', items: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => 'mood/' + i + '.svg') },
   { id: 'love', name: 'Sevgi', icon: '💖', c: '#FF3B5C', items: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => 'love/' + i + '.svg') },
   { id: 'party', name: 'Bayram', icon: '🎉', c: '#7C5CFF', items: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => 'party/' + i + '.svg') },
+  { id: 'his', name: 'His-tuyg‘ular', icon: '😂', c: '#FC6262', items: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => 'his/' + i + '.svg') },
+  { id: 'hayvonlar', name: 'Hayvonlar', icon: '🐱', c: '#22C55E', items: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => 'hayvonlar/' + i + '.svg') },
+  { id: 'ovqat', name: 'Ovqatlar', icon: '🍕', c: '#FF6A88', items: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => 'ovqat/' + i + '.svg') },
+  { id: 'tabiat', name: 'Tabiat', icon: '🌈', c: '#0EA5E9', items: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => 'tabiat/' + i + '.svg') },
 ]
 const STICKER_RECENT_KEY = 'g50_rec_stk'
 const GIFS = [

@@ -41,6 +41,9 @@ import org.json.JSONObject;
  * - v2.4: TIZIM "ORQAGA" TUGMASI endi ilovani yopmaydi — ilova ichida bir qadam orqaga
  *   qaytadi (ochiq chat/efir/oyna yopiladi, JS __50back orqali). Hech narsa ochiq
  *   bo'lmasa ilova fonga o'tadi (moveTaskToBack) — xabarlar olib kelaveradi
+ * - v2.6: ESKI SAHIFA MUAMMOSI tugatildi — ilova fonda kunlar bo'ylab tursa, WebView'dagi
+ *   sahifa eskirib qolardi (yangi banner/funksiyalar ko'rinmasdi). Endi 5 soatdan eski
+ *   sahifa ilovaga qaytganda avtomatik yangilanadi (qo'ng'iroq paytida uzilmaydi)
  */
 public class MainActivity extends Activity {
 
@@ -57,6 +60,7 @@ public class MainActivity extends Activity {
   View splash;
   ValueCallback<Uri[]> fileCb;
   volatile PermissionRequest pendingWebReq; // OS ruxsat javobi kutilayotgan web so'rovi
+  volatile long lastLoadAt = 0; // sahifa oxirgi marta qachon yuklangan (5 soatlik yangilash uchun)
   final Handler main = new Handler(Looper.getMainLooper());
 
   /** JS <-> Native ko'prik: qo'ng'iroqlar fon rejimida native oyna ko'rsatadi */
@@ -88,7 +92,7 @@ public class MainActivity extends Activity {
     }
 
     @JavascriptInterface
-    public String version() { return "2.5"; }
+    public String version() { return "2.6"; }
 
     /** Web tomondan ruxsatlarni ataylab so'rash (masalan qo'ng'iroq tugmasi bosilganda). */
     @JavascriptInterface
@@ -122,7 +126,7 @@ public class MainActivity extends Activity {
     s.setCacheMode(WebSettings.LOAD_DEFAULT);
     s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     s.setJavaScriptCanOpenWindowsAutomatically(true);
-    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.5");
+    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.6");
     web.addJavascriptInterface(new Bridge(), "Android50");
 
     web.setWebViewClient(new WebViewClient() {
@@ -136,6 +140,7 @@ public class MainActivity extends Activity {
 
       @Override
       public void onPageFinished(WebView v, String url) {
+        lastLoadAt = System.currentTimeMillis();
         hideSplash();
       }
     });
@@ -199,6 +204,7 @@ public class MainActivity extends Activity {
       web.loadUrl(URL);
     } else {
       web.restoreState(savedInstanceState);
+      lastLoadAt = System.currentTimeMillis();
       hideSplash();
     }
     web.resumeTimers();
@@ -457,6 +463,14 @@ public class MainActivity extends Activity {
     visible = true; // ilova ekranda — xizmat polling to'xtatadi (WS ko'rsatayapti)
     if (web != null) {
       web.resumeTimers();
+      // v2.6 TASK 39: sahifa 5 soatdan eski bo'lib qolsa — avtomatik yangilanadi. Aks holda
+      // ilova xotirada turib beradi va yangi versiya (TEST rejimi banneri ham) ko'rinmay qolardi.
+      // Qo'ng'iroq oynasi ko'rinayotganda uzilmaydi — foydalanuvchi javob berishi kerak.
+      if (lastLoadAt > 0 && System.currentTimeMillis() - lastLoadAt > 5 * 3600000L
+          && !CallAlert.showing) {
+        lastLoadAt = System.currentTimeMillis();
+        try { web.reload(); } catch (Exception ignored) { }
+      }
       // Ilovaga qaytganda WebSocket qayta ulanadi + fon qo'ng'irog'i UI'da ko'rinadi
       try { web.evaluateJavascript("try{window.__appResume&&window.__appResume()}catch(e){}", null); } catch (Exception e) { }
     }

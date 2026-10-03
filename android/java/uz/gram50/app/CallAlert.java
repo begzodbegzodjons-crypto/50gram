@@ -17,6 +17,8 @@ public class CallAlert {
 
   static final String CH_ID = "50gram_calls";
   static final int NOTIF_ID = 2001;
+  /** Qo'ng'iroq oynasi ko'rinayotgani (MainActivity kabi oqimlar uchun — reload buzmasin) */
+  public static volatile boolean showing = false;
 
   static void show(Context ctx, String name, boolean video, String callId) {
     NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -70,10 +72,11 @@ public class CallAlert {
       // To'liq ekran: qulf ekranda ham butun oyna ochiladi (ruxsat berilgan bo'lsa)
       b.setFullScreenIntent(pTap, true);
     }
-    try { nm.notify(NOTIF_ID, b.build()); } catch (Exception ignored) { }
+    try { nm.notify(NOTIF_ID, b.build()); showing = true; } catch (Exception ignored) { }
   }
 
   static void cancel(Context ctx) {
+    showing = false;
     try {
       NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
       if (nm != null) nm.cancel(NOTIF_ID);

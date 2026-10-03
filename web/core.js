@@ -834,9 +834,22 @@ async function startApp() {
 }
 window.addEventListener('online', () => { setConn(); if (!S.wsOk) wsConnect() })
 window.addEventListener('offline', setConn)
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.token) { poll(); if (S.cur) markRead(S.cur) } })
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.token) { g50SoftUpdate(); poll(); if (S.cur) markRead(S.cur) } })
+// Task 39: APK/brauzer ESKI sahifani xotirada saqlab qolmasin — 5 soatdan eski ochiq sahifa
+// qayta yuklanadi (yangi versiya + TEST rejimi banneri darhol ko'rinadi). Faol qo'ng'iroq/efir
+// yoki ochiq oyna paytida hech qachon uzilmaydi — keyingi qaytishda yangilanadi.
+const G50_BOOT = Date.now()
+function g50SoftUpdate() {
+  try {
+    if (Date.now() - G50_BOOT < 5 * 3600e3) return
+    if (typeof CALL !== 'undefined' && CALL) return
+    if (typeof LIVE !== 'undefined' && LIVE) return
+    if (qs('.shbg')) return // ochiq oyna bor — keyingi qaytishda
+    location.replace(location.href)
+  } catch {}
+}
 // APK ilovadan qaytganda: darhol sinxronlash va uzilgan WS'ni tiklash (MainActivity.onResume chaqiradi)
-window.__appResume = () => { try { if (!S.token) return; poll(); if (S.cur) markRead(S.cur); if (!S.ws || S.ws.readyState === 3) wsConnect() } catch {} }
+window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); poll(); if (S.cur) markRead(S.cur); if (!S.ws || S.ws.readyState === 3) wsConnect() } catch {} }
 window.addEventListener('hashchange', handleHash)
 async function handleHash() {
   const h = decodeURIComponent(location.hash.slice(1))

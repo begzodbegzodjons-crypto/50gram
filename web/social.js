@@ -406,7 +406,7 @@ function reelHTML(p) {
     </div>
     <div class="racts">
       <button data-like class="${p.liked ? 'on' : ''}">${p.liked ? '❤️' : '🤍'}<i>${p.like_count || 0}</i></button>
-      <button data-cmt>💬<i>${p.comment_count || 0}</i></button>
+      <button data-cmt>💬<i data-scc="${p.id}">${p.comment_count || 0}</i></button>
       <button data-psh>↗️<i>Ulashish</i></button>
       ${p.can_delete ? '<button data-pdel>🗑<i>O‘chirish</i></button>' : ''}
     </div>
@@ -573,17 +573,182 @@ $('feedlist').addEventListener('click', async (e) => {
 })
 $('t-feed').addEventListener('scroll', (e) => { const t = e.target; if (t.scrollHeight - t.scrollTop - t.clientHeight < 600) { if (feedMode === 'trend') loadTrend(); else loadFeed() } }, { passive: true })
 $('t-reels').addEventListener('scroll', (e) => { const t = e.target; if (t.scrollHeight - t.scrollTop - t.clientHeight < 900) loadReels() }, { passive: true })
+// --- Task 39: Telegram-uslubidagi izohlar — javob-lar, emoji-reaksiyalar, stiker izohlar ---
+const CM_REACTS = ['❤️', '👍', '🔥', '😮', '😂', '🥰', '👏', '😢']
+let cmPress = null, cmPick = null
+function cmStickerHTML(s) {
+  if (!s) return ''
+  return s.indexOf('/') >= 0
+    ? `<img class="cm-stk" src="stickers/${esc(s)}" alt="" loading="lazy">`
+    : `<span class="cm-stk e">${esc(s)}</span>`
+}
+function cmChipHTML(k) {
+  const rc = k.reacts || []
+  const chips = rc.slice(0, 3).map((r) => `<button class="cm-chip ${r.mine ? 'on' : ''}" data-crk="${esc(r.emoji)}" data-crkc="${r.n}">${r.emoji} ${r.n > 99 ? '99+' : r.n}</button>`).join('')
+  const tot = rc.reduce((a, x) => a + x.n, 0)
+  return chips + (rc.length > 3 ? `<span class="cm-more">+${tot > 99 ? '99+' : tot}</span>` : '')
+}
+function cmNodeHTML(k, isReply, rootId) {
+  const t = k.text_body ? `<div class="cm-tx">${linkify(k.text_body)}</div>` : ''
+  const st = cmStickerHTML(k.sticker)
+  const pend = k.pending ? '<span class="cm-pend">⏳</span>' : k.failed ? '<span class="cm-fail" data-cretry>⚠️ Qayta</span>' : ''
+  const acts = `<div class="cm-act"><b data-crply="${k.id}">Javob berish</b>${k.mine ? `<b data-cdel="${k.id}">O‘chirish</b>` : ''}</div>`
+  const replies = !isReply && k.replies && k.replies.length
+    ? `<div class="cm-sub">${k.replies.map((r) => cmNodeHTML(r, true, k.id)).join('')}</div>` : ''
+  return `<div class="cmt2 ${isReply ? 'rep' : ''}" data-cid="${k.id}" data-root="${rootId || k.id}">
+    ${avHTML(k.user, isReply ? 26 : 36, { noStory: true })}
+    <div class="cm-bw">
+      <div class="cm-bub">${k.failed ? '<span class="cm-failb"></span>' : ''}<b>${esc(uname(k.user))}</b> <small class="mut">${fmtAgo(k.created_at)} ${pend}</small>${t}${st}
+        <div class="cm-chips">${cmChipHTML(k)}</div>
+      </div>
+      ${acts}
+      ${replies}
+    </div>
+  </div>`
+}
 async function commentsSheet(p, el) {
-  let list = []
-  try { list = await api(`/posts/${p.id}/comments`) } catch (e) { return toast('⚠️ ' + e.message) }
-  const draw = () => list.map((k) => `<div class="cmt">${avHTML(k.user, 34, { noStory: true })}<div class="cb2"><b>${esc(uname(k.user))}</b> <small class="mut">${fmtAgo(k.created_at)}</small><div>${linkify(k.text_body)}</div></div></div>`).join('') || '<div class="empty">Birinchi izohni yozing</div>'
-  const sh = sheet(h3('Izohlar') + `<div id="cm-l" style="max-height:55vh;overflow:auto">${draw()}</div><div class="inrow"><input class="inp" id="cm-i" maxlength="1000" placeholder="Izoh yozing…"><button class="btn" id="cm-s" style="width:auto">➤</button></div>`)
-  const send = async () => {
-    const i = qs('#cm-i', sh), t = i.value.trim(); if (!t) return
-    try { const k = await post(`/posts/${p.id}/comments`, { text_body: t }); i.value = ''; list.push(k.user ? k : { ...k, user: S.me, text_body: t, created_at: Date.now() }); p.comment_count = (p.comment_count || 0) + 1; qs('#cm-l', sh).innerHTML = draw(); if (el && el.isConnected) { el.outerHTML = postHTML(p); hydrate($('feedlist')) } else { try { renderReels(true) } catch {} } } catch (er) { toast('⚠️ ' + er.message) }
+  let data = { roots: [], total: 0, emojis: CM_REACTS }
+  let replyTo = null, sort = 'new', stkTab = ''
+  const sh = sheet(h3('Izohlar <i class="cm-total" id="cm-n"></i>') + `
+    <div class="cm-sort"><button data-cs="new" class="on">🕐 Yangi</button><button data-cs="top">🔥 Top</button></div>
+    <div id="cm-l" class="cm-list"><div class="cmskel"><i></i><i></i><i></i><i></i></div></div>
+    <div id="cm-rv" class="cm-rv" hidden></div>
+    <div id="cm-stkp" class="cm-stkp" hidden></div>
+    <div class="inrow cm-in">${avHTML(S.me, 32, { noStory: true })}<input class="inp" id="cm-i" maxlength="1000" placeholder="Izoh yozing…"><button class="ic cm-emoji" id="cm-stk" aria-label="Stiker">😊</button><button class="btn" id="cm-s" style="width:auto">➤</button></div>`)
+  const list = qs('#cm-l', sh), input = qs('#cm-i', sh)
+  const rootOf = (id) => data.roots.find((r) => r.id === id)
+  const draw = () => {
+    let roots = [...data.roots]
+    if (sort === 'top') roots.sort((a, b) => (b.reacts || []).reduce((s, x) => s + x.n, 0) + (b.reply_count || 0) * 2 - (a.reacts || []).reduce((s, x) => s + x.n, 0) - (a.reply_count || 0) * 2)
+    list.innerHTML = roots.map((k) => cmNodeHTML(k, false, k.id)).join('') || '<div class="empty">Birinchi izohni yozing — javoblar va ❤️ reaksiyalar bilan qiziqarli bo‘ladi</div>'
+    qs('#cm-n', sh).textContent = data.total ? `· ${data.total}` : ''
+    p.comment_count = data.total
   }
-  qs('#cm-s', sh).onclick = send
-  qs('#cm-i', sh).onkeydown = (e) => e.key === 'Enter' && send()
+  const refreshRow = () => {
+    p.comment_count = data.total
+    if (el && el.isConnected) { el.outerHTML = postHTML(p); hydrate($('feedlist')) }
+    else { // reels: to'liq qayta render'siz — faqat hisoblagichlar yangilanadi (sakramaslik uchun)
+      try { qsa('[data-scc="' + p.id + '"]').forEach((c) => { c.textContent = p.comment_count || 0 }) } catch {}
+    }
+  }
+  const setReply = (k) => {
+    replyTo = k || null
+    const rv = qs('#cm-rv', sh)
+    if (!k) { rv.hidden = true; input.placeholder = 'Izoh yozing…'; return }
+    rv.hidden = false
+    rv.innerHTML = `<span class="cm-rvi">↩</span><div class="cm-rvt"><b>${esc(uname(k.user))}</b> ga javob — ${esc((k.text_body || 'stiker').slice(0, 46))}</div><button class="ic" id="cm-rvx">✕</button>`
+    qs('#cm-rvx', rv).onclick = () => setReply(null)
+    input.placeholder = `${uname(k.user).split(' ')[0]} ga javob…`
+    input.focus()
+  }
+  const scrollEnd = () => requestAnimationFrame(() => { list.scrollTop = list.scrollHeight })
+  const send = async (text, sticker) => {
+    text = (text || '').trim(); if (!text && !sticker) return
+    const root = replyTo ? (replyTo.parent_id && rootOf(replyTo.parent_id) ? rootOf(replyTo.parent_id) : replyTo) : null
+    const tmp = { id: -Date.now(), parent_id: root ? root.id : 0, text_body: text, sticker: sticker || '', created_at: Date.now(), user: S.me, mine: true, reacts: [], replies: [], reply_count: 0, pending: 1 }
+    if (root) { root.replies.push(tmp); root.reply_count = root.replies.length } else data.roots.push(tmp)
+    data.total++; setReply(null); draw(); scrollEnd(); refreshRow()
+    try {
+      const k = await post(`/posts/${p.id}/comments`, { text_body: text, parent_id: tmp.parent_id, sticker: sticker || '' })
+      Object.assign(tmp, k, { pending: 0 })
+      draw()
+    } catch (er) { tmp.pending = 0; tmp.failed = 1; draw(); toast('⚠️ ' + er.message) }
+  }
+  const sendText = () => { const t = input.value.trim(); if (!t) return; input.value = ''; send(t) }
+  qs('#cm-s', sh).onclick = sendText
+  input.onkeydown = (e) => e.key === 'Enter' && sendText()
+  // Reaksiya (optimistik toggle)
+  const react = async (cid, emoji) => {
+    const node = (function find(nodes) { for (const n of nodes) { if (n.id == cid) return n; const r = find(n.replies || []); if (r) return r } return null })(data.roots)
+    if (!node) return
+    node.reacts = node.reacts || []
+    const cur = node.reacts.find((x) => x.emoji === emoji)
+    if (cur) { cur.mine = !cur.mine; cur.n += cur.mine ? 1 : -1; if (cur.n <= 0) node.reacts = node.reacts.filter((x) => x !== cur) }
+    else node.reacts.push({ emoji, n: 1, mine: true })
+    draw()
+    try { const r = await post(`/comments/${cid}/react`, { emoji }); const c2 = (node.reacts || []).find((x) => x.emoji === emoji); if (c2) { c2.n = r.n; if (!r.on) node.reacts = node.reacts.filter((x) => x !== c2) } draw() } catch {}
+  }
+  // O'chirish
+  const removeNode = async (cid) => {
+    try {
+      await api(`/comments/${cid}`, { method: 'DELETE' })
+      const root = rootOf(+cid)
+      if (root) data.roots = data.roots.filter((x) => x.id !== +cid)
+      else for (const r of data.roots) { const before = r.replies.length; r.replies = r.replies.filter((x) => x.id !== +cid); if (r.replies.length !== before) { r.reply_count = r.replies.length; data.total -= before - r.replies.length } }
+      if (root) data.total -= 1 + (root.replies ? root.replies.length : 0)
+      draw(); refreshRow(); toast('Izoh o‘chirildi')
+    } catch (e) { toast('⚠️ ' + e.message) }
+  }
+  // YUKLASH — avval kesh (zudlik), so'ng tarmoq
+  const cacheKey = 'g50_cmts_' + p.id
+  try { const c = JSON.parse(sessionStorage.getItem(cacheKey) || 'null'); if (c && c.roots) { data = c; draw() } } catch {}
+  try {
+    const r = await api(`/posts/${p.id}/comments`)
+    if (r && r.roots) { data = r; try { sessionStorage.setItem(cacheKey, JSON.stringify({ roots: data.roots, total: data.total })) } catch {} }
+    draw(); scrollEnd()
+  } catch (e) { if (!data.roots.length) list.innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>` }
+  // Saralash
+  qsa('[data-cs]', sh).forEach((b) => b.onclick = () => { sort = b.dataset.cs; qsa('[data-cs]', sh).forEach((x) => x.classList.toggle('on', x === b)); draw(); scrollEnd() })
+  // Ro'yxat hodisalari (delegatsiya)
+  let lastTap = 0, lastTapId = 0
+  list.addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-crk]')
+    if (chip) return react(+chip.closest('.cmt2').dataset.cid, chip.dataset.crk)
+    const rp = e.target.closest('[data-crply]')
+    if (rp) { const node = (function f(ns) { for (const n of ns) { if (n.id == rp.dataset.crply) return n; const r = f(n.replies || []); if (r) return r } return null })(data.roots); return setReply(node) }
+    const dl = e.target.closest('[data-cdel]')
+    if (dl) return removeNode(+dl.dataset.cdel)
+    const retry = e.target.closest('[data-cretry]')
+    if (retry) { const b = retry.closest('.cmt2'); return removeNode(+b.dataset.cid) }
+    const bub = e.target.closest('.cm-bub')
+    if (bub) {
+      const cid = +bub.closest('.cmt2').dataset.cid, t = Date.now()
+      if (t - lastTap < 350 && lastTapId === cid) { lastTap = 0; return react(cid, '❤️') } // ikki bosish = ❤️
+      lastTap = t; lastTapId = cid
+    }
+  })
+  // UZUN BOSISH — reaksiyalar tasmasi (stiker-smaylik baholash)
+  const closePick = () => { if (cmPick) { cmPick.remove(); cmPick = null } if (cmPress) { clearTimeout(cmPress.t); cmPress = null } }
+  const openPick = (cid) => {
+    closePick()
+    const bub = list.querySelector(`.cmt2[data-cid="${cid}"] .cm-bub`); if (!bub) return
+    const r = bub.getBoundingClientRect()
+    const pk = document.createElement('div'); pk.className = 'cm-pick'
+    pk.innerHTML = CM_REACTS.map((x) => `<button data-pk="${x}">${x}</button>`).join('') + `<button data-pkdel class="del">🗑</button>`
+    document.body.appendChild(pk)
+    const pw = Math.min(320, innerWidth - 24)
+    pk.style.left = Math.max(12, Math.min(innerWidth - pw - 12, r.left + r.width / 2 - pw / 2)) + 'px'
+    pk.style.top = Math.max(70, r.top - 58) + 'px'
+    cmPick = pk
+    pk.addEventListener('click', (ev) => {
+      const b = ev.target.closest('[data-pk]')
+      if (b) { react(cid, b.dataset.pk); closePick() } else if (ev.target.closest('[data-pkdel]')) { removeNode(cid); closePick() }
+    })
+    setTimeout(() => document.addEventListener('click', closePick, { once: true }), 50)
+    list.addEventListener('scroll', closePick, { once: true, passive: true })
+  }
+  list.addEventListener('touchstart', (e) => {
+    const bub = e.target.closest('.cmt2'); if (!bub || e.target.closest('button,img')) return
+    const cid = +bub.dataset.cid
+    cmPress = { t: setTimeout(() => { try { navigator.vibrate && navigator.vibrate(12) } catch {}; openPick(cid) }, 420) }
+  }, { passive: true })
+  ;['touchend', 'touchmove', 'touchcancel'].forEach((ev) => list.addEventListener(ev, () => { if (cmPress) { clearTimeout(cmPress.t); cmPress = null } }, { passive: true }))
+  list.addEventListener('contextmenu', (e) => { const b = e.target.closest('.cmt2'); if (b) { e.preventDefault(); openPick(+b.dataset.cid) } })
+  // STIKER IZOHLAR — paketlar tasmasi
+  const stkp = qs('#cm-stkp', sh)
+  qs('#cm-stk', sh).onclick = () => {
+    stkp.hidden = !stkp.hidden
+    if (stkp.hidden) return
+    const rec = JSON.parse(localStorage.getItem(STICKER_RECENT_KEY) || '[]')
+    const packs = STICKER_PACKS.map((pk) => ({ ...pk }))
+    stkp.innerHTML = `<div class="pk-packs">${packs.map((x) => `<button data-pkp="${x.id}" class="${x.id === (stkTab || packs[0].id) ? 'on' : ''}" style="--pkc:${x.c}"><i>${x.icon}</i><span>${esc(x.name)}</span></button>`).join('')}</div>`
+      + (rec.length ? `<div class="stkg imgs sm">${rec.map((s) => `<div data-sk="${esc(s)}"><img src="stickers/${esc(s)}" alt="" loading="lazy"></div>`).join('')}</div>` : '')
+      + (() => { const pk = packs.find((x) => x.id === (stkTab || packs[0].id)) || packs[0]; return `<div class="stkg imgs sm">${pk.items.map((s) => `<div data-sk="${esc(s)}"><img src="stickers/${esc(s)}" alt="" loading="lazy"></div>`).join('')}</div>` })()
+    qsa('[data-pkp]', stkp).forEach((b) => b.onclick = () => { stkTab = b.dataset.pkp; qs('#cm-stk', sh).click(); qs('#cm-stk', sh).click() })
+    qsa('[data-sk]', stkp).forEach((d) => d.onclick = () => { stkp.hidden = true; send('', d.dataset.sk) })
+  }
+  sh.addEventListener('click', (e) => { if (e.target === sh) closePick() })
+  setTimeout(() => input.focus(), 250)
 }
 // Yangi post / e'lon — kanal boshqaruvidan ham ochiladi (preChatId tanlangan bo'ladi)
 function postSheet(preChatId = 0) {
@@ -757,7 +922,7 @@ function shSlideHTML(it, i) {
       <div class="sh-bot">${who}${p.views ? `<small class="sh-vw">👁 ${p.views}</small>` : ''}${p.text_body ? `<div class="sh-cap">${linkify(p.text_body)}</div>` : ''}</div>
       <div class="sh-acts">
         <button data-slike class="${p.liked ? 'on' : ''}">${p.liked ? '❤️' : '🤍'}<i>${p.like_count || 0}</i></button>
-        <button data-scmt>💬<i>${p.comment_count || 0}</i></button>
+        <button data-scmt>💬<i data-scc="${p.id}">${p.comment_count || 0}</i></button>
         <button data-ssh>↗️</button>
         ${p.can_delete ? '<button data-sdel>🗑</button>' : ''}
       </div>
