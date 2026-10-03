@@ -247,14 +247,14 @@ function trendSkeleton() {
 // ZUDLIK keshi: oxirgi 1-sahifa localStorage'da (3 kun) — lenta HAR QAYTA OCHILGANDA, hatto ilova
 // qayta ishga tushganda/oflaynda ham darhol chiziladi (fon yangilanadi). Bu "lenta sekin" muammosi yechimi.
 function trendCacheSave(items) {
-  try { localStorage.setItem('g50_trend_c', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
+  try { localStorage.setItem('g50_trend_c2', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
 }
 function trendCacheAge() {
-  try { const d = JSON.parse(localStorage.getItem('g50_trend_c') || ''); return d && d.t ? Date.now() - d.t : Infinity } catch { return Infinity }
+  try { const d = JSON.parse(localStorage.getItem('g50_trend_c2') || ''); return d && d.t ? Date.now() - d.t : Infinity } catch { return Infinity }
 }
 function trendCacheGet() {
   try {
-    const d = JSON.parse(localStorage.getItem('g50_trend_c') || '')
+    const d = JSON.parse(localStorage.getItem('g50_trend_c2') || '')
     // 3 kun — mavzular tezroq yangilanadi (random algoritm bilan har safar xilma-xil ko'rinish uchun)
     if (d && d.items && d.items.length && Date.now() - d.t < 3 * 864e5) return d.items
   } catch {}
@@ -265,6 +265,13 @@ function shShuffle(a) {
   for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]] }
   return a
 }
+// MINECRAFT FILTRI (foydalanuvchi talabi: "tagi bilan o'chirib yo'q qilib tashla"): Minecraft
+// videolari Reels/Shorts lentasida UMUMAN ko'rinmaydi — latin + kirill sarlavhalar bo'yicha,
+// bo'shliq/belgilar olib tashlab tekshiriladi (Minecraft, Maynkraft, Майнкрафт, Minе Kraf...)
+const shBadT = (t) => { try { const s = String(t || '').toLowerCase().replace(/[\s_\-.,!?()[\]:'"«»]/g, ''); return /minecraft|minekraf|maynkraft|майнкрафт|минекрафт/.test(s) } catch { return false } }
+// Barqaror ID: serverda id bo'lmasa (eski kesh/kod) manba+native-id'dan sintetik qilinadi —
+// kartalarning data-trend/data-tv qiymati bilan klik-qidiruv AYNAN mos kelishi uchun
+const shTrendId = (x) => x && (x.id || (x.yt ? 'yt' + x.yt : x.mp4 ? 'mk' + x.mp4 : x.ig ? 'ig' + x.ig : x.fb ? 'fb' + x.fb : x.embed ? 'dm' + x.embed : x.url ? 'n' + String(x.url).slice(-40) : ''))
 async function loadTrend(reset) {
   if (trendBusy) return
   if (reset) {
@@ -291,7 +298,10 @@ async function loadTrend(reset) {
     trendPage++
     const q = `?page=${trendPage}` + (trendCat !== 'all' ? '&cat=' + trendCat : '') + (trendCat === 'all' && trendPage === 1 ? '&cats=' + encodeURIComponent(catsParam()) : '')
     const r = await api('/trend' + q)
-    const list = r.items || []
+    // ID NORMALIZATSIYA: kartalar data-tn/data-tv qiymati bilan qidiruv aynan mos bo'lishi uchun
+    // (serverda id bo'lmasa — sintetik) + Shorts'larda Minecraft filtri
+    const list = (r.items || []).filter((x) => (x.kind === 'short' || x.kind === 'video') ? !shBadT(x.title) : true)
+    for (const x of list) if (x && !x.id) x.id = shTrendId(x)
     if (!list.length && trendPage === 1 && !trendCat) {
       // Vaqtinchalik bo'sh — 1.5s dan keyin avtomatik qayta urinish
       trendPage = 0
@@ -425,7 +435,7 @@ function reelHTML(p) {
 // Reels holati (alohida bo'lim): reelPosts + kesh (oflaynda ham ochiladi)
 let reelPosts = [], reelsEnd = false, reelsBusy = false
 let reelsTrend = [], reelsTrendBusy = false // ro'yxatdagi ommabop Shorts kartalari
-const RKEY = 'g50_reels_c2' // v2: eski keshda qolgan o'chirilgan test reel'lar bekor qilinadi
+const RKEY = 'g50_reels_c3' // v3: eski keshdagi o'chirilgan test/Minecraft reel'lar QATIY bekor (shikoyat: "boshidagi 2 ta minecraft hech yo'qolmadi")
 function reelsCacheSave() {
   try { localStorage.setItem(RKEY, JSON.stringify({ t: Date.now(), posts: reelPosts.slice(0, 30).map((p) => ({ ...p, meta: p.meta || null })) })) } catch {}
 }
@@ -452,7 +462,8 @@ async function loadReels(reset) {
   try {
     const before = fromCache ? 0 : (reelPosts.length ? reelPosts[reelPosts.length - 1].id : 0)
     const r = await api('/reels' + (before ? '?before=' + before : ''))
-    const list = Array.isArray(r) ? r : r.posts || []
+    // MINECRAFT FILTR: sarlavhasida/matinida Minecraft eslatuvchi postlar umuman olmaydi
+    const list = (Array.isArray(r) ? r : r.posts || []).filter((p) => !shBadT(p.text_body) && !shBadT(p.title))
     for (const p of list) if (p.media_id && p.meta) P2P.note(String(p.media_id), { chat: 0, ...p.meta })
     if (fromCache) {
       const seen = new Set(list.map((x) => x.id))
@@ -594,9 +605,11 @@ function renderFeed() {
 $('feedseg').onclick = (e) => { const d = e.target.closest('[data-m]'); if (!d) return; feedMode = d.dataset.m; qsa('#feedseg div').forEach((x) => x.classList.toggle('on', x === d)); $('b-post').classList.toggle('hide', feedMode === 'trend'); $('trendchips').classList.toggle('hide', feedMode !== 'trend'); feedMode === 'trend' ? loadTrend(true) : loadFeed(true) }
 // --- Reels bo'limi: kliklar (like/izoh/ulashish/o'chirish/shorts) ---
 $('reelslist').addEventListener('click', async (e) => {
-  // Ommabop Shorts kartasi — tomosha shu videodan boshlanadi
+  // Ommabop Shorts kartasi — tomosha shu videodan boshlanadi. QIDIRUV 2 JOYDA: trendItems
+  // (jonli ro'yxat) + reelsTrend (keshdan chizilgan kartalar — avval faqat trendItems'da
+  // qidirilgandi, kesh-kartalar BOSILGANDA HEC NARSA BO'LMASDI — shikoyat: "ustiga bosganda ko'rsatmayapti")
   const tvc = e.target.closest('[data-trend]')
-  if (tvc) { const x = trendItems.find((v) => v.id === tvc.dataset.trend); if (x) shortsStart({ trend: x }); return }
+  if (tvc) { const x = trendItems.find((v) => v.id === tvc.dataset.trend) || reelsTrend.find((v) => v.id === tvc.dataset.trend); if (x) shortsStart({ trend: x }); return }
   const reel = e.target.closest('[data-reel]')
   if (!reel) return
   const p = reelPosts.find((x) => x.id === +reel.dataset.reel); if (!p) return
@@ -956,9 +969,11 @@ let shMode = 'trend' // 'reels' — faqat platform Reels · 'trend' — internet
 let shList = [], shWrap = null, shKeyH = null, shWtTimer = null
 let shPostsEnd = false, shTrPage = 0, shBusyMore = false, shLastTap = 0, shTapTimer = null, shFailStreak = 0, shDry = 0
 
-const shNormPosts = (list) => (Array.isArray(list) ? list : []).filter((p) => p.media_kind === 'video').map((p) => ({ t: 'post', p }))
+// Minecraft shikoyati + manba id'si yagona joyda hal qilinadi (har kirishda qayta tekshiriladi)
+const shNormPosts = (list) => (Array.isArray(list) ? list : []).filter((p) => p && p.media_kind === 'video' && !shBadT(p.text_body)).map((p) => ({ t: 'post', p }))
 // LIVE efirlar chiqariladi — ular qotib sekin ishlaydi (chet el jonli efirlari foydalanuvchi shikoyati)
-const shNormTrend = (list) => (Array.isArray(list) ? list : []).filter((x) => x && (x.kind === 'short' || x.kind === 'video') && !x.live).map((x) => ({ t: 'trend', x }))
+// MINECRAFT QATIY FILTR: foydalanuvchi "tagi bilan o'chirib yo'q qilib tashla" — hech qanday yo'l bilan kirmasin
+const shNormTrend = (list) => (Array.isArray(list) ? list : []).filter((x) => x && (x.kind === 'short' || x.kind === 'video') && !x.live && !shBadT(x.title)).map((x) => { if (!x.id) x.id = shTrendId(x); return { t: 'trend', x } })
 
 // YouTube player (nocookie — engilroq, O'zbekistonda ishonchli) + enablejsapi (postMessage boshqaruvi — reload'siz pauza/play)
 function shYTURL(id) {
@@ -1024,7 +1039,7 @@ function shSlideHTML(it, i) {
   const bg = x.image ? ` style="background:#07070c url('${esc(x.image)}') center/cover no-repeat"` : ''
   // IFRAME'lar LAZY: src='about:blank', haqiqiy URL data-shsrc'da — faqat faol slayd yuklanadi.
   // Barchasi birdan yuklansa 40+ iframe tarmoqni bosib oladi = SEKINLIK (asosiy sabab shu edi).
-  if (x.mp4) pl = `<video src="${esc(x.mp4)}" loop playsinline preload="metadata" data-shaudio="${esc(x.audio || '')}" poster="${esc(x.image || '')}"></video>`
+  if (x.mp4) pl = `<video src="${esc(x.mp4)}" data-shsrc="${esc(x.mp4)}" loop playsinline preload="metadata" data-shaudio="${esc(x.audio || '')}" poster="${esc(x.image || '')}"></video>`
   else if (x.yt) pl = `<iframe data-shyt="1" src="about:blank" data-shsrc="${esc(shYTURL(x.yt))}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>`
   else if (x.ig) pl = `<iframe src="about:blank" data-shsrc="https://www.instagram.com/reel/${esc(x.ig)}/embed/captioned/" allow="autoplay; encrypted-media" allowfullscreen frameborder="0"></iframe>`
   else if (x.fb) pl = `<iframe src="about:blank" data-shsrc="https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(x.fb)}&autoplay=1&show_text=false&mute=${shMuted ? 1 : 0}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>`
@@ -1047,11 +1062,12 @@ function shBindVideo(v) {
   const slide = v.closest('.sh-slide')
   const prog = qs('.sh-prog i', slide)
   v.addEventListener('timeupdate', () => { if (prog && v.duration) prog.style.width = (v.currentTime / v.duration) * 100 + '%' })
-  v.addEventListener('loadeddata', () => { const l = qs('.sh-load', slide); if (l) l.style.display = 'none' }, { once: true })
+  v.addEventListener('loadeddata', () => { slide.dataset.ok = '1'; const l = qs('.sh-load', slide); if (l) l.style.display = 'none' }, { once: true })
   v.addEventListener('error', () => { const l = qs('.sh-load', slide); if (l) l.style.display = 'none'; slide.classList.add('sh-fail') }, { once: true })
-  v.addEventListener('play', () => slide.classList.remove('paused'))
+  v.addEventListener('play', () => { slide.dataset.ok = '1'; slide.classList.remove('paused') })
   v.addEventListener('pause', () => slide.classList.add('paused'))
-  v.addEventListener('canplay', () => { if (slide.dataset.on === '1' && S.prefs.shauto) v.play().catch(() => {}) })
+  v.addEventListener('canplay', () => { slide.dataset.ok = '1'; if (slide.dataset.on === '1' && S.prefs.shauto) v.play().catch(() => {}) })
+  if (v.readyState >= 2) slide.dataset.ok = '1' // allaqachon yuklangan video — watchdog soxta xato bermasin
   // Reddit mp4: audio treksi alohida faylda — sinxron oqim
   const aurl = v.dataset.shaudio
   if (aurl) {
@@ -1149,8 +1165,10 @@ function shActivate(w, slide) {
   if (it && it.t === 'trend') tev('video', 'imp') // analiz tizimiga ko'rish
   const v = qs('video', slide)
   if (v) {
-    // shPrune tozalagan bo'lsa — manbani tiklaymiz (canplay'da ijro davom etadi)
-    if (!v.getAttribute('src')) { v.removeAttribute('data-h'); hydrate(slide) }
+    // shPrune tozalagan bo'lsa — manbani tiklaymiz: mp4'larda data-shsrc'dan (hydrate faqat
+    // data-media'ni tiklaydi — trend mp4'larida src o'chsa ORQAGA QAYTISHDA QORA/QOTGAN slayd edi)
+    if (!v.getAttribute('src') && v.dataset.shsrc) { v.src = v.dataset.shsrc; v.muted = shMuted; if (!S.prefs.shq) v.preload = 'auto' }
+    else if (!v.getAttribute('src')) { v.removeAttribute('data-h'); hydrate(slide) }
     v.muted = shMuted
     if (!S.prefs.shq && v.preload !== 'auto') v.preload = 'auto'
     if (S.prefs.shauto) v.play().catch(() => {})
@@ -1188,6 +1206,11 @@ function shActivate(w, slide) {
     clearTimeout(slide._shwd)
     clearTimeout(slide._shauto)
     slide._shwd = setTimeout(() => {
+      // VIDEO SLAYD HIMoyasi: video yuklangan/o'ynayotgan bo'lsa — iframe-watchdog uni "yuklanmadi"
+      // deb SANAMASIN (avval video slaydlar dataset.ok'siz qolardi → o'ynayotgan mp4 ham 12s'da
+      // soxta "fail" bo'lib, 3 soxta sakrashdan keyin lenta TO'XTARDI — "5-6 tadan keyin qotmoqda")
+      const vv = qs('video', slide)
+      if (vv && (vv.readyState >= 2 || !vv.paused)) { shFailStreak = 0; return }
       if (!slide.dataset.ok && shWrap && slide.isConnected) {
         slide.classList.add('sh-fail')
         const l2 = qs('.sh-load', slide)
@@ -1248,33 +1271,34 @@ function shPrune(w, idx) {
     }
   })
 }
-function shAppend(items) {
+function shAppend(items, force) {
   if (!items.length || !shWrap) return 0
   // DEDUPE: cheksiz lenta hovuz qaytishi bilan o'sha videolarni QAYTA qo'shmasin —
   // foydalanuvchi "har safar bir xil reel qayta-qayta" degan shikoyatiga javoban
-  const seenD = new Set(shList.map((it) => it.t === 'post' ? 'p' + it.p.id : 'x' + (it.x.id || it.x.yt || it.x.embed || '')))
-  items = items.filter((it) => {
-    const k = it.t === 'post' ? 'p' + it.p.id : 'x' + (it.x.id || it.x.yt || it.x.embed || '')
-    if (seenD.has(k)) return false
-    seenD.add(k); return true
-  })
-  if (!items.length) return 0
+  // (id + yt/embed/mp4/url — barcha platformalar bo'yicha takror aniqlanadi)
+  const key = (it) => it.t === 'post' ? 'p' + it.p.id : 'x' + (it.x.id || it.x.yt || it.x.embed || it.x.mp4 || it.x.url || '')
+  const seenD = new Set(shList.map(key))
+  const kept = items.filter((it) => { const k = key(it); if (seenD.has(k)) return false; seenD.add(k); return true })
+  // RECYCLE: hovuz batamom ko'rilgan bo'lsa (kept bo'sh) lenta TO'XTAMASIN — hovuz qayta aylanadi
+  // (avval shDry=2'da butunlay o'chardi → "5-6 tadan keyin qotib qolmoqda"; TikTok ham shunday qiladi)
+  const use = kept.length ? kept : (force ? items.slice(0, 12) : [])
+  if (!use.length) return 0
   const sc = qs('.sh-scroll', shWrap)
   const base = shList.length
-  shList.push(...items)
-  sc.insertAdjacentHTML('beforeend', items.map((it, k) => shSlideHTML(it, base + k)).join(''))
+  shList.push(...use)
+  sc.insertAdjacentHTML('beforeend', use.map((it, k) => shSlideHTML(it, base + k)).join(''))
   const fresh = qsa('.sh-slide', sc).slice(base)
   fresh.forEach((s) => { qsa('video', s).forEach(shBindVideo) }) // iframe shBindFrame — faqat yuklanganda (about:blank load hodisasi aldamasligi uchun)
   hydrate(sc)
-  return items.length
+  return use.length
 }
 async function shMore() {
   if (shBusyMore) return
-  // DRY-HIMIYA: 2 marta ketma-ket hech narsa qo'shilmagan bo'lsa (hovuz takrorlandi —
-  // dedupe tushirib yubordi) yana so'rov yuborilmaydi — foydasiz trafik yo'q
-  if (shDry >= 2) return
   shBusyMore = true
   try {
+    // force = shDry>=1: bir marta bo'sh qaytgach hovuz QAYTA AYLANADI — lenta hech qachon
+    // butunlay to'xtab qolmaydi (avval shDry=2'da butunlay o'chardi → "5-6 tadan keyin qotmoqda")
+    const f = shDry >= 1
     if (shMode === 'reels') {
       if (shPostsEnd) return
       const posts = shList.filter((x) => x.t === 'post')
@@ -1282,7 +1306,7 @@ async function shMore() {
       const r = await api('/reels' + (before ? '?before=' + before : ''))
       const items = shNormPosts(Array.isArray(r) ? r : (r && r.posts) || [])
       if (items.length < 10) shPostsEnd = true
-      shDry = shAppend(items) ? 0 : shDry + 1
+      shDry = shAppend(items, f) ? 0 : shDry + 1
     } else if (shMode === 'mix') {
       // MIX: avval platform Reels tugaydi, keyin internet Shorts uzluksiz davom etadi
       if (!shPostsEnd) {
@@ -1291,21 +1315,21 @@ async function shMore() {
         const r = await api('/reels' + (before ? '?before=' + before : ''))
         const items = shNormPosts(Array.isArray(r) ? r : (r && r.posts) || [])
         if (items.length < 10) shPostsEnd = true
-        shDry = shAppend(items) ? 0 : shDry + 1
+        shDry = shAppend(items, f) ? 0 : shDry + 1
       }
       if (shPostsEnd && shWrap && shDry < 2) {
         shTrPage++
         const r = await api('/trend?cat=video&page=' + shTrPage)
         const items = shNormTrend(Array.isArray(r) ? r : (r && r.items) || [])
         if (!items.length) shTrPage = 0 // cheksiz lenta
-        shDry = shAppend(items) ? 0 : shDry + 1
+        shDry = shAppend(items, f) ? 0 : shDry + 1
       }
     } else {
       shTrPage++
       const r = await api('/trend?cat=video&page=' + shTrPage)
       const items = shNormTrend(Array.isArray(r) ? r : (r && r.items) || [])
       if (!items.length) shTrPage = 0 // cheksiz lenta: qaytadan boshlaydi
-      shDry = shAppend(items) ? 0 : shDry + 1
+      shDry = shAppend(items, f) ? 0 : shDry + 1
     }
   } catch {} finally { shBusyMore = false }
 }

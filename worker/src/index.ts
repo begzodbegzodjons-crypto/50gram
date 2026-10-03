@@ -1133,6 +1133,12 @@ function tagGet(block: string, tag: string): string {
   const m = block.match(new RegExp("<" + tag + ">(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</" + tag + ">"))
   return m ? m[1].trim() : ""
 }
+// Qisqa deterministik id (djb2) — yangilik URL'dan barqaror id (kesh/kartalar uchun)
+function hId(s: string): string {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
 async function gnewsFetch(src: string, url: string, n: number): Promise<any[]> {
   const UA = { headers: TREND_UA, cf: { cacheTtl: 900, cacheEverything: true } } as any
   try {
@@ -1158,7 +1164,7 @@ async function gnewsFetch(src: string, url: string, n: number): Promise<any[]> {
       // Manba nomini yashirish: "Sarlavha - Manba nomi" -> "Sarlavha"
       const title = rawTitle.replace(/\s+[-–—]\s+[^-–—]{2,42}$/, "").trim() || rawTitle
       out.push({
-        kind: "news", src, title, url: link,
+        id: "n" + hId(link), kind: "news", src, title, url: link,
         snippet: stripHtml(desc).slice(0, 300),
         image: imgM ? imgM[1] : mcM ? mcM[1] : "",
         time: isNaN(ts) ? now() : ts,
@@ -1292,7 +1298,7 @@ async function uzChannelShorts(): Promise<any[]> {
         const views = vm ? +vm[1] : 0
         if (!vid || !title) continue
         out.push({
-          kind: "short", vid: "yt", yt: vid, uz: 1, src: "ch", chid: ch,
+          id: "yt" + vid, kind: "short", vid: "yt", yt: vid, uz: 1, src: "ch", chid: ch,
           title, image: "https://i.ytimg.com/vi/" + vid + "/hqdefault.jpg",
           views, duration: 0,
           time: pub ? (Date.parse(pub) || now()) : now(),
@@ -1325,7 +1331,7 @@ async function uzSearch(): Promise<any[]> {
         const title = String(v.title || "")
         if (!UZ_RE.test(title)) return null // QATIY: faqat o'zbekcha sarlavhali videolar
         return {
-          kind: "short", vid: "yt", yt: id.split("&")[0], uz: 1, src: "s",
+          id: "yt" + id.split("&")[0], kind: "short", vid: "yt", yt: id.split("&")[0], uz: 1, src: "s",
           title, image: String(v.thumbnail || ""),
           views: +v.views || 0, duration: dur,
           time: +v.uploaded > 0 ? +v.uploaded : now(),
@@ -1361,7 +1367,7 @@ async function oneInvid(base: string): Promise<any[]> {
       const title = String(v.title || "")
       if (!v.videoId || dur < 1 || dur > 90 || !UZ_RE.test(title)) return null
       return {
-        kind: "short", vid: "yt", yt: String(v.videoId), uz: 1, src: "s",
+        id: "yt" + String(v.videoId), kind: "short", vid: "yt", yt: String(v.videoId), uz: 1, src: "s",
         title, image: String(v.videoThumbnails?.[0]?.url || ""),
         views: +v.viewCount || 0, duration: dur,
         time: +v.published > 0 ? +v.published * 1000 : now(),
@@ -1403,7 +1409,7 @@ function dmPick(): Promise<any[]> {
         const dur = +v.duration || 0
         if (!v.id || !v.title || dur < 3 || dur > 180) return null
         return {
-          kind: "short", vid: "dm", embed: String(v.id), uz: 0, src: "dm:" + t,
+          id: "dm" + String(v.id), kind: "short", vid: "dm", embed: String(v.id), uz: 0, src: "dm:" + t,
           title: String(v.title), image: String(v.thumbnail_360_url || ""),
           views: +v.views_total || 0, duration: dur,
           time: +v.created_time > 0 ? +v.created_time * 1000 : now(),
@@ -1429,7 +1435,7 @@ async function dmTrendingGeneral(): Promise<any[]> {
       const dur = +v.duration || 0
       if (!v.id || !v.title || dur < 3 || dur > 180) return null
       return {
-        kind: "short", vid: "dm", embed: String(v.id), uz: 0, src: "dm",
+        id: "dm" + String(v.id), kind: "short", vid: "dm", embed: String(v.id), uz: 0, src: "dm",
         title: String(v.title), image: String(v.thumbnail_360_url || ""),
         views: +v.views_total || 0, duration: dur,
         time: +v.created_time > 0 ? +v.created_time * 1000 : now(),
@@ -1460,7 +1466,7 @@ async function mixkitPool(): Promise<any[]> {
         if (!altM) continue
         const title = altM[1].replace(/\s+/g, " ").trim().replace(/\.+$/, "")
         out.push({
-          kind: "short", vid: "mk", mp4: "https://assets.mixkit.co/videos/" + id + "/" + id + "-720.mp4", uz: 0, src: "mk:" + cat,
+          id: "mk" + id, kind: "short", vid: "mk", mp4: "https://assets.mixkit.co/videos/" + id + "/" + id + "-720.mp4", uz: 0, src: "mk:" + cat,
           title, image: "https://assets.mixkit.co/videos/" + id + "/" + id + "-thumb-360-0.jpg",
           views: 0, duration: 0,
           time: now(), url: "https://mixkit.co/free-stock-video/" + cat + "/", cat: "video",
@@ -1476,7 +1482,13 @@ async function buildVideoPool(): Promise<{ shorts: any[]; vids: any[] }> {
   // ① YouTube kanallar (round-robin) ② YouTube qidiruv ③ Dailymotion (6 tasodifiy mavzu)
   // ④ Mixkit (to'g'ridan-to'g'ri mp4 — ENG TEZ, iframe yo'q, 5 tasodifiy mavzu)
   // Har qadamda BOSHQA platformadan 1 ta — platforma round-robin, hech biri hukmronlik qilmaydi.
-  const [chan, uz, dm, mk] = await Promise.all([uzChannelShorts(), uzSearch(), dmTrending(), mixkitPool()])
+  const [chan0, uz0, dm0, mk0] = await Promise.all([uzChannelShorts(), uzSearch(), dmTrending(), mixkitPool()])
+  // MINECRAFT QATIY FILTR (foydalanuvchi: "tagi bilan o'chirib yo'q qilib tashla"): Minecraft/
+  // Maynkraft/Майнкрафт videolari hovuzga UMUMAN kirmasin — Anilan-dublaj kanallari yangi
+  // videolari asosan Minecraft bo'lgani uchun sarlavha bo'yicha qat'iy kesiladi (latin+kirill).
+  const BAD_RE = /minecraft|minekraf|maynkraft|минекрафт|майнкрафт/i
+  const noBad = (arr: any[]) => (arr || []).filter((v: any) => v && !BAD_RE.test(String(v.title || "")))
+  const chan = noBad(chan0), uz = noBad(uz0), dm = noBad(dm0), mk = noBad(mk0)
   const seen = new Set<string>()
   const chRaw = chan.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt))
   // KANALLAR ROUND-ROBIN + kanal bo'yicha cheklov (3): bir kanal (masalan Minecraft-dublaj
@@ -1513,7 +1525,7 @@ async function buildVideoPool(): Promise<{ shorts: any[]; vids: any[] }> {
   return { shorts: shorts.slice(0, 72), vids: [] }
 }
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  const ck = "https://trend.50gram.internal/poolv12"
+  const ck = "https://trend.50gram.internal/poolv13"
   const meta = await cacheGetJSON<{ shorts: any[]; vids: any[] }>(ck)
   if (meta && meta.data && meta.data.shorts?.length) {
     if (now() - meta.t < POOL_FRESH_MS) return meta.data
@@ -1684,7 +1696,7 @@ async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  const cacheKey = "https://trend.50gram.internal/t10?p=" + page + "&cat=" + onlyCat
+  const cacheKey = "https://trend.50gram.internal/t11?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
