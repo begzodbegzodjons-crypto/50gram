@@ -335,20 +335,36 @@ async function circle(c: C) {
 async function authOtp(c: C) {
   const phone = normPhone(c.b.phone)
   const t = now()
-  const prev = await c.db.one("SELECT sent_at FROM otp WHERE phone=?", [phone])
-  if (prev && t - prev.sent_at < 55000) fail("Kodni qayta so‘rash uchun 1 daqiqa kuting", 429)
+  const devPhones = (c.env.DEV_PHONES || "").split(",").map((x) => x.trim()).filter(Boolean)
+  const smsOn = smsConfigured(c.env)
   const test = (c.env.TEST_PHONES || "").split(",").map((x) => x.trim().split(":")).find(([p]) => p === phone)
+  // SINOV REJIMI (SMS hali ulanmagan): kod ilova ICHIDA qaytariladigan raqamlar:
+  // ① DEV_PHONES (operator) — DOIM ② hisobi HALI YO'Q yangi raqamlar — ommaga o'sish uchun
+  // (foydalanuvchi: "dastur o'zidan sms kod bersin, eskiz keyin ulanadi"). MAVJUD hisoblar
+  // faqat operator raqami bilan ochiladi — boshqaning hisobiga kirish yo'li YO'Q (himoya saqlanadi).
+  // MUHIM: javob berilmaydigan raqamlarga otp qatori YOZILMAYDI — aks holda 503'dan keyingi
+  // urinish "1 daqiqa kuting" 429 oladi va foydalanuvchi QAMALIB QOLADI (shikoyat).
+  let devSelf = false
+  if (!smsOn && !test && c.env.DEV_MODE === "1") {
+    if (devPhones.includes(phone)) devSelf = true
+    else {
+      const ex = await c.db.one("SELECT id FROM users WHERE phone=?", [phone])
+      if (ex) return fail("Bu raqamga kod hozircha SMS orqali yuboriladi — SMS tasdiqlash tez orada ulanadi", 503)
+      devSelf = true
+    }
+  }
+  // Kutish muddati: haqiqiy SMS (Eskiz) pullik/pumping-xavfli — 55s; ilova-ichki kod bepul — 20s
+  const cd = smsOn ? 55000 : 20000
+  const prev = await c.db.one("SELECT sent_at FROM otp WHERE phone=?", [phone])
+  if (prev && t - prev.sent_at < cd) fail(smsOn ? "Kodni qayta so‘rash uchun 1 daqiqa kuting" : "Kodni qayta so‘rash uchun 20 soniya kuting", 429)
   const code = test ? test[1] : randomCode()
   await c.db.run("REPLACE INTO otp(phone,code_hash,expires_at,sent_at,tries) VALUES(?,?,?,?,0)", [phone, await sha256(phone + code + c.env.JWT_SECRET), t + 5 * 60000, t])
   if (test) return json({ ok: true, phone })
-  if (smsConfigured(c.env)) {
+  if (smsOn) {
     await sendSms(c.env, phone, code)
     return json({ ok: true, phone })
   }
-  // DEV rejim kodi FAQAT DEV_PHONES'dagi raqamlarga (operator) qaytariladi — boshqa
-  // har qanday raqam uchun kod HECH QACHON javobda qaytmaydi (hisob o'tlash yo'li yopilgan)
-  const devPhones = (c.env.DEV_PHONES || "").split(",").map((x) => x.trim()).filter(Boolean)
-  if (c.env.DEV_MODE === "1" && devPhones.includes(phone)) return json({ ok: true, phone, dev_code: code })
+  if (devSelf) return json({ ok: true, phone, dev_code: code })
   return fail("SMS xizmati sozlanmagan (ESKIZ_EMAIL/ESKIZ_PASSWORD)", 503)
 }
 async function authVerify(c: C) {
@@ -2919,8 +2935,9 @@ export default {
         if (fwLokal(fwip, "inj", 2, 7 * DAY)) return FW_404()
         fwOchko(env, wait, fwip, "inj")
       }
-      // SMS-kod so'rovlari: 1 IP → 1 soatda 25tadan ko'p so'rash = kod-pumping → 12 soat blok
-      if (url.pathname === "/api/auth/otp" && fwLokal(fwip, "otp", 25, 12 * 3_600_000)) { fwOchko(env, wait, fwip, "otp"); return FW_404() }
+      // OTP PUMPING: 50 so'rov/1 soat (mobil tarmoq CGNAT — bir IP'da YUZLARGA foydalanuvchi
+      // bo'lishi mumkin; avvalgi 25/12soat chegara ODDIY foydalanuvchilarni ham urib yuborardi)
+      if (url.pathname === "/api/auth/otp" && fwLokal(fwip, "otp", 50, 3_600_000)) { fwOchko(env, wait, fwip, "otp"); return FW_404() }
     }
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS })
     // Hajm chegarasi — ulkan payload bilan abuse (upload bo'laklari ≤1.2MB, JSON ≤2MB)
