@@ -880,6 +880,9 @@ function shSetMuted(m) {
 }
 function shActivate(w, slide) {
   slide.dataset.on = '1'
+  // Scroll-settle rejimi: boshqa barcha slaydlar o'chiriladi (eski IO shDeactivate o'rniga).
+  // Aks holda eski slaydlar "on" holatda qoladi — qaytib kirganda video tiklanmaydi.
+  qsa('.sh-slide', w).forEach((s) => { if (s !== slide) s.dataset.on = '' })
   const i = +slide.dataset.shi
   const it = shList[i]
   if (it && it.t === 'trend') tev('video', 'imp') // analiz tizimiga ko'rish
