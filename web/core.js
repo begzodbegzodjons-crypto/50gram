@@ -163,9 +163,19 @@ async function api(path, opt = {}) {
   if (S.token) h.Authorization = 'Bearer ' + S.token
   let body
   if (opt.body !== undefined) { h['content-type'] = 'application/json'; body = JSON.stringify(opt.body) }
-  let r
-  try { r = await fetch(API + path, { method: opt.method || (body ? 'POST' : 'GET'), headers: h, body }) }
-  catch { throw new Error('Internet aloqasi yo‘q') }
+  const method = opt.method || (body ? 'POST' : 'GET')
+  // ISHONCHLILIK (server kuchaytirish): 1) 20s timeout — so'rov abadiy osilib qolmaydi;
+  // 2) GET so'rov tarmoq uzilishida 1 marta AVTOMATIK qayta uriniladi — ma'lumot yo'qolmaydi,
+  // foydalanuvchi xato ko'rmaydi (POST/DELETE qayta urinilmaydi — takror yuborilishining oldi olinadi)
+  let r = null, lastErr = null
+  for (let att = 0; att < 2; att++) {
+    const ac = typeof AbortController !== 'undefined' ? new AbortController() : null
+    const to = ac ? setTimeout(() => { try { ac.abort() } catch {} }, 20000) : 0
+    try { r = await fetch(API + path, { method, headers: h, body, signal: ac ? ac.signal : undefined }); break }
+    catch (e) { lastErr = e; if (method !== 'GET' || att) break }
+    finally { if (to) clearTimeout(to) }
+  }
+  if (!r) throw new Error(lastErr && lastErr.name === 'AbortError' ? 'Server javob bermadi — birozdan so‘ng qayta urinib ko‘ring' : 'Internet aloqasi yo‘q')
   let j = {}
   try { j = await r.json() } catch {}
   if (r.status === 401 && S.token && !path.startsWith('/auth')) { logout(true); throw new Error('Qaytadan kiring') }
