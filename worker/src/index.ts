@@ -195,6 +195,8 @@ async function ensureSchema(db: Db) {
     "CREATE INDEX IF NOT EXISTS idx_pc_parent ON post_comments (parent_id)",
     "CREATE TABLE IF NOT EXISTS comment_reacts (comment_id BIGINT NOT NULL, user_id BIGINT NOT NULL, emoji VARCHAR(8) NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY(comment_id,user_id,emoji))",
     "CREATE INDEX IF NOT EXISTS idx_creacts_c ON comment_reacts (comment_id)",
+    // Task 57: yagona faol sessiya — logout barcha tokenlarni o'ldiradi, yangi kirish eskisini
+    "ALTER TABLE users ADD COLUMN sess VARCHAR(24) NULL",
     // Task 56: paralel-kirish himoyasi — logout bayrog'i va sessiya muddati (ms)
     "ALTER TABLE users ADD COLUMN logout_at BIGINT NULL",
     "ALTER TABLE users ADD COLUMN token_exp BIGINT NULL",
@@ -397,17 +399,18 @@ async function authVerify(c: C) {
   await c.db.run("DELETE FROM otp WHERE phone=?", [phone])
   await ensureSchema(c.db)
   const tnow = now(), texp = tnow + 180 * 86400 * 1000
+  const sess = randomStr(16)
   let u = await c.db.one(`SELECT ${USER_COLS} FROM users WHERE phone=?`, [phone])
   if (!u) {
     const id = newId()
-    await c.db.run("INSERT INTO users(id,phone,created_at,last_seen,token_exp) VALUES(?,?,?,?,?)", [id, phone, tnow, tnow, texp])
+    await c.db.run("INSERT INTO users(id,phone,created_at,last_seen,token_exp,sess) VALUES(?,?,?,?,?,?)", [id, phone, tnow, tnow, texp, sess])
     u = await c.db.one(`SELECT ${USER_COLS} FROM users WHERE id=?`, [id])
   } else {
-    // Kirish → hisob yana FAOL bo'ldi: logout bayrog'i tozalanadi, sessiya muddati va
-    // faollik yangilanadi. Endi boshqa hech kim shu raqamga kod ola olmaydi (paralel YO'Q).
-    await c.db.run("UPDATE users SET logout_at=NULL, token_exp=?, last_seen=? WHERE id=?", [texp, tnow, u.id])
+    // Kirish → hisob yana FAOL bo'ldi + YANGI YAGONA SESSIYA: eskirgan barcha tokenlar
+    // o'lik bo'lib qoladi (sess mos kelmadi → 401) — bir raqam, bitta faol qurilma.
+    await c.db.run("UPDATE users SET logout_at=NULL, token_exp=?, last_seen=?, sess=? WHERE id=?", [texp, tnow, sess, u.id])
   }
-  const token = await signJwt({ sub: String(u.id) }, c.env.JWT_SECRET, 180 * 86400)
+  const token = await signJwt({ sub: String(u.id), s: sess }, c.env.JWT_SECRET, 180 * 86400)
   return json({ token, user: pubUser(u, u.id), is_new: !u.first_name })
 }
 
@@ -2979,6 +2982,10 @@ export default {
       if (path === "/ws") {
         const payload = await verifyJwt(url.searchParams.get("token") || "", env.JWT_SECRET)
         if (!payload) { if (fwip) { if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404(); fwOchko(env, wait, fwip, "tok") } return json({ error: "Avtorizatsiya kerak" }, 401) }
+        // Yagona sessiya nazorati (WS uchun ham): logout/qayta kirish eski ulanishni o'chiradi
+        const su = await db.one("SELECT sess, logout_at, token_exp FROM users WHERE id=?", [Number(payload.sub)])
+        if (!su || su.logout_at || (su.token_exp && +su.token_exp < now()) || (payload.s && payload.s !== su.sess))
+          return json({ error: "Avtorizatsiya kerak" }, 401)
         if (req.headers.get("Upgrade") !== "websocket") return json({ error: "WebSocket kerak" }, 426)
         const stub = env.USER_SOCKET.get(env.USER_SOCKET.idFromName(String(payload.sub)))
         return stub.fetch(req)
@@ -2991,6 +2998,12 @@ export default {
         const payload = await verifyJwt(token, env.JWT_SECRET)
         if (!payload) { if (fwip) { if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404(); fwOchko(env, wait, fwip, "tok") } fail("Avtorizatsiya kerak", 401) }
         uid = Number(payload.sub)
+        // YAGONA FAOL SESSIYA (bir raqam — bitta faol qurilma): logout barcha tokenlarni
+        // o'ldiradi (logout_at), yangi kirish esa eskisini (sess mos emas → 401). Eski
+        // tokenlar (s klaimsiz) moslik bo'yicha ishlaydi — yangilanish yumshoq o'tadi.
+        const su = await db.one("SELECT sess, logout_at, token_exp FROM users WHERE id=?", [uid])
+        if (!su || su.logout_at || (su.token_exp && +su.token_exp < now())) fail("Avtorizatsiya kerak", 401)
+        if (payload.s && payload.s !== su.sess) fail("Avtorizatsiya kerak", 401)
       }
       let b: any = {}
       const ct = req.headers.get("content-type") || ""
