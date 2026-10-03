@@ -16,6 +16,26 @@ const S = {
 }
 // Tungi ovozsizlik (23:00–07:00): bildirishnoma ovozi/tebranishi o'chadi — o'qilmagan belgisi qoladi
 const quietNow = () => { if (!S.prefs.nightmute) return false; const h = new Date().getHours(); return h >= 23 || h < 7 }
+// ---------------- Barqaror viewport balandligi (--vph) ----------------
+// 100dvh scroll davomida o'zgaradi (manzil paneli yashirinadi/ko'rinadi) — to'liq ekran
+// Reels slaydlarining snap nuqtalari siljiydi = "tepa-pastga sakrash". Shuning uchun
+// balandlikni bir marta o'lchab CSS o'zgaruvchiga qo'yamiz; faqat ekran burilishi yoki
+// katta o'zgarishda (klaviatura) yangilaymiz — kichik o'zgarishlar e'tiborga olinmaydi.
+let vphT = null
+function measureVPH() {
+  const h = Math.round(window.visualViewport ? visualViewport.height : innerHeight)
+  document.documentElement.style.setProperty('--vph', h + 'px')
+  measureVPH.w = innerWidth
+}
+measureVPH()
+addEventListener('resize', () => {
+  clearTimeout(vphT)
+  vphT = setTimeout(() => {
+    const prev = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--vph')) || 0
+    const h = Math.round(window.visualViewport ? visualViewport.height : innerHeight)
+    if (Math.abs(h - prev) > 150 || innerWidth !== measureVPH.w) measureVPH()
+  }, 180)
+})
 // Sozlamalar: lokal + serverga sinxron (barcha qurilmalarda bir xil)
 function savePrefs(patch, sync = true) {
   S.prefs = { ...S.prefs, ...patch }

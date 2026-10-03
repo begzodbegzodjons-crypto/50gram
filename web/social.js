@@ -452,31 +452,61 @@ async function loadReels(reset) {
       reelPosts.push(...list.filter((x) => !seen.has(x.id)))
     }
     if (list.length < 10) reelsEnd = true
-    renderReels()
+    // Pagination: yangi videolar faqat PASTGA qo'shiladi (inkremental) — butun ro'yxatni
+    // qayta qurish barcha videolarni qayta yuklaydi = sakrash + qotish (shikoyat sababi)
+    renderReels(!fromCache)
     reelsCacheSave()
   } catch (e) {
     if (!reelPosts.length) $('reelslist').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`
   } finally { reelsBusy = false }
 }
-function renderReels() {
+function renderReels(inc) {
   const box = $('reelslist')
   if (!box) return
+  const rd = qs('.reels', box)
+  const exist = qsa('.reel[data-reel]', box)
+  const have = new Set(exist.map((el) => +el.dataset.reel))
+  const fresh = reelPosts.filter((p) => !have.has(p.id))
+  // INKREMENTAL: pagination yangi videolarni ro'yxat OXIRIGA qo'shadi — mavjud video
+  // tugunlarga tegmaydi (qayta yuklanish/sakrash bo'lmaydi)
+  if (inc && rd && exist.length && fresh.length && fresh.length < reelPosts.length) {
+    let tail = 0
+    for (let i = reelPosts.length - 1; i >= 0 && !have.has(reelPosts[i].id); i--) tail++
+    if (tail === fresh.length) {
+      rd.insertAdjacentHTML('beforeend', reelPosts.slice(-tail).map(reelHTML).join(''))
+      const added = qsa('.reel', rd).slice(-tail)
+      added.forEach((el) => { const v = qs('video', el); if (v) v.preload = 'none'; reelsObserver && reelsObserver.observe(el) })
+      hydrate(rd)
+      reelsHint(box)
+      return
+    }
+  }
   box.innerHTML = reelPosts.length
-    ? `<div class="reels">${reelPosts.map(reelHTML).join('')}</div>${reelsEnd ? '<div class="hint" style="text-align:center;padding:12px">Hammasi ko‘rildi ✨</div>' : '<div class="hint" style="text-align:center;padding:12px">Pastga suring — yana videolar 🎬</div>'}`
+    ? `<div class="reels">${reelPosts.map(reelHTML).join('')}</div><div class="hint" id="reelshint" style="text-align:center;padding:12px"></div>`
     : `<div class="empty"><span class="big">🎬</span>Hali Reels yo‘q — <b>➕</b> tugmasi bilan birinchi videoni joylang!<br><small style="color:var(--xira)">⚡ Shorts esa internetdan videolar keltiradi</small></div>`
   hydrate(box)
   if (reelsObserver) reelsObserver.disconnect()
-  const rd = qs('.reels', box)
-  if (rd && 'IntersectionObserver' in window) {
+  const rd2 = qs('.reels', box)
+  if (rd2) qsa('.reel video', rd2).forEach((v, i) => { if (i > 2) v.preload = 'none' }) // birinchi 3 tadan keyingi — play bosilgach yuklanadi (tezlik)
+  if (rd2 && 'IntersectionObserver' in window) {
     reelsObserver = new IntersectionObserver((es) => {
       for (const en of es) {
         const v = en.target
-        if (en.isIntersecting && en.intersectionRatio > 0.6) { if (S.prefs.shauto) v.play().catch(() => {}); v.muted = false }
-        else v.pause()
+        if (en.isIntersecting && en.intersectionRatio > 0.6) {
+          // Ovozli ijro bloklansa — ovozsiz davom (video qotib qolmasin)
+          if (S.prefs.shauto) v.play().then(() => { v.muted = false }).catch(() => { v.muted = true; v.play().catch(() => {}) })
+          // Bir vaqtda 2-3 video ovoz chiqarib yuborsa — sekinlashadi: qolganlarini pauza
+          qsa('.reel video', box).forEach((o) => { if (o !== v && !o.paused) { o.muted = true; o.pause() } })
+        } else { v.pause(); v.muted = true }
       }
     }, { root: qs('#t-reels'), threshold: [0, 0.6, 1] })
     qsa('.reel video', box).forEach((v) => reelsObserver.observe(v))
   }
+  reelsHint(box)
+}
+function reelsHint(box) {
+  const h = qs('#reelshint', box)
+  if (h && reelPosts.length) h.textContent = reelsEnd ? 'Hammasi ko‘rildi ✨' : 'Pastga suring — yana videolar 🎬'
 }
 function postHTML(p) {
   const who = p.chat ? `${avHTML(p.chat, 40, { chat: true })}<div><b>${p.chat.type === 'channel' ? '📢 ' : ''}${esc(p.chat.title)}</b><small>${fmtAgo(p.created_at)}</small></div>` : `${avHTML(p.author, 40)}<div><b>${esc(uname(p.author))}</b><small>${fmtAgo(p.created_at)}</small></div>`
@@ -550,7 +580,7 @@ async function commentsSheet(p, el) {
   const sh = sheet(h3('Izohlar') + `<div id="cm-l" style="max-height:55vh;overflow:auto">${draw()}</div><div class="inrow"><input class="inp" id="cm-i" maxlength="1000" placeholder="Izoh yozing…"><button class="btn" id="cm-s" style="width:auto">➤</button></div>`)
   const send = async () => {
     const i = qs('#cm-i', sh), t = i.value.trim(); if (!t) return
-    try { const k = await post(`/posts/${p.id}/comments`, { text_body: t }); i.value = ''; list.push(k.user ? k : { ...k, user: S.me, text_body: t, created_at: Date.now() }); p.comment_count = (p.comment_count || 0) + 1; qs('#cm-l', sh).innerHTML = draw(); if (el && el.isConnected) { el.outerHTML = postHTML(p); hydrate($('feedlist')) } else { try { renderReels() } catch {} } } catch (er) { toast('⚠️ ' + er.message) }
+    try { const k = await post(`/posts/${p.id}/comments`, { text_body: t }); i.value = ''; list.push(k.user ? k : { ...k, user: S.me, text_body: t, created_at: Date.now() }); p.comment_count = (p.comment_count || 0) + 1; qs('#cm-l', sh).innerHTML = draw(); if (el && el.isConnected) { el.outerHTML = postHTML(p); hydrate($('feedlist')) } else { try { renderReels(true) } catch {} } } catch (er) { toast('⚠️ ' + er.message) }
   }
   qs('#cm-s', sh).onclick = send
   qs('#cm-i', sh).onkeydown = (e) => e.key === 'Enter' && send()
@@ -684,7 +714,7 @@ $('b-cimport').onclick = async () => {
 // Platform Reels va trend Shorts vertikal ko'rish rejimida.
 let shMuted = localStorage.getItem('g50_shmute') !== '0'
 let shMode = 'trend' // 'reels' — faqat platform Reels · 'trend' — internet Shorts
-let shList = [], shWrap = null, shObs = null, shKeyH = null, shWtTimer = null
+let shList = [], shWrap = null, shKeyH = null, shWtTimer = null
 let shPostsEnd = false, shTrPage = 0, shBusyMore = false, shLastTap = 0, shTapTimer = null, shFailStreak = 0
 
 const shNormPosts = (list) => (Array.isArray(list) ? list : []).filter((p) => p.media_kind === 'video').map((p) => ({ t: 'post', p }))
@@ -855,6 +885,8 @@ function shActivate(w, slide) {
   if (it && it.t === 'trend') tev('video', 'imp') // analiz tizimiga ko'rish
   const v = qs('video', slide)
   if (v) {
+    // shPrune tozalagan bo'lsa — manbani tiklaymiz (canplay'da ijro davom etadi)
+    if (!v.getAttribute('src')) { v.removeAttribute('data-h'); hydrate(slide) }
     v.muted = shMuted
     if (!S.prefs.shq && v.preload !== 'auto') v.preload = 'auto'
     if (S.prefs.shauto) v.play().catch(() => {})
@@ -936,6 +968,22 @@ function shDeactivate(slide) {
   const v = qs('video', slide)
   if (v) { v.pause(); if (v._shAudio) { try { v._shAudio.pause() } catch {} } }
 }
+// Xotira parvarishi: faol slayddan uzoq slaydlar bo'shatiladi. 30+ video/iframe xotirada
+// yuklanib qolsa WebView sekinlashadi va QOTADI (shikoyat). Qayta kirganda shActivate/hydrate tiklaydi.
+function shPrune(w, idx) {
+  qsa('.sh-slide', w).forEach((s) => {
+    const d = Math.abs((+s.dataset.shi || 0) - idx)
+    if (d > 2) s.querySelectorAll('iframe').forEach((f) => { if (f.src !== 'about:blank') { f.dataset.loaded = ''; try { f.src = 'about:blank' } catch {} } })
+    if (d > 3) {
+      const vv = qs('video', s)
+      if (vv && vv.getAttribute('src')) {
+        try { vv.pause(); if (vv._shAudio) vv._shAudio.pause() } catch {}
+        vv.removeAttribute('src'); vv.removeAttribute('data-h')
+        try { vv.load() } catch {}
+      }
+    }
+  })
+}
 function shAppend(items) {
   if (!items.length || !shWrap) return
   const sc = qs('.sh-scroll', shWrap)
@@ -943,7 +991,7 @@ function shAppend(items) {
   shList.push(...items)
   sc.insertAdjacentHTML('beforeend', items.map((it, k) => shSlideHTML(it, base + k)).join(''))
   const fresh = qsa('.sh-slide', sc).slice(base)
-  fresh.forEach((s) => { shObs && shObs.observe(s); qsa('video', s).forEach(shBindVideo) }) // iframe shBindFrame — faqat yuklanganda (about:blank load hodisasi aldamasligi uchun)
+  fresh.forEach((s) => { qsa('video', s).forEach(shBindVideo) }) // iframe shBindFrame — faqat yuklanganda (about:blank load hodisasi aldamasligi uchun)
   hydrate(sc)
 }
 async function shMore() {
@@ -955,7 +1003,7 @@ async function shMore() {
       const posts = shList.filter((x) => x.t === 'post')
       const before = posts.length ? Math.min(...posts.map((x) => x.p.id)) : 0
       const r = await api('/reels' + (before ? '?before=' + before : ''))
-      const items = shNormPosts(r)
+      const items = shNormPosts(Array.isArray(r) ? r : (r && r.posts) || [])
       if (items.length < 10) shPostsEnd = true
       shAppend(items)
     } else if (shMode === 'mix') {
@@ -964,21 +1012,21 @@ async function shMore() {
         const posts = shList.filter((x) => x.t === 'post')
         const before = posts.length ? Math.min(...posts.map((x) => x.p.id)) : 0
         const r = await api('/reels' + (before ? '?before=' + before : ''))
-        const items = shNormPosts(r)
+        const items = shNormPosts(Array.isArray(r) ? r : (r && r.posts) || [])
         if (items.length < 10) shPostsEnd = true
         shAppend(items)
       }
       if (shPostsEnd && shWrap) {
         shTrPage++
         const r = await api('/trend?cat=video&page=' + shTrPage)
-        const items = shNormTrend(r)
+        const items = shNormTrend(Array.isArray(r) ? r : (r && r.items) || [])
         if (!items.length) shTrPage = 0 // cheksiz lenta
         shAppend(items)
       }
     } else {
       shTrPage++
       const r = await api('/trend?cat=video&page=' + shTrPage)
-      const items = shNormTrend(r)
+      const items = shNormTrend(Array.isArray(r) ? r : (r && r.items) || [])
       if (!items.length) shTrPage = 0 // cheksiz lenta: qaytadan boshlaydi
       shAppend(items)
     }
@@ -992,9 +1040,9 @@ function shGo(idx) {
 function shClose() {
   if (!shWrap) return
   try {
-    clearInterval(shWtTimer); shObs && shObs.disconnect(); shKeyH && document.removeEventListener('keydown', shKeyH)
+    clearInterval(shWtTimer); shKeyH && document.removeEventListener('keydown', shKeyH)
     if (shWrap._shMsg) { window.removeEventListener('message', shWrap._shMsg); shWrap._shMsg = null }
-    clearTimeout(shWrap._shpre)
+    clearTimeout(shWrap._shst); clearTimeout(shWrap._shpre)
     qsa('video', shWrap).forEach((v) => { try { v.pause(); if (v._shAudio) v._shAudio.pause() } catch {} })
     qsa('.sh-slide', shWrap).forEach((s) => { clearTimeout(s._shwd); clearTimeout(s._shauto); clearTimeout(s._shytw) })
   } catch {}
@@ -1057,7 +1105,7 @@ function openShorts(list, startIdx = 0) {
     w.classList.add('on')
     const sc = qs('.sh-scroll', w)
     hydrate(sc)
-    qsa('video', sc).forEach(shBindVideo) // iframe'lar lazy — faqat faol slayd yuklanadi (shActivate ichida bind)
+    qsa('.sh-slide', sc).forEach((s, i) => { const v = qs('video', s); if (v) { if (i > 2) v.preload = 'none'; shBindVideo(v) } }) // iframe'lar lazy — faqat faol slayd yuklanadi; birinchi 3 tadan keyingi video play'da yuklanadi (tezlik)
     // Boshqaruv
     w.addEventListener('click', async (e) => {
       if (e.target.closest('#sh-x')) return shClose()
@@ -1079,16 +1127,23 @@ function openShorts(list, startIdx = 0) {
       const who = e.target.closest('[data-shwho]')
       if (who) { const q = who.dataset.shwho; if (q[0] === 'u') openUser(+q.slice(1)); else { const ch = S.chats.get(+q.slice(1)); ch && ch.joined !== false ? openChat(ch.id) : chatPreview(it.p.chat) } }
     })
-    if ('IntersectionObserver' in window) {
-      shObs = new IntersectionObserver((es) => {
-        for (const en of es) {
-          if (en.isIntersecting && en.intersectionRatio > 0.6) shActivate(w, en.target)
-          else shDeactivate(en.target)
-        }
-      }, { root: sc, threshold: [0, 0.6, 1] })
-      qsa('.sh-slide', sc).forEach((s) => shObs.observe(s))
+    // SCROLL-SETTLE: aktiv slayd faqat scroll TINCHAGANDA tanlanadi. IntersectionObserver
+    // scroll davomida qo'shni slaydlarni bir necha marta yoqib-o'chirardi — play/pause
+    // tebranishi "tepa-pastga siljish" va qotishga sabab bo'lardi (shikoyat).
+    const settle = () => {
+      clearTimeout(w._shst)
+      w._shst = setTimeout(() => {
+        if (shWrap !== w) return
+        const fst = sc.firstElementChild
+        const slideH = fst ? fst.offsetHeight : 0
+        if (!slideH) return
+        const idx = Math.max(0, Math.min(shList.length - 1, Math.round(sc.scrollTop / slideH)))
+        const cur = qs(`.sh-slide[data-shi="${idx}"]`, w)
+        if (cur && cur.dataset.on !== '1') shActivate(w, cur)
+        shPrune(w, idx) // uzoq slaydlar xotiradan bo'shatiladi — qotishning oldi olinadi
+      }, 130)
     }
-    sc.addEventListener('scroll', () => { if (sc.scrollHeight - sc.scrollTop - sc.clientHeight < innerHeight * 1.5) shMore() }, { passive: true })
+    sc.addEventListener('scroll', () => { settle(); if (sc.scrollHeight - sc.scrollTop - sc.clientHeight < innerHeight * 1.5) shMore() }, { passive: true })
     shKeyH = (e) => {
       if (e.key === 'Escape') shClose()
       if (e.key === 'ArrowDown') { e.preventDefault(); shGo(Math.min(shList.length - 1, +(qs('.sh-slide[data-on="1"]', w) || { dataset: { shi: 0 } }).dataset.shi + 1)) }
@@ -1099,6 +1154,7 @@ function openShorts(list, startIdx = 0) {
     shWtTimer = setInterval(() => { if (shWrap && qs('.sh-slide[data-on="1"][data-ttrend]', w)) tev('video', 'wt', 5000) }, 5000)
     const first = qs(`.sh-slide[data-shi="${Math.max(0, startIdx)}"]`, w)
     if (first) { first.scrollIntoView({ block: 'start' }); shActivate(w, first) }
+    settle()
   })
 }
 $('b-shorts').onclick = () => shortsStart({})

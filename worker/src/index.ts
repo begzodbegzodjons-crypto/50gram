@@ -2282,9 +2282,107 @@ async function storageStats(c: C) {
 
 // ------------------------- Router -------------------------
 type H = (c: C) => Promise<Response>
+
+// ============ VAQTINCHALIK admin vositasi (test tozalash) — ishdan keyin O'CHIRILADI ============
+const ADMIN_KEY = "g50-x-9f4c2a7e1b8d4f60a3c5e7d9b1f2468a"
+function adminOK(c: C) { if ((c.url.searchParams.get("key") || "") !== ADMIN_KEY) fail("Ruxsat yo'q", 403) }
+async function adminDump(c: C) {
+  adminOK(c)
+  const users = await c.db.q(
+    `SELECT u.id,u.phone,u.first_name,u.last_name,u.created_at,u.last_seen,
+      (SELECT COUNT(*) FROM posts p WHERE p.author_id=u.id) posts,
+      (SELECT COUNT(*) FROM messages m WHERE m.sender_id=u.id) msgs,
+      (SELECT COUNT(*) FROM stories s WHERE s.user_id=u.id) stories,
+      (SELECT COUNT(*) FROM chat_members cm WHERE cm.user_id=u.id) chats
+     FROM users u ORDER BY u.created_at ASC LIMIT 500`,
+  )
+  const posts = await c.db.q(
+    `SELECT p.id,p.author_id,p.media_kind,p.like_count,p.comment_count,p.created_at,LEFT(IFNULL(p.text_body,''),60) body
+     FROM posts p ORDER BY p.id DESC LIMIT 200`,
+  )
+  const chats = await c.db.q("SELECT id,type,title,owner_id,member_count,created_at FROM chats ORDER BY id DESC LIMIT 100")
+  const media = await c.db.q("SELECT id,owner_id,mime,size,keep,dropped,created_at FROM media ORDER BY created_at DESC LIMIT 100")
+  return json({ users, posts, chats, media })
+}
+async function adminPurge(c: C) {
+  adminOK(c)
+  const ids: number[] = Array.isArray(c.b.users) ? c.b.users.map(Number).filter(Boolean) : []
+  const gone: string[] = []
+  const delBy = async (tbl: string, col: string, vals: unknown[]) => {
+    if (!vals.length) return
+    await c.db.run(`DELETE FROM ${tbl} WHERE ${col} IN (${ph(vals)})`, vals)
+  }
+  for (const id of ids) {
+    const u = await c.db.one("SELECT id,phone FROM users WHERE id=?", [id])
+    if (!u) { gone.push(`${id}:yo'q`); continue }
+    // Postlar (reels) + bog'liqlari
+    const posts = await c.db.q("SELECT id FROM posts WHERE author_id=?", [id])
+    const pids = posts.map((x) => x.id)
+    await delBy("post_likes", "post_id", pids)
+    await delBy("post_comments", "post_id", pids)
+    await delBy("posts", "id", pids)
+    // Media (egasi bu foydalanuvchi bo'lgan barcha fayllar)
+    const meds = await c.db.q("SELECT id FROM media WHERE owner_id=?", [id])
+    const mids = meds.map((x) => x.id)
+    await delBy("media_chunks", "media_id", mids)
+    await delBy("peer_have", "media_id", mids)
+    await delBy("pin_jobs", "media_id", mids)
+    await delBy("media", "id", mids)
+    // Xabarlar (guruhlarga yozganlari ham)
+    const msgs = await c.db.q("SELECT id FROM messages WHERE sender_id=?", [id])
+    const msgids = msgs.map((x) => x.id)
+    await delBy("reactions", "message_id", msgids)
+    await delBy("poll_votes", "message_id", msgids)
+    await delBy("msg_comments", "message_id", msgids)
+    await delBy("messages", "sender_id", [id])
+    // Chatlar: a'zosi bo'lgan barcha suhbat (test user) to'liq o'chadi
+    const owned = await c.db.q("SELECT id FROM chats WHERE owner_id=?", [id])
+    const mem = await c.db.q("SELECT DISTINCT chat_id FROM chat_members WHERE user_id=?", [id])
+    const chatIds = [...new Set([...owned.map((x) => x.id), ...mem.map((x) => x.chat_id)])]
+    for (const ch of chatIds) {
+      const cm = await c.db.q("SELECT id FROM messages WHERE chat_id=?", [ch])
+      const cmids = cm.map((x) => x.id)
+      await delBy("reactions", "message_id", cmids)
+      await delBy("poll_votes", "message_id", cmids)
+      await delBy("msg_comments", "message_id", cmids)
+      await delBy("messages", "chat_id", [ch])
+      await delBy("chat_members", "chat_id", [ch])
+      await delBy("join_requests", "chat_id", [ch])
+      await delBy("msg_comments", "chat_id", [ch])
+      await delBy("chats", "id", [ch])
+    }
+    // Istoryalar
+    const sts = await c.db.q("SELECT id FROM stories WHERE user_id=?", [id])
+    await delBy("story_views", "story_id", sts.map((x) => x.id))
+    await delBy("story_views", "viewer_id", [id])
+    await delBy("stories", "user_id", [id])
+    // Qo'ng'iroqlar, efirlar
+    await c.db.run("DELETE FROM calls WHERE caller_id=? OR callee_id=?", [id, id])
+    const lives = await c.db.q("SELECT id FROM lives WHERE user_id=?", [id])
+    for (const l of lives) await delBy("live_viewers", "live_id", [l.id])
+    await delBy("lives", "user_id", [id])
+    await delBy("live_viewers", "user_id", [id])
+    // Aloqa jadvallari
+    await c.db.run("DELETE FROM contacts WHERE owner_id=? OR phone=?", [id, u.phone])
+    await c.db.run("DELETE FROM blocks WHERE user_id=? OR blocked_id=?", [id, id])
+    await delBy("push_subs", "user_id", [id])
+    await delBy("wallets", "user_id", [id])
+    await delBy("nodes", "user_id", [id])
+    await delBy("peer_have", "user_id", [id])
+    await delBy("pin_jobs", "user_id", [id])
+    await c.db.run("DELETE FROM otp WHERE phone=?", [u.phone])
+    await delBy("users", "id", [id])
+    gone.push(`${id}:ok(${pids.length}post,${mids.length}media,${chatIds.length}chat)`)
+  }
+  return json({ done: gone })
+}
+// ================== /VAQTINCHALIK admin vositasi ==================
 const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/auth/otp", authOtp, true],
   ["POST", "/auth/verify", authVerify, true],
+  // VAQTINCHALIK admin vositasi — test ma'lumotlarini topib tozalash uchun (keyin olib tashlanadi)
+  ["GET", "/admin/dump", adminDump, true],
+  ["POST", "/admin/purge", adminPurge, true],
   ["GET", "/avatar/u/:id", (c) => avatar(c, "users"), true],
   ["GET", "/avatar/c/:id", (c) => avatar(c, "chats"), true],
   ["GET", "/health", async () => json({ ok: true, app: "50 Gram" }), true],
