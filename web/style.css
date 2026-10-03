@@ -591,25 +591,46 @@ body.dark .sheet .grab{background:linear-gradient(90deg,#31415F,#42527A);box-sha
 
 /* ---------- DESKTOP: AUTH HERO — brauzerni to'liq egallaydi ---------- */
 @media (min-width:900px){
-  .auth-hero{gap:clamp(28px,6vw,96px);max-width:1240px}
-  .auth-brand{display:flex;flex-direction:column;align-items:flex-start;text-align:left;flex:1 1 380px;min-width:0;max-width:470px;animation:fadein .5s ease}
-  .brand-logo{height:280px;margin:0 0 26px;filter:drop-shadow(0 18px 40px rgba(198,146,32,.5))}
-  .auth-brand h1{margin:0 0 12px;font-size:clamp(40px,4.2vw,56px);font-weight:900;letter-spacing:-1.6px;line-height:1.02;color:var(--asos);background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-  .brand-tag{margin:0 0 28px;font-size:17px;line-height:1.6;color:var(--xira);max-width:440px}
-  .brand-feats{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%}
-  .bf{background:rgba(255,255,255,.66);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.85);border-radius:18px;padding:14px 15px;box-shadow:var(--soya)}
-  .bf i{font-style:normal;font-size:21px;display:block;margin-bottom:6px}
-  .bf b{display:block;font-size:14.5px;letter-spacing:-.2px}
-  .bf span{display:block;margin-top:3px;font-size:12.5px;line-height:1.45;color:var(--xira)}
+  .auth-hero{gap:clamp(40px,7vw,160px);max-width:100%;padding-left:5vw;padding-right:5vw}
+  .auth-brand{display:flex;flex-direction:column;align-items:flex-start;text-align:left;flex:1 1 380px;min-width:0;max-width:820px;animation:fadein .5s ease}
+  .brand-logo{height:clamp(250px,20vw,380px);margin:0 0 28px;filter:drop-shadow(0 18px 40px rgba(198,146,32,.5))}
+  .auth-brand h1{margin:0 0 14px;font-size:clamp(44px,4.4vw,78px);font-weight:900;letter-spacing:-1.6px;line-height:1.02;color:var(--asos);background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .brand-tag{margin:0 0 30px;font-size:clamp(18px,1.4vw,22px);line-height:1.65;color:var(--xira);max-width:760px}
+  .brand-feats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;width:100%}
+  .bf{background:rgba(255,255,255,.66);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.85);border-radius:22px;padding:20px 22px;box-shadow:var(--soya)}
+  .bf i{font-style:normal;font-size:29px;display:block;margin-bottom:9px}
+  .bf b{display:block;font-size:17.5px;letter-spacing:-.2px}
+  .bf span{display:block;margin-top:5px;font-size:14.5px;line-height:1.45;color:var(--xira)}
   body.dark .bf{background:rgba(20,28,49,.62);border-color:rgba(255,255,255,.08)}
-  .auth-box{flex:0 1 440px;max-width:440px;padding:36px 30px}
+  .auth-box{flex:0 1 560px;max-width:560px;padding:48px 44px}
   .auth-box .logo{display:none}
-  .step h2{font-size:24px}
+  .step h2{font-size:31px}
+  .step .mut{font-size:15.5px;margin-bottom:22px}
+  .phone-in{padding:0 20px;margin-bottom:18px;border-radius:20px}
+  .phone-in input{font-size:21px;padding:18px 0}
+  .code-in{font-size:36px;letter-spacing:14px;padding:17px;border-radius:20px}
+  .inp{font-size:17px;padding:15px 17px;border-radius:18px}
+  .btn.big{padding:16px;font-size:17.5px;border-radius:18px}
+  .apk-btn b,.ios-btn b{font-size:16.5px}
+  .apk-btn span,.ios-btn span{font-size:13.5px}
+  .lnk{font-size:15px}
+  .pbody{max-width:960px}
+  .phead b{font-size:21px}
+  .sheet{max-width:740px}
 }
 
 /* ---------- DESKTOP ---------- */
 @media (min-width:900px) and (pointer:fine){
-  #main{width:clamp(360px,30vw,520px);flex-shrink:0;border-right:1px solid var(--chiziq)}
+  #main{width:clamp(430px,33vw,680px);flex-shrink:0;border-right:1px solid var(--chiziq)}
+  .top h1{font-size:32px}
+  .mini-logo{height:46px}
+  .dock button{font-size:11.5px}
+  .dock button i{font-size:21px;width:50px;height:34px;line-height:34px}
+  .item{padding:11px 12px}
+  .item .t1 b{font-size:16.5px}
+  .item .t1 .tm{font-size:12.5px}
+  .item .t2 span{font-size:14.5px}
+  .m{--msgfs:16px}
   .dlg{position:relative;inset:auto;flex:1;transform:none;visibility:visible;transition:none}
   .dlg:not(.open)>*:not(.nochat){display:none!important}
   .dlg:not(.open) .nochat{display:flex}
@@ -620,10 +641,10 @@ body.dark .sheet .grab{background:linear-gradient(90deg,#31415F,#42527A);box-sha
 
 /* ---------- KENG EKRANLAR: xabarlar ustuni markazda ---------- */
 @media (min-width:1400px) and (pointer:fine){
-  .msgs{padding-left:calc(50% - 400px);padding-right:calc(50% - 400px)}
-  .yoz{padding-left:calc(50% - 412px);padding-right:calc(50% - 412px)}
-  .replybar,.pinbar{padding-left:calc(50% - 412px);padding-right:calc(50% - 412px)}
-  .m{max-width:min(72%,560px)}
+  .msgs{padding-left:calc(50% - 580px);padding-right:calc(50% - 580px)}
+  .yoz{padding-left:calc(50% - 592px);padding-right:calc(50% - 592px)}
+  .replybar,.pinbar{padding-left:calc(50% - 592px);padding-right:calc(50% - 592px)}
+  .m{max-width:min(72%,820px)}
 }
 
 /* ---------- Qadalgan xabar paneli ---------- */
