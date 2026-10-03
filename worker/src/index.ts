@@ -122,7 +122,7 @@ function fwBlokli(ip: string) {
 // hech qanday qoldiq qolmaydi.
 let FW_KET = null as Promise<unknown> | null // ayni bor refresh (dublikatlarni birlashtirish)
 async function fwYangola(env: Env) {
-  if (Date.now() - FW_YANGI < 5_000 || !env.SEC) return
+  if (Date.now() - FW_YANGI < 1_000 || !env.SEC) return
   FW_YANGI = Date.now()
   if (FW_KET) return FW_KET
   FW_KET = (async () => {
