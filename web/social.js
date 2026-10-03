@@ -314,10 +314,54 @@ async function loadTrend(reset) {
     renderTrend()
   } catch (e) { if (reset && !trendItems.length) $('feedlist').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`; trendPage-- } finally { trendBusy = false }
 }
+// TO'LIQ O'QISH (Task 47): yangilik ilova ICHIDA, to'liq matnda o'qiladi — tashqi saytga
+// yo'naltirish YO'Q, manba nomi/havolasi HECH QANDAY SHAKLDA ko'rsatilmaydi (manba siri —
+// URL faqat serverda qoladi, matn /trend/article?id= orqali olinadi). "To'liq o'qish"
+// tugmasi tashqi havola EMAS — matn shu oynada to'liq chiziladi.
 function openTrendNews(x) {
   tintAdd(x.cat)
   tev(x.cat || 'uz', 'clk')
-  sheet(`<div class="tnews">${x.image ? `<img src="${esc(x.image)}" alt="" referrerpolicy="no-referrer">` : ''}<span class="tch">${TCATS[x.cat] ? TCATS[x.cat][0] + ' ' + TCATS[x.cat][1] : '📰 Yangilik'}</span><h2>${esc(x.title)}</h2><small class="mut">${fmtAgo(x.time)}</small>${x.snippet ? `<p>${esc(x.snippet)}</p>` : ''}<a class="btn big" href="${esc(x.url)}" target="_blank" rel="noopener">🌐 To‘liq o‘qish</a></div>`)
+  const artKey = 'g50_art_' + x.id
+  let cached = null
+  try { const d = JSON.parse(sessionStorage.getItem(artKey) || 'null'); if (d && d.paras) cached = d } catch {}
+  const o = document.createElement('div')
+  o.className = 'treader'
+  o.innerHTML = `<div class="treader-in">
+    <button class="xb" aria-label="Yopish">✕</button>
+    <div class="tr-body">
+      ${x.image ? `<img class="tr-img" src="${esc(x.image)}" alt="" referrerpolicy="no-referrer">` : ''}
+      <span class="tch">${TCATS[x.cat] ? TCATS[x.cat][0] + ' ' + TCATS[x.cat][1] : '📰 Yangilik'}</span>
+      <h1>${esc(x.title)}</h1>
+      <div class="tr-meta"><span>${fmtAgo(x.time)}</span><span id="tr-min">${cached ? '· ' + cached.mins + ' daqiqa o‘qish' : ''}</span></div>
+      <div class="tr-text">${cached ? '' : '<div class="tr-skel"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>'}</div>
+      <div class="tr-act"><button class="btn gh" data-trsh>↗️ Ulashish</button></div>
+    </div>
+  </div>`
+  document.body.appendChild(o)
+  requestAnimationFrame(() => o.classList.add('on'))
+  const txt = qs('.tr-text', o)
+  const draw = (a) => {
+    txt.innerHTML = (a.paras || []).map((p) => `<p>${linkify(String(p || ''))}</p>`).join('') || '<div class="empty">Matn topilmadi</div>'
+    const m = qs('#tr-min', o)
+    if (m && a.mins) m.textContent = '· ' + a.mins + ' daqiqa o‘qish'
+  }
+  const load = async () => {
+    if (cached) return draw(cached)
+    try {
+      const a = await api('/trend/article?id=' + encodeURIComponent(x.id))
+      try { sessionStorage.setItem(artKey, JSON.stringify(a)) } catch {}
+      draw(a)
+    } catch (e) {
+      txt.innerHTML = `<div class="empty">⚠️ ${esc(e.message)}<br><button class="btn" data-rt style="margin-top:10px">Qayta urinish</button></div>`
+      const rt = qs('[data-rt]', o)
+      if (rt) rt.onclick = () => { txt.innerHTML = '<div class="tr-skel"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>'; load() }
+    }
+  }
+  load()
+  const close = () => { flushTev(); o.classList.remove('on'); setTimeout(() => o.remove(), 200) }
+  qs('.xb', o).onclick = close
+  qs('[data-trsh]', o).onclick = () => share((x.title || '50 Gram Yangilik').slice(0, 90), location.origin + location.pathname)
+  o.onclick = (e) => { if (e.target === o) close() }
 }
 function openTrendVideo(x) {
   tev('video', 'clk')

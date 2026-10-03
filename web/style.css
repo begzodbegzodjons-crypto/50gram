@@ -772,6 +772,28 @@ body.dark .trendchips{background:rgba(10,16,31,.85)}
 .tnews h2{margin:0;font-size:19px;line-height:1.35;font-weight:800;letter-spacing:-.2px}
 .tnews p{margin:0;font-size:14px;line-height:1.55;color:var(--xira)}
 .tvo{position:fixed;inset:0;z-index:240;background:rgba(4,8,18,.96);display:flex;align-items:center;justify-content:center;padding:14px;opacity:0;transition:opacity .2s ease}
+/* ---- To'liq o'qish (Task 47): yangilik to'liq matni ilova ichida, manba yashirin ---- */
+.treader{position:fixed;inset:0;z-index:235;background:var(--fon);opacity:0;transition:opacity .2s ease;overflow:hidden}
+.treader.on{opacity:1}
+.treader-in{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 0 40px}
+.treader .xb{position:fixed;top:calc(12px + var(--tbh,0px) + env(safe-area-inset-top));right:14px;width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.9);color:var(--matn);border:0;font-size:18px;cursor:pointer;z-index:5;box-shadow:var(--soya)}
+body.dark .treader .xb{background:rgba(20,28,49,.92);color:#fff}
+.treader .tr-body{max-width:640px;margin:0 auto;padding:calc(14px + var(--tbh,0px) + env(safe-area-inset-top)) 18px 0;display:flex;flex-direction:column;gap:12px}
+.treader .tr-img{width:100%;border-radius:18px;aspect-ratio:16/9;object-fit:cover;background:var(--sirt2);box-shadow:var(--soya)}
+.treader .tch{align-self:flex-start;background:var(--asos-och);color:var(--asos);font-size:11px;font-weight:800;padding:4px 10px;border-radius:999px;letter-spacing:.3px}
+.treader h1{margin:0;font-size:22px;line-height:1.32;font-weight:800;letter-spacing:-.3px}
+.treader .tr-meta{display:flex;gap:6px;align-items:center;color:var(--xira);font-size:12.5px}
+.treader .tr-text{display:flex;flex-direction:column;gap:13px}
+.treader .tr-text p{margin:0;font-size:16.5px;line-height:1.72;color:var(--matn);word-break:break-word}
+.treader .tr-text p:first-child{font-size:17.5px;font-weight:500}
+.treader .tr-text a{color:var(--asos);text-decoration:none;font-weight:600}
+.treader .tr-skel{display:flex;flex-direction:column;gap:12px;margin-top:6px}
+.treader .tr-skel i{display:block;height:14px;border-radius:7px;background:linear-gradient(90deg,var(--sirt2) 25%,var(--men) 50%,var(--sirt2) 75%);background-size:200% 100%;animation:trsk 1.3s infinite}
+.treader .tr-skel i:nth-child(3n){width:72%}
+.treader .tr-skel i:nth-child(3n+2){width:88%}
+@keyframes trsk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.treader .tr-act{display:flex;justify-content:center;padding:16px 0 0}
+.treader .empty{text-align:center;color:var(--xira);padding:26px 10px}
 .tvo.on{opacity:1}
 .tvo .xb{position:absolute;top:14px;right:14px;width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.12);color:#fff;border:0;font-size:18px;cursor:pointer;z-index:2}
 .tvo .tvb{width:100%;max-width:480px;display:flex;flex-direction:column;gap:10px}

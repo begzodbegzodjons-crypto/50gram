@@ -1538,16 +1538,70 @@ async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
 }
 async function newsPool(c: C): Promise<any[]> {
   // Barcha manbalar PARALLEL yuklanadi + stale-while-revalidate: eski pool DARHOL qaytadi (sovuq sahifa ham tez)
+  // ARXIV: yangilashda avvalgi generatsiya poolN4old'ga ko'chiriladi — maqola o'qishda eski id'lar ham topiladi
   const ck = "https://trend.50gram.internal/poolN4"
   const meta = await cacheGetJSON<any[]>(ck)
   if (meta && meta.data?.length) {
     if (now() - meta.t < 15 * 60 * 1000) return meta.data
-    c.wait(buildNewsPool().then((d) => { if (d.length) return cachePutJSON(ck, { t: now(), data: d }) }).catch(() => {}))
+    c.wait(Promise.all([
+      cachePutJSON("https://trend.50gram.internal/poolN4old", { t: meta.t, data: meta.data }),
+      buildNewsPool().then((d) => { if (d.length) return cachePutJSON(ck, { t: now(), data: d }) }),
+    ]).catch(() => {}))
     return meta.data
   }
   const d = await buildNewsPool()
   if (d.length) await cachePutJSON(ck, { t: now(), data: d })
   return d
+}
+// Maqola o'qish uchun: id bo'yicha item (joriy pool → arxiv pool). URL FAQAT serverda qoladi —
+// klient hech qachon manba saytni ko'rmaydi/bilmaydi (foydalanuvchi talabi: manba SIR saqlansin).
+async function newsItemById(c: C, id: string): Promise<any | null> {
+  for (const key of ["https://trend.50gram.internal/poolN4", "https://trend.50gram.internal/poolN4old"]) {
+    const meta = await cacheGetJSON<any[]>(key)
+    const hit = (meta?.data || []).find((x) => x && (x.id === id || "n" + hId(x.url || "") === id))
+    if (hit && hit.url) return hit
+  }
+  return null
+}
+// Maqola matnini HTML'dan ajratish (readability-lite): script/style/nav/footer/aside tozalanadi,
+// <article>/<main> bloki afzal ko'riladi, <p> paragraflar yig'iladi — MANBA NOMI HECH QANDAY SHAKLDA QAYTMAYDI
+function extractArticle(html: string): { paras: string[]; image: string; title: string } {
+  // og:image/og:title avval, RAW html'dan olinadi (keyin meta teglar tozalanadi)
+  const og = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)
+  const image = og ? decodeEnt(og[1]) : ""
+  const tMatch = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) || html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
+  const title = tMatch ? stripHtml(tMatch[1]) : ""
+  let h = html
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(script|style|noscript|iframe|svg|form|nav|header|footer|aside|button|select|video|audio)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<(script|style|noscript|iframe|svg|form|link|meta)[^>]*\/?>/gi, " ")
+  const art = h.match(/<article[\s\S]*?<\/article>/i) || h.match(/<main[\s\S]*?<\/main>/i)
+  if (art) h = art[0]
+  const raw: string[] = []
+  const pm = h.matchAll(/<p[\s>][\s\S]*?<\/p\s*>/gi)
+  for (const m of pm) {
+    let t = stripHtml(m[0].replace(/<br\s*\/?>/gi, " "))
+    // Havola-qatorlar / obuna / manba eslatmalari / juda qisqa bo'laklar — tashlanadi
+    if (t.length < 35) continue
+    if (/(obuna bo|telegram|instagram|facebook|youtube|@[\w_]{4,}|https?:\/\/|www\.|manba:|izohlan|ko'rishlar soni|reklama|\d{1,2}:\d{2}$)/i.test(t)) continue
+    if (/^[\s\d.,:;!?%()'"«»\-—+]+$/.test(t)) continue
+    // MANBA SIRI: matn ichida manba sayt nomi uchrasa ham tozalanadi (kun.uz, daryo.uz, BBC...)
+    t = t.replace(/\b(kun\s?\.?\s?uz|daryo\s?\.?\s?uz|gazeta\s?\.?\s?uz|spot\s?\.?\s?uz|nuz\s?\.?\s?uz|bbc|ббс)\b/gi, "").replace(/\(\s*\)/g, "").replace(/\s{2,}/g, " ").trim()
+    if (t.length < 30) continue
+    t = t.replace(/\s+/g, " ").trim()
+    if (raw.length && raw[raw.length - 1] === t) continue
+    raw.push(t)
+    if (raw.length >= 130) break
+  }
+  // Juda oz chiqsa — bo'sag'ichni pasaytirib qayta urinish
+  if (raw.length < 3) {
+    for (const m of h.matchAll(/<p[\s>][\s\S]*?<\/p\s*>/gi)) {
+      const t = stripHtml(m[0])
+      if (t.length >= 18 && !raw.includes(t)) raw.push(t)
+      if (raw.length >= 60) break
+    }
+  }
+  return { paras: raw.slice(0, 130).map((p) => p.slice(0, 1200)), image, title: title.slice(0, 200) }
 }
 async function buildNewsPool(): Promise<any[]> {
   const res = await Promise.all(TREND_FEEDS.map(async ([src, url]) => {
@@ -1672,6 +1726,42 @@ async function trendSrcDbg(c: C) {
   } catch (e: any) { st.yt_full = { err: String(e?.message || e).slice(0, 90), ms: Date.now() - t2 } }
   return json(st)
 }
+// YANGILIQ TO'LIQ O'QISH (Task 47): maqola matni SERVERDA olinadi va faqat paragraflar
+// qaytariladi — manba sayt nomi/URL/havolasi klientga UMUMAN bormaydi (foydalanuvchi talabi:
+// "to'liq o'qish" ilovada, manba SIR). id faqat hovuzdagi itemlarga mos keladi (SSRF xavfsiz).
+async function trendArticle(c: C) {
+  const id = str(c.url.searchParams.get("id") || "", 48)
+  if (!id) fail("id kerak")
+  const ck = "https://art.50gram.internal/a/" + id
+  const hit = await cacheGetJSON<any>(ck)
+  if (hit && hit.data?.paras?.length) return json({ ...hit.data, cached: true })
+  const item = await newsItemById(c, id)
+  if (!item?.url) fail("Yangilik topilmadi — lentani yangilang", 404)
+  let out: any
+  try {
+    const r = await fetch(item.url, { headers: TREND_UA, signal: AbortSignal.timeout(9000), cf: { cacheTtl: 1800, cacheEverything: true } } as any)
+    if (!r.ok) fail("Yangilik yuklanmadi", 502)
+    const html = await r.text()
+    const ex = extractArticle(html)
+    const paras = ex.paras.length >= 2 ? ex.paras : [item.snippet || item.title].filter(Boolean)
+    const words = paras.join(" ").split(/\s+/).length
+    out = {
+      ok: true, id, kind: "news",
+      title: item.title || ex.title || "",
+      image: item.image || ex.image || "",
+      paras, mins: Math.max(1, Math.round(words / 170)),
+      time: item.time || now(),
+      cat: item.cat || "uz",
+    }
+  } catch (e: any) {
+    // Sayt ochilmasa — kamida sarlavha + qisqa mazmun bilan o'qib bo'ladi
+    if (item.snippet || item.title) {
+      out = { ok: true, id, kind: "news", title: item.title || "", image: item.image || "", paras: [item.snippet || item.title], mins: 1, time: item.time || now(), cat: item.cat || "uz", lite: true }
+    } else fail("Yangilik yuklanmadi — keyinroq urinib ko'ring", 502)
+  }
+  if (out.paras?.length) { try { await cachePutJSON(ck, { t: now(), data: out }) } catch {} ; return json(out) }
+  return json(out)
+}
 async function trendInsights(c: C) {
   const rows = await c.db.q("SELECT cat, imp, clk, wt FROM trend_stats ORDER BY clk DESC").catch(() => [])
   let imp = 0, clk = 0, wt = 0
@@ -1740,6 +1830,9 @@ async function trend(c: C) {
       const picks = vall.slice(v0, v0 + 3)
       for (let i = 3, vi = 0; i < picked.length && vi < picks.length; i += 7) picked.splice(i, 0, picks[vi++])
       if (picked.length && picks.length && !picked.some((x) => x.kind === "video" || x.kind === "short")) picked.push(picks[0])
+      // HAR YANGILASHDA BOSHQA TARTIB (Fisher-Yates): foydalanuvchi "yangiliklar yangilansin" —
+      // har pool qayta qurilganda sahifa tartibi ham o'zgaradi, bir xillik yo'q
+      for (let i = picked.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[picked[i], picked[j]] = [picked[j], picked[i]] }
       items = picked
     }
   }
@@ -1758,6 +1851,9 @@ async function trend(c: C) {
   // hamma BIR XIL id chiqarardi → klient dedupe ularni tushirardi → hovuz 5-6 tagacha
   // qisqarardi → lenta "5-6 tadan keyin qotib qolmoqda" (asosiy ildiz sabab shu edi!)
   for (const x of items) x.id = (await sha256(x.id || x.url || x.title || String(x.time))).slice(0, 12)
+  // MANBA SIRI (foydalanuvchi talabi): yangilik itemlarida URL/manba klientga CHIQMAYDI —
+  // to'liq matn faqat /trend/article?id= orqali serverda olinadi
+  for (const x of items) if (x.kind === "news") { delete x.url; delete x.src }
   const out = { ok: true, page, items }
   const resp = json(out)
   // Video sahifasida YouTube yo'q bo'lsa 60s kesh (hovuz tuzatilgach tez yangilanadi); qolganlari 600s
@@ -2543,6 +2639,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/feed", feed],
   ["GET", "/reels", reels],
   ["GET", "/trend", trend],
+  ["GET", "/trend/article", trendArticle],
   ["POST", "/trend/ev", trendEv],
   ["GET", "/trend/insights", trendInsights],
   ["GET", "/trend/trdbg", trendTrDbg],
