@@ -1,9 +1,4 @@
-/* 50 Gram — Taqsimlangan xotira (har bir qurilma tarmoqqa ko'pi bilan 30 GB beradi)
-   - Server har bir faylni 15–20 ta qurilmaga tarqatadi, kamida 2 tasi "doimiy onlayn" qurilma.
-   - Qurilma hech qachon belgilangan chegaradan (standart 30 GB) va telefonning bo'sh joyidan oshmaydi:
-     har doim kamida 3 GB bo'sh joy qoldiriladi, aks holda eng eski nusxalar o'chiriladi.
-   - Bo'shatilgan nusxa haqida serverga xabar beriladi va server boshqa qurilmaga nusxa buyuradi.
-   - Fayllar shifrlangan: begona qurilma o'zida saqlayotgan faylni o'qiy olmaydi. */
+/* 50 Gram — media xotira boshqaruvi (qurilma chegarasi va tozalash) */
 'use strict'
 const Store = (() => {
   const GB = 1024 ** 3, MAX_GB = 30, RESERVE = 3 * GB
@@ -19,7 +14,7 @@ const Store = (() => {
     used = all.reduce((a, [, v]) => a + ((v && v.size) || 0), 0)
     loaded = true
   }
-  // Faylni hisobga olish (pinned=1: tarmoq uchun saqlanayotgan nusxa)
+  // Faylni hisobga olish
   function record(id, size, chat, pinned) {
     return q(async () => {
       const o = await IDB.get('idx', id)

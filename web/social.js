@@ -463,7 +463,7 @@ function renderReels() {
   if (!box) return
   box.innerHTML = reelPosts.length
     ? `<div class="reels">${reelPosts.map(reelHTML).join('')}</div>${reelsEnd ? '<div class="hint" style="text-align:center;padding:12px">Hammasi ko‘rildi ✨</div>' : '<div class="hint" style="text-align:center;padding:12px">Pastga suring — yana videolar 🎬</div>'}`
-    : `<div class="empty"><span class="big">🎬</span>Hali Reels yo‘q. Yuqoridagi <b>📹</b> tugmasi bilan o‘z videongizni joylang!<br><small style="color:var(--xira)">⚡ Shorts esa internetdan jonli videolar keltiradi</small></div>`
+    : `<div class="empty"><span class="big">🎬</span>Hali Reels yo‘q — <b>➕</b> tugmasi bilan birinchi videoni joylang!<br><small style="color:var(--xira)">⚡ Shorts esa internetdan videolar keltiradi</small></div>`
   hydrate(box)
   if (reelsObserver) reelsObserver.disconnect()
   const rd = qs('.reels', box)
@@ -512,8 +512,8 @@ $('reelslist').addEventListener('click', async (e) => {
   }
   const w = e.target.closest('[data-who]')
   if (w) { const v = w.dataset.who; if (v[0] === 'u') openUser(+v.slice(1)); else { const c = S.chats.get(+v.slice(1)); c && c.joined !== false ? openChat(c.id) : chatPreview(p.chat) } ; return }
-  // To'liq ekran Shorts rejimi (TikTok uslubi)
-  return shortsStart({ post: p })
+  // To'liq ekran Reels rejimi (TikTok uslubi) — tomosha darhol boshlanadi
+  return shortsStart({ post: p, reelsOnly: true })
 })
 $('feedlist').addEventListener('click', async (e) => {
   if (feedMode === 'trend') {
@@ -583,11 +583,10 @@ function postSheet(preChatId = 0) {
 }
 $('b-post').onclick = () => postSheet(0)
 
-// ---------------- 📹 REELS JOYLASH — Reels bo'limidan to'g'ridan-to'g'ri ----------------
-// Videolar shifrlangan holda yuklanadi (AES-GCM) va tarmoq qurilmalarida taqsimlanadi (P2P gibrid xotira).
+// ---------------- 📹 REELS JOYLASH ----------------
 function reelSheet() {
   let file = null
-  const sh = sheet(h3('🎬 Reels joylash') + `<div class="hint">📹 Video tanlanadi va <b>shifrlangan holda</b> yuklanadi 🔒 — tarmoqdagi qurilmalarda taqsimlanadi, serverda faqat shifr saqlanadi.</div>
+  const sh = sheet(h3('🎬 Reels joylash') + `
     <div id="rl-pv" class="rl-pv" data-rpick><span class="rl-ic">📹</span><b>Video tanlash</b><small>Vertikal video — maks 30 MB</small></div>
     <textarea class="inp" id="rl-t" rows="2" maxlength="1000" placeholder="Izoh… (ixtiyoriy)"></textarea>
     <button class="btn big" id="rl-s" disabled>⬆️ Joylash</button>`)
@@ -610,7 +609,7 @@ function reelSheet() {
       reelsEnd = false
       renderReels(); reelsCacheSave()
       tabGo('t-reels')
-      toast('✅ Reels joylandi — barcha foydalanuvchilar ko‘radi 🎬')
+      toast('✅ Reels joylandi 🎬')
     } catch (e) { toast('⚠️ ' + e.message); btn.disabled = false; btn.textContent = '⬆️ Joylash' }
   }
 }
@@ -682,8 +681,9 @@ $('b-cimport').onclick = async () => {
 }
 
 // ============ ⚡ SHORTS: TikTok-uslubida to'liq ekran vertikal rejim ============
-// Platform Reels (shifrlangan media) + dunyo trend Shorts'lari bitta cheksiz vertikal lentada.
+// Platform Reels va trend Shorts vertikal ko'rish rejimida.
 let shMuted = localStorage.getItem('g50_shmute') !== '0'
+let shMode = 'trend' // 'reels' — faqat platform Reels · 'trend' — internet Shorts
 let shList = [], shWrap = null, shObs = null, shKeyH = null, shWtTimer = null
 let shPostsEnd = false, shTrPage = 0, shBusyMore = false, shLastTap = 0, shTapTimer = null, shFailStreak = 0
 
@@ -927,8 +927,9 @@ async function shMore() {
   if (shBusyMore) return
   shBusyMore = true
   try {
-    const posts = shList.filter((x) => x.t === 'post')
-    if (!shPostsEnd) {
+    if (shMode === 'reels') {
+      if (shPostsEnd) return
+      const posts = shList.filter((x) => x.t === 'post')
       const before = posts.length ? Math.min(...posts.map((x) => x.p.id)) : 0
       const r = await api('/reels' + (before ? '?before=' + before : ''))
       const items = shNormPosts(r)
@@ -938,7 +939,7 @@ async function shMore() {
       shTrPage++
       const r = await api('/trend?cat=video&page=' + shTrPage)
       const items = shNormTrend(r)
-      if (!items.length) { shPostsEnd = false; shTrPage = 0 } // cheksiz lenta: qaytadan boshlaydi
+      if (!items.length) shTrPage = 0 // cheksiz lenta: qaytadan boshlaydi
       shAppend(items)
     }
   } catch {} finally { shBusyMore = false }
@@ -965,47 +966,38 @@ function shClose() {
 }
 async function shortsStart(opt = {}) {
   try {
-    let posts = shNormPosts(reelPosts)
-    if (opt.post && !posts.some((x) => x.p.id === opt.post.id)) posts.unshift({ t: 'post', p: opt.post })
-    // TREND SHORTS TO'SIQ QILMAYDI: keshda bo'lsa darhol qo'shamiz, yo'q bo'lsa ilova OCHILGACH fonda yuklanadi.
-    // Avval: shortsStart ikkala API'ni ketma-ket kutardi — sekin API butun Shorts'ni bloklaydi (asosiy sekinlik sababi).
+    if (opt.reelsOnly) {
+      // REELS rejim: faqat foydalanuvchilar joylagan videolar
+      let posts = shNormPosts(reelPosts)
+      if (opt.post && !posts.some((x) => x.p.id === opt.post.id)) posts.unshift({ t: 'post', p: opt.post })
+      if (!posts.length) { try { posts = shNormPosts(await api('/reels')) } catch {} }
+      if (!posts.length) return false // hali Reels yo'q — ro'yxatdagi holat ko'rinadi
+      shMode = 'reels'
+      const idx = opt.post ? posts.findIndex((x) => x.p.id === opt.post.id) : 0
+      openShorts(posts, Math.max(0, idx))
+      return true
+    }
+    // SHORTS rejim: internetdan trend videolar
     let tr = shNormTrend(trendItems.filter((x) => x.kind === 'short'))
-    if (!tr.length && opt.trend) { try { tr = shNormTrend(await api('/trend?cat=video&page=1')) } catch {} }
+    if (!tr.length) { try { const r = await api('/trend?cat=video&page=1'); tr = shNormTrend((r && r.items) || r || []) } catch {} }
     if (opt.trend && !tr.some((x) => x.x.id === opt.trend.id)) tr.unshift({ t: 'trend', x: opt.trend })
-    if (!posts.length && !tr.length && !opt.trend) {
-      // Hech narsa yo'q — ikkala manba PARALLEL kutiladi (ketma-ket emas!)
-      const [rp, rt] = await Promise.allSettled([api('/reels'), api('/trend?cat=video&page=1')])
-      if (rp.status === 'fulfilled') posts = shNormPosts(rp.value)
-      if (rt.status === 'fulfilled') tr = shNormTrend(rt.value)
-    }
-    if (!posts.length && !tr.length) return toast('Hali video yo‘q — Lenta’da 🎬 Reels’dan video post joylang!')
-    const list = []
-    let pi = 0, ti = 0
-    while (pi < posts.length || ti < tr.length) {
-      if (ti < tr.length) list.push(tr[ti++])
-      if (ti < tr.length) list.push(tr[ti++])
-      if (pi < posts.length) list.push(posts[pi++])
-    }
-    let idx = 0
-    if (opt.post) idx = list.findIndex((x) => x.t === 'post' && x.p.id === opt.post.id)
-    else if (opt.trend) idx = list.findIndex((x) => x.t === 'trend' && x.x.id === opt.trend.id)
-    openShorts(list, Math.max(0, idx))
-    // FONDA: trend shorts hali qo'shilmagan bo'lsa — yuklab slaydlar oxiriga qo'shiladi (cheksiz lenta)
-    if (!opt.trend && tr.length < 6) {
-      api('/trend?cat=video&page=1').then((r) => {
-        const more = shNormTrend(r).filter((x) => !list.some((y) => y.t === 'trend' && y.x.id === x.x.id))
-        if (more.length && shWrap) shAppend(more)
-      }).catch(() => {})
-    }
+    if (!tr.length) return toast('⚡ Shorts hali tayyor emas — birozdan so‘ng urinib ko‘ring')
+    shMode = 'trend'
+    const idx = opt.trend ? tr.findIndex((x) => x.x.id === opt.trend.id) : 0
+    openShorts(tr, Math.max(0, idx))
+    // Yosh lenta: kam bo'lsa fonda yana bir sahifa tortamiz
+    if (tr.length < 4) { api('/trend?cat=video&page=2').then((r) => { const more = shNormTrend((r && r.items) || r || []); if (more.length && shWrap && shMode === 'trend') shAppend(more) }).catch(() => {}) }
+    return true
   } catch (e) { toast('⚠️ ' + e.message) }
 }
 function openShorts(list, startIdx = 0) {
   shClose()
   shList = list
   shPostsEnd = false; shTrPage = 1
+  const isReels = shMode === 'reels'
   const w = document.createElement('div')
   w.id = 'shorts'
-  w.innerHTML = `<div class="sh-top"><button class="sh-x" id="sh-x">✕</button><b>⚡ Shorts</b><div class="sh-sp"></div><button class="sh-mute" id="sh-m">${shMuted ? '🔇' : '🔊'}</button></div>
+  w.innerHTML = `<div class="sh-top"><button class="sh-x" id="sh-x">✕</button><b>${isReels ? '🎬 Reels' : '⚡ Shorts'}</b><div class="sh-sp"></div>${isReels ? '<button class="sh-mute" id="sh-add" title="Reels joylash">➕</button><button class="sh-mute" id="sh-yt" title="Internet Shorts">⚡</button>' : ''}<button class="sh-mute" id="sh-m">${shMuted ? '🔇' : '🔊'}</button></div>
   <div class="sh-scroll">${list.map(shSlideHTML).join('')}</div>`
   document.body.appendChild(w)
   document.body.classList.add('sh-lock')
@@ -1020,6 +1012,8 @@ function openShorts(list, startIdx = 0) {
     w.addEventListener('click', async (e) => {
       if (e.target.closest('#sh-x')) return shClose()
       if (e.target.closest('#sh-m')) return shSetMuted(!shMuted)
+      if (e.target.closest('#sh-add')) return reelSheet()
+      if (e.target.closest('#sh-yt')) { shClose(); return shortsStart({}) }
       const slide = e.target.closest('.sh-slide')
       if (!slide) return
       const it = shList[+slide.dataset.shi]

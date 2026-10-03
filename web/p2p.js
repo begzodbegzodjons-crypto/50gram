@@ -1,8 +1,4 @@
-/* 50 Gram — P2P "o'rgimchak to'ri"
-   Server fayl yoki xabarni muddati tugab o'chirgan bo'lsa, ma'lumot shu chatdagi onlayn
-   foydalanuvchi qurilmasidan WebRTC DataChannel orqali to'g'ridan-to'g'ri olinadi.
-   Olgan qurilma o'zi ham manbaga aylanadi, shu tarzda tarmoq kengayib boradi.
-   Xavfsizlik: ruxsatni server tekshiradi, fayl SHA-256 bilan, xabar server imzosi bilan tekshiriladi. */
+/* 50 Gram — qo'shimcha media manba (zaxira nusxalar) */
 'use strict'
 const P2P = (() => {
   const ctx = new Map()          // mediaId -> { chat, sha, size }

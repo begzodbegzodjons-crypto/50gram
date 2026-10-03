@@ -211,7 +211,7 @@ const CHUNK = 512 * 1024
 function blobToB64(b) {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(b) })
 }
-// ---- Shifrlash: fayl serverga va tarmoq qurilmalariga faqat shifrlangan holda boradi ----
+// ---- Fayllarni tayyorlash ----
 const b64e = (u) => { let s = ''; u = new Uint8Array(u); for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]); return btoa(s) }
 const b64d = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 async function encryptBlob(plain) {
@@ -278,7 +278,7 @@ async function fetchChunk(id, i) {
   }
   return null
 }
-// Shifrlangan faylni olish: 1) qurilmadan 2) serverdan 3) tarmoqdagi boshqa qurilmalardan
+// Faylni olish va ko'rsatish
 async function getCipher(id) {
   const local = await IDB.get('media', id)
   if (local) { Store.access(id); P2P.touch(id); return local }
@@ -456,7 +456,9 @@ window.__50back = () => {
   // 3) To'liq ekran sozlamalar sahifalari (ichma-ich qatlamlar — eng ustidagini yopamiz)
   const pages = qsa('.page')
   if (pages.length) { closePage(pages[pages.length - 1]); return true }
-  // 4) Jonli efir: sovg'a paneli → tomoshabin chiqadi, efirchida tasdiqlash oynasi
+  // 4) Shorts/Reels to'liq ekran ko'rish oynasi
+  if (typeof shWrap !== 'undefined' && shWrap) { try { shClose() } catch {} return true }
+  // 5) Jonli efir: sovg'a paneli → tomoshabin chiqadi, efirchida tasdiqlash oynasi
   if (typeof LIVE !== 'undefined' && LIVE) {
     const gp = qs('#l-gift', LIVE.el)
     if (gp && !gp.classList.contains('hide')) { gp.classList.add('hide'); return true }
@@ -767,7 +769,7 @@ function tabGo(id) {
   qsa('.dock button').forEach((b) => b.classList.toggle('on', b.dataset.t === id))
   if (id === 't-contacts') loadContacts()
   if (id === 't-feed') (feedMode === 'trend' ? loadTrend(true) : loadFeed(true))
-  if (id === 't-reels') loadReels(true)
+  if (id === 't-reels') { loadReels(true); shortsStart({ reelsOnly: true }) }
   if (id === 't-channels') renderChannels()
   if (id === 't-me') renderMe()
 }

@@ -329,7 +329,7 @@ async function renderMe() {
     prow('view', '🎨', '#00C2E0', '#22C55E', 'Ko‘rinish va ovoz', 'Mavzu, aksent rang, shrift, fon'),
     prow('stick', '🎈', '#FF9F0A', '#FF3B5C', 'Stikerlar', 'Animatsiyali paketlar'),
     prow('wallet', '💎', '#FFB020', '#FF9F0A', 'Coin va martaba', 'Balans, kunlik bonus, TOP'),
-    prow('data', '🗂', '#37B24D', '#0CA678', 'Ma’lumotlar va xotira', 'P2P tarmoq, zaxira, kesh'),
+    prow('data', '🗂', '#37B24D', '#0CA678', 'Ma’lumotlar va xotira', 'Zaxira va tozalash'),
     prow('lang', '🌐', '#4dabf7', '#2E7BFF', 'Til', 'O‘zbek (lotin)'),
   ])}
   ${rowsHTML([row('about', 'ℹ️', '50 Gram haqida', 'Versiya 2.0 «Zamonaviy»'), row('logout', '🚪', 'Chiqish', '', 'red')])}`
@@ -420,7 +420,7 @@ function pgPrivacy() {
       prow('blocks', '🚫', '#FF3B5C', '#E52550', 'Bloklangan foydalanuvchilar', 'Bloklanganlar sizga yozolmaydi'),
     ])}
     <div class="sec">Himoya</div>
-    <div class="hint">Xabarlar qurilmangizda saqlanadi. Media fayllar shifrlangan holda a’zolar qurilmalari orqali (P2P tarmoq) yetkaziladi — server faqat ko‘prik vazifasini bajaradi. Hech qanday yozishma avtomatik o‘chirmaydi: tarix faqat sizning ixtiyoringizda.</div>`,
+    <div class="hint">Suhbatlaringiz faqat sizning ixtiyoringizda — hech qanday yozishma avtomatik o‘chirmaydi.</div>`,
   (p) => {
     p.onclick = (e) => {
       const it = e.target.closest('[data-pg]'); if (!it) return
@@ -495,11 +495,9 @@ async function pgData() {
   try { st = Store.info ? await Promise.resolve(Store.info()) : null } catch {}
   const gb = +(localStorage.getItem('g50_store_gb') || 5)
   openPage('Ma’lumotlar va xotira', `
-    <div class="sec">🕸 Qurilmalar tarmog‘i (P2P)</div>
-    ${rowsHTML([`<div data-sw2="share"><div class="rt">Tarmoqqa hissa qo‘shish<small>Ma’lumotlaringiz shifrlangan holda boshqa a’zolarga yetkaziladi</small></div>${swHTML(localStorage.getItem('g50_share') !== '0')}</div>`])}
     <div class="rows">
       <div style="display:block"><div class="rt">Qurilmada ajratilgan joy: <b id="gb-v">${gb} GB</b><small>Maksimum 30 GB. Joy tugasa eski fayllar avtomatik bo‘shatiladi.</small></div><input type="range" id="gb-r" min="1" max="30" value="${gb}" style="width:100%"></div>
-      <div><div class="rt">Hozir band<small>${st ? `${fmtSize(st.used || 0)} / ${st.limitGB} GB · boshqalar uchun ${st.pinned || 0} ta nusxa (${fmtSize(st.pinnedBytes || 0)})` : '—'}</small></div><div class="rt" id="net-st"><small>Tarmoq tekshirilmoqda…</small></div></div>
+      <div><div class="rt">Hozir band<small>${st ? `${fmtSize(st.used || 0)} / ${st.limitGB} GB` : '—'}</small></div></div>
     </div>
     <div class="sec">Zaxira va tozalash</div>
     ${rowsHTML([prow('backup', '🗜', '#4dabf7', '#2E7BFF', 'Butun tarixni zaxiralash', 'Barcha chatlar bitta faylga saqlanadi'), prow('clear', '🧹', '#FF6B81', '#E52550', 'Keshni tozalash', 'Qurilmadagi media fayllar o‘chiriladi')])}`,
@@ -507,10 +505,7 @@ async function pgData() {
     const r = qs('#gb-r', p)
     r.oninput = () => { const v = qs('#gb-v', p); if (v) v.textContent = r.value + ' GB' }
     r.onchange = () => { Store.setLimit(+r.value); toast('✅ ' + r.value + ' GB ajratildi') }
-    api('/storage/stats').then((s2) => { const el = qs('#net-st', p); if (el) el.innerHTML = `<small>Tarmoqda <b>${s2.nodes || 0}</b> qurilma · ${s2.files || 0} fayl · sog‘lom: ${s2.healthy || 0}</small>` }).catch(() => {})
     p.onclick = async (e) => {
-      const sw = e.target.closest('[data-sw2="share"]')
-      if (sw) { const on = localStorage.getItem('g50_share') === '0'; localStorage.setItem('g50_share', on ? '1' : '0'); qs('.sw', sw).classList.toggle('on', on); return }
       const it = e.target.closest('[data-a],[data-pg]'); if (!it) return
       const ak = it.dataset.a || it.dataset.pg
       if (ak === 'clear') { if (await confirmBox('Qurilmadagi barcha media fayllar o‘chirilsinmi? Xabarlar matni saqlanib qoladi.', 'Tozalash')) tryDo(async () => { await Store.clearAll(); mediaCache.clear() }, '🧹 Tozalandi') }
@@ -544,12 +539,12 @@ function pgLanguage() {
 function pgAbout() {
   openPage('50 Gram haqida', `
     <div class="prof"><img src="logo.png" style="width:132px" alt="50 Gram"><h2>50 Gram</h2><div class="mut">Versiya 2.0 «Zamonaviy» · O‘zbekiston</div></div>
-    <div class="hint">O‘zbekiston uchun yaratilgan tezkor, xavfsiz messenjer: chatlar, kanallar, istoriyalar, jonli efir (sovg‘a va martaba tizimi bilan), Shorts lenta, HD qo‘ng‘iroqlar va taqsimlangan P2P xotira.</div>
+    <div class="hint">O‘zbekiston uchun yaratilgan tezkor, xavfsiz messenjer: chatlar, kanallar, istoriyalar, jonli efir (sovg‘a va martaba tizimi bilan), Reels va Shorts lenta, HD qo‘ng‘iroqlar.</div>
     ${rowsHTML([
-      `<div>${tile('🔒', '#a5d8ff', '#4dabf7')}<div class="rt">Xavfsizlik<small>Shifrlangan media va P2P yetkazish</small></div></div>`,
+      `<div>${tile('🔒', '#a5d8ff', '#4dabf7')}<div class="rt">Xavfsizlik<small>Ma’lumotlaringiz himoya ostida</small></div></div>`,
       `<div>${tile('🇺🇿', '#d3f9d8', '#40c057')}<div class="rt">100% o‘zbekcha<small>Interfeys, kontent va Shorts</small></div></div>`,
-      `<div>${tile('⚡', '#ffe066', '#f59f00')}<div class="rt">Real vaqt<small>WebSocket + Web Push bildirishnomalar</small></div></div>`,
-      `<div>${tile('🔴', '#fcc2d7', '#e64980')}<div class="rt">Jonli efir<small>Tomoshabinlar soni cheklanmagan — o‘rgimchak to‘ri</small></div></div>`,
+      `<div>${tile('⚡', '#ffe066', '#f59f00')}<div class="rt">Real vaqt<small>Tezkor bildirishnomalar</small></div></div>`,
+      `<div>${tile('🔴', '#fcc2d7', '#e64980')}<div class="rt">Jonli efir<small>Tomoshabinlar soni cheklanmagan</small></div></div>`,
     ])}`)
 }
 async function changeMyAvatar() {
@@ -628,9 +623,8 @@ function chatViewSheet() {
 // Trend qiziqishlarini qo'lda sozlash (o'zi ochgani hisoblanadi ham)
 function trendInterestsSheet() {
   const t = tintGet()
-  const sh = sheet(h3('🔥 Trend qiziqishlarim') + `<div class="hint">Ko‘proq qiziqtirgan mavzularingiz lentada ko‘proq chiqadi. Omadi qancha ko‘p bo‘lsa — shunchalik ko‘p chiqadi.</div>` +
+  const sh = sheet(h3('🔥 Trend qiziqishlarim') + `<div class="hint">Ko‘proq qiziqtirgan mavzularingiz lentada ko‘proq ko‘rinadi.</div>` +
     Object.entries(TCATS).filter(([k]) => k !== 'all').map(([k, [e, l]]) => `<div class="rows"><div><div class="rt">${e} ${l}</div><input type="range" data-ti="${k}" min="0" max="10" value="${t[k] || 0}" style="width:110px"></div></div>`).join('') +
-    `<div class="tins" id="tins"><div class="rt">🧠 Analiz tizimi yuklanmoqda...</div></div>` +
     `<button class="btn gh big" id="ti-r">Qiziqishlarni tozalash</button>`)
   qs('#ti-r', sh).onclick = () => { try { localStorage.setItem('g50_tint', '{}') } catch {}; toast('Tozalandi'); closeSheet(sh) }
   sh.onchange = (e) => {
@@ -640,18 +634,5 @@ function trendInterestsSheet() {
     try { localStorage.setItem('g50_tint', JSON.stringify(t2)) } catch {}
     toast('✅ Qiziqishlar saqlandi — Trend yangilanadi')
   }
-  // 🧠 Analiz tizimi: tizimning joriy qarorlari (faqat agregat statistika ko'rsatiladi)
-  api('/trend/insights').then((d) => {
-    const el = qs('#tins', sh); if (!el || !d?.ok) return
-    if (!d.cats?.length) { el.innerHTML = `<div class="rt">🧠 Analiz tizimi ma'lumot to'playapti — bir necha ko'rishdan keyin qarorlar shakllanadi.</div>`; return }
-    const top = d.cats[0]
-    const topL = TCATS[top.cat] ? TCATS[top.cat][0] + ' ' + TCATS[top.cat][1] : top.cat
-    el.innerHTML = `<div class="rt"><b>🧠 Analiz tizimi qarorlari</b></div>` +
-      d.cats.slice(0, 6).map((s) => {
-        const L = TCATS[s.cat] ? TCATS[s.cat][0] + ' ' + TCATS[s.cat][1] : s.cat
-        return `<div class="trow"><span class="tl">${L}</span><div class="tbar"><i style="width:${s.bar}%"></i></div><small>${s.ctr}% CTR</small></div>`
-      }).join('') +
-      `<small class="mut">Jami ${fmtN(d.total_imp)} ko‘rish · ${fmtN(d.total_clk)} bosish · Umumiy CTR ${d.ctr}%<br>Tizim qarori: «${topL}» eng katta qiziqish uyg‘otmoqda — lenta shu mavzuga ko‘proq joy beradi.</small>`
-  }).catch(() => {})
 }
 initChatView()
