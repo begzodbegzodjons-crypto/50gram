@@ -2282,93 +2282,9 @@ async function storageStats(c: C) {
 
 // ------------------------- Router -------------------------
 type H = (c: C) => Promise<Response>
-
-// ============ VAQTINCHALIK admin vositasi (test tozalash) — ishdan keyin O'CHIRILADI ============
-const ADMIN_KEY = "g50-x-9f4c2a7e1b8d4f60a3c5e7d9b1f2468a"
-function adminOK(c: C) { if ((c.url.searchParams.get("key") || "") !== ADMIN_KEY) fail("Ruxsat yo'q", 403) }
-async function adminDump(c: C) {
-  adminOK(c)
-  const users = await c.db.q(
-    `SELECT u.id,u.phone,u.first_name,u.last_name,u.created_at,u.last_seen,
-      (SELECT COUNT(*) FROM posts p WHERE p.author_id=u.id) posts,
-      (SELECT COUNT(*) FROM messages m WHERE m.sender_id=u.id) msgs,
-      (SELECT COUNT(*) FROM stories s WHERE s.user_id=u.id) stories,
-      (SELECT COUNT(*) FROM chat_members cm WHERE cm.user_id=u.id) chats
-     FROM users u ORDER BY u.created_at ASC LIMIT 500`,
-  )
-  const posts = await c.db.q(
-    `SELECT p.id,p.author_id,p.media_kind,p.like_count,p.comment_count,p.created_at,LEFT(IFNULL(p.text_body,''),60) body
-     FROM posts p ORDER BY p.id DESC LIMIT 200`,
-  )
-  const chats = await c.db.q("SELECT id,type,title,owner_id,member_count,created_at FROM chats ORDER BY id DESC LIMIT 100")
-  const media = await c.db.q("SELECT id,owner_id,mime,size,keep,dropped,created_at FROM media ORDER BY created_at DESC LIMIT 100")
-  return json({ users, posts, chats, media })
-}
-async function adminPurge(c: C) {
-  adminOK(c)
-  // Cloudflare Workers free plan: 50 subrequest limit — shuning uchun HAR CHAQIRUVDA
-  // BITTA foydalanuvchi tozalanadi (qolganlari "left" ichida qaytariladi, qayta-qayta chaqiriladi).
-  const ids: number[] = Array.isArray(c.b.users) ? c.b.users.map(Number).filter(Boolean) : []
-  const id = ids[0]
-  if (!id) return json({ done: [], left: [] })
-  const rest = ids.slice(1)
-  const gone: string[] = []
-  const u = await c.db.one("SELECT id,phone FROM users WHERE id=?", [id])
-  if (!u) return json({ done: [`${id}:yo'q`], left: rest })
-  // Postlar (reels) + bog'liqlari
-  await c.db.run("DELETE FROM post_likes WHERE post_id IN (SELECT id FROM posts WHERE author_id=?)", [id])
-  await c.db.run("DELETE FROM post_comments WHERE post_id IN (SELECT id FROM posts WHERE author_id=?)", [id])
-  await c.db.run("DELETE FROM posts WHERE author_id=?", [id])
-  // Media (egasi bu foydalanuvchi bo'lgan barcha fayllar)
-  await c.db.run("DELETE FROM media_chunks WHERE media_id IN (SELECT id FROM media WHERE owner_id=?)", [id])
-  await c.db.run("DELETE FROM peer_have WHERE media_id IN (SELECT id FROM media WHERE owner_id=?)", [id])
-  await c.db.run("DELETE FROM pin_jobs WHERE media_id IN (SELECT id FROM media WHERE owner_id=?)", [id])
-  await c.db.run("DELETE FROM media WHERE owner_id=?", [id])
-  // Xabarlar: avval bog'liq reaksiyalar (xabarlar o'chishidan OLDIN), keyin xabarlar
-  await c.db.run("DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE sender_id=?)", [id])
-  await c.db.run("DELETE FROM poll_votes WHERE message_id IN (SELECT id FROM messages WHERE sender_id=?)", [id])
-  await c.db.run("DELETE FROM msg_comments WHERE message_id IN (SELECT id FROM messages WHERE sender_id=?)", [id])
-  await c.db.run("DELETE FROM messages WHERE sender_id=?", [id])
-  // Chatlar: a'zosi bo'lgan barcha suhbat (test user) to'liq o'chadi
-  const mem = await c.db.q("SELECT DISTINCT chat_id FROM chat_members WHERE user_id=?", [id])
-  const chatIds = mem.map((x) => x.chat_id)
-  if (chatIds.length) {
-    await c.db.run(`DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE chat_id IN (${ph(chatIds)}))`, chatIds)
-    await c.db.run(`DELETE FROM poll_votes WHERE message_id IN (SELECT id FROM messages WHERE chat_id IN (${ph(chatIds)}))`, chatIds)
-    await c.db.run(`DELETE FROM msg_comments WHERE message_id IN (SELECT id FROM messages WHERE chat_id IN (${ph(chatIds)}))`, chatIds)
-    await c.db.run(`DELETE FROM messages WHERE chat_id IN (${ph(chatIds)})`, chatIds)
-    await c.db.run(`DELETE FROM msg_comments WHERE chat_id IN (${ph(chatIds)})`, chatIds)
-    await c.db.run(`DELETE FROM chat_members WHERE chat_id IN (${ph(chatIds)})`, chatIds)
-    await c.db.run(`DELETE FROM join_requests WHERE chat_id IN (${ph(chatIds)})`, chatIds)
-    await c.db.run(`DELETE FROM chats WHERE id IN (${ph(chatIds)})`, chatIds)
-  }
-  // Istoryalar
-  await c.db.run("DELETE FROM story_views WHERE viewer_id=? OR story_id IN (SELECT id FROM stories WHERE user_id=?)", [id, id])
-  await c.db.run("DELETE FROM stories WHERE user_id=?", [id])
-  // Qo'ng'iroqlar, efirlar
-  await c.db.run("DELETE FROM calls WHERE caller_id=? OR callee_id=?", [id, id])
-  await c.db.run("DELETE FROM live_viewers WHERE user_id=? OR live_id IN (SELECT id FROM lives WHERE user_id=?)", [id, id])
-  await c.db.run("DELETE FROM lives WHERE user_id=?", [id])
-  // Aloqa jadvallari
-  await c.db.run("DELETE FROM contacts WHERE owner_id=? OR phone=?", [id, u.phone])
-  await c.db.run("DELETE FROM blocks WHERE user_id=? OR blocked_id=?", [id, id])
-  await c.db.run("DELETE FROM push_subs WHERE user_id=?", [id])
-  await c.db.run("DELETE FROM wallets WHERE user_id=?", [id])
-  await c.db.run("DELETE FROM nodes WHERE user_id=?", [id])
-  await c.db.run("DELETE FROM peer_have WHERE user_id=?", [id])
-  await c.db.run("DELETE FROM pin_jobs WHERE user_id=?", [id])
-  await c.db.run("DELETE FROM otp WHERE phone=?", [u.phone])
-  await c.db.run("DELETE FROM users WHERE id=?", [id])
-  gone.push(`${id}:ok`)
-  return json({ done: gone, left: rest })
-}
-// ================== /VAQTINCHALIK admin vositasi ==================
 const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/auth/otp", authOtp, true],
   ["POST", "/auth/verify", authVerify, true],
-  // VAQTINCHALIK admin vositasi — test ma'lumotlarini topib tozalash uchun (keyin olib tashlanadi)
-  ["GET", "/admin/dump", adminDump, true],
-  ["POST", "/admin/purge", adminPurge, true],
   ["GET", "/avatar/u/:id", (c) => avatar(c, "users"), true],
   ["GET", "/avatar/c/:id", (c) => avatar(c, "chats"), true],
   ["GET", "/health", async () => json({ ok: true, app: "50 Gram" }), true],
