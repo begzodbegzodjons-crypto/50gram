@@ -10,6 +10,21 @@
 <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="50 Gram">
+<meta name="format-detection" content="telephone=no">
+<link rel="apple-touch-startup-image" media="(device-width:375px) and (device-height:667px) and (-webkit-device-pixel-ratio:2)" href="ios/750x1334.png">
+<link rel="apple-touch-startup-image" media="(device-width:414px) and (device-height:896px) and (-webkit-device-pixel-ratio:2)" href="ios/828x1792.png">
+<link rel="apple-touch-startup-image" media="(device-width:375px) and (device-height:812px) and (-webkit-device-pixel-ratio:3)" href="ios/1125x2436.png">
+<link rel="apple-touch-startup-image" media="(device-width:390px) and (device-height:844px) and (-webkit-device-pixel-ratio:3)" href="ios/1170x2532.png">
+<link rel="apple-touch-startup-image" media="(device-width:393px) and (device-height:852px) and (-webkit-device-pixel-ratio:3)" href="ios/1179x2556.png">
+<link rel="apple-touch-startup-image" media="(device-width:402px) and (device-height:874px) and (-webkit-device-pixel-ratio:3)" href="ios/1206x2622.png">
+<link rel="apple-touch-startup-image" media="(device-width:414px) and (device-height:736px) and (-webkit-device-pixel-ratio:3)" href="ios/1242x2208.png">
+<link rel="apple-touch-startup-image" media="(device-width:420px) and (device-height:912px) and (-webkit-device-pixel-ratio:3)" href="ios/1260x2736.png">
+<link rel="apple-touch-startup-image" media="(device-width:428px) and (device-height:926px) and (-webkit-device-pixel-ratio:3)" href="ios/1284x2778.png">
+<link rel="apple-touch-startup-image" media="(device-width:430px) and (device-height:932px) and (-webkit-device-pixel-ratio:3)" href="ios/1290x2796.png">
+<link rel="apple-touch-startup-image" media="(device-width:440px) and (device-height:956px) and (-webkit-device-pixel-ratio:3)" href="ios/1320x2868.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -51,7 +66,8 @@
         <input id="ap-last" class="inp" placeholder="Familiya (ixtiyoriy)" maxlength="64">
         <button class="btn big" id="b-prof">Davom etish</button>
       </div>
-      <a id="apk-dl" class="apk-btn" href="50gram.apk" download="50gram.apk"><b>📱 Android uchun yuklab olish (APK)</b><span>Ilova sifatida o‘rnating — fonda ham ishlaydi</span></a>
+      <a id="apk-dl" class="apk-btn" href="50gram.apk" download="50gram.apk"><b>📱 Androidlar uchun ilovani yuklab oling</b><span>Ilova sifatida o‘rnating — fonda ham ishlaydi</span></a>
+      <a id="ios-dl" class="ios-btn" href="javascript:void(0)"><b>🍎 Iphonelar uchun ilovani yuklab oling</b><span>Ilova sifatida o‘rnating — Home ekranda belgisi paydo bo‘ladi</span></a>
       </div>
     </div>
   </section>
@@ -122,6 +138,23 @@
     <div id="picker" class="picker"></div>
   </section>
 </div>
+<div id="ios-mod" class="ios-mod" aria-hidden="true">
+  <div class="ios-bg" id="ios-bg"></div>
+  <div class="ios-card" role="dialog" aria-label="iPhone uchun ilova">
+    <button class="ios-x" id="ios-x" title="Yopish">✕</button>
+    <div class="ios-head">
+      <img src="logo.png" alt="50 Gram">
+      <div><b>50 Gram — iPhone ilovasi</b><span>Home ekranda to‘liq ilova sifatida o‘rnatiladi — to‘liq ekran, ikonka va bildirishnomalar bilan</span></div>
+    </div>
+    <div class="ios-steps">
+      <div class="ios-step"><i>🧭</i><div><b>1. Safari brauzerida oching</b><span>Agar hozir boshqa brauzerda bo‘lsangiz — Safari'ni ochib shu manzilni kiriting</span></div></div>
+      <div class="ios-step"><i>📤</i><div><b>2. Pastdagi «Share» tugmasini bosing</b><span>Ekran pastidagi o‘rtadagi kvadrat-up-arrow belgi</span></div></div>
+      <div class="ios-step"><i>➕</i><div><b>3. «Add to Home Screen» ni tanlang</b><span>Ruyxatdan shu bo‘limni toping va tepadagi «Add» tugmasini bosing</span></div></div>
+    </div>
+    <button class="btn big" id="ios-copy">🔗 Manzilni nusxalash</button>
+    <p class="ios-note">O‘rnatilgach Home ekrandagi <b>50 Gram</b> belgisini bosing — ilova darhol to‘liq ekranda ochiladi.</p>
+  </div>
+</div>
 <div id="toast"></div>
 <script src="config.js"></script>
 <script src="core.js"></script>
@@ -133,7 +166,29 @@
 <script src="rtc.js"></script>
 <script>
   if (S.token && S.me) startApp(); else showAuth();
-  try { if (navigator.userAgent.indexOf('50GramApp') > -1) document.getElementById('apk-dl').style.display = 'none'; } catch (e) {}
+  (function () {
+    var apk = document.getElementById('apk-dl'), ios = document.getElementById('ios-dl'), mod = document.getElementById('ios-mod');
+    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var installed = (navigator.userAgent.indexOf('50GramApp') > -1) || (isIOS && navigator.standalone === true);
+    try {
+      if (installed) { apk.style.display = 'none'; ios.style.display = 'none'; }
+      else if (isIOS) { ios.parentNode.insertBefore(ios, apk); } // iOS'da iPhone tugmasi yuqorida
+    } catch (e) {}
+    function openMod() { mod.classList.add('open'); mod.setAttribute('aria-hidden', 'false'); }
+    function closeMod() { mod.classList.remove('open'); mod.setAttribute('aria-hidden', 'true'); }
+    if (ios) ios.addEventListener('click', function (e) { e.preventDefault(); openMod(); });
+    if (document.getElementById('ios-x')) document.getElementById('ios-x').addEventListener('click', closeMod);
+    if (document.getElementById('ios-bg')) document.getElementById('ios-bg').addEventListener('click', closeMod);
+    if (apk) apk.addEventListener('click', function (e) {
+      if (isIOS) { e.preventDefault(); try { toast('📱 Bu fayl Android uchun — iPhone uchun 🍎 tugmasini bosing'); } catch (err) {} }
+    });
+    var cp = document.getElementById('ios-copy');
+    if (cp) cp.addEventListener('click', function () {
+      var url = location.origin + location.pathname.replace(/index\.html$/, '');
+      var done = function () { try { toast('✅ Manzil nusxalandi — Safariga qo‘yib yuboring'); } catch (e) {} };
+      try { navigator.clipboard.writeText(url).then(done, function () { prompt('Manzilni nusxalang:', url); }); } catch (e) { prompt('Manzilni nusxalang:', url); }
+    });
+  })();
 </script>
 </body>
 </html>
