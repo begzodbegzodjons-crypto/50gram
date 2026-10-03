@@ -964,6 +964,7 @@ let shPostsEnd = false, shTrPage = 0, shBusyMore = false, shLastTap = 0, shTapTi
 // lenta hech qachon bo'sh qolmaydi (TikTok ham shunday qiladi).
 const SHSEEN_KEY = 'g50_shseen_v1'
 let shSeen = new Map()
+let shBad = new Set() // bu sessiyada ISHLAMAGAN videolar (qora ekran/ovozsiz) — lenta qaytib ko'rsatmasin (foydalanuvchi talabi)
 try { const a = JSON.parse(localStorage.getItem(SHSEEN_KEY) || '[]'); if (Array.isArray(a)) for (const [k, t] of a) shSeen.set(k, t) } catch {}
 let shSeenSaveT = 0
 function shSeenSave() {
@@ -987,8 +988,10 @@ const shNormPosts = (list) => (Array.isArray(list) ? list : []).filter((p) => p 
 const shNormTrend = (list) => (Array.isArray(list) ? list : []).filter((x) => x && (x.kind === 'short' || x.kind === 'video') && !x.live && !shBadT(x.title)).map((x) => { if (!x.id) x.id = shTrendId(x); return { t: 'trend', x } })
 
 // YouTube player (nocookie — engilroq, O'zbekistonda ishonchli) + enablejsapi (postMessage boshqaruvi — reload'siz pauza/play)
+// MUHIM: iframe HAR DOIM mute=1 bilan yuklanadi (preload qilingan keyingi video FONDA OVOZLI
+// o'ynab begona ovoz berardi — shikoyat). Ovoz faqat FAOL slaydga postMessage'unMute bilan beriladi.
 function shYTURL(id) {
-  return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3&loop=1&playlist=${id}&mute=${shMuted ? 1 : 0}&enablejsapi=1&origin=${encodeURIComponent(location.origin)}`
+  return `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3&loop=1&playlist=${id}&mute=1&enablejsapi=1&origin=${encodeURIComponent(location.origin)}`
 }
 function shYTpost(f, func) { try { f.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args: [] }), '*') } catch {} }
 
@@ -1071,31 +1074,53 @@ function shSlideHTML(it, i) {
 }
 
 function shBindVideo(v) {
+  if (v._shBound) return // ikki marta bog'lanma yo'q — ikki Audio = begona/qo'shma ovoz
+  v._shBound = 1
   v.muted = shMuted
   const slide = v.closest('.sh-slide')
   const prog = qs('.sh-prog i', slide)
   v.addEventListener('timeupdate', () => { if (prog && v.duration) prog.style.width = (v.currentTime / v.duration) * 100 + '%' })
-  v.addEventListener('loadeddata', () => { slide.dataset.ok = '1'; const l = qs('.sh-load', slide); if (l) l.style.display = 'none' }, { once: true })
-  v.addEventListener('error', () => { const l = qs('.sh-load', slide); if (l) l.style.display = 'none'; slide.classList.add('sh-fail') }, { once: true })
+  v.addEventListener('loadeddata', () => { shFailStreak = 0; slide.dataset.ok = '1'; const l = qs('.sh-load', slide); if (l) l.style.display = 'none' }, { once: true })
+  // VIDEO XATOSI = SLAYD BUTUNLAY O'CHIRILADI: qora ekran lentaDA QOLMASIN (foydalanuvchi talabi).
+  // (prune'dagi src'siz load()da error kelmaydi — src bor holatdagi haqiqiy xatolargina)
+  v.addEventListener('error', () => { if (v.getAttribute('src')) shDropSlide(slide, 'err') })
   v.addEventListener('play', () => { slide.dataset.ok = '1'; slide.classList.remove('paused') })
   v.addEventListener('pause', () => slide.classList.add('paused'))
-  v.addEventListener('canplay', () => { slide.dataset.ok = '1'; if (slide.dataset.on === '1' && S.prefs.shauto) v.play().catch(() => { v.muted = true; v.play().catch(() => {}) }) })
+  v.addEventListener('canplay', () => { slide.dataset.ok = '1'; shFailStreak = 0; if (slide.dataset.on === '1' && S.prefs.shauto) v.play().catch(() => { v.muted = true; v.play().catch(() => {}) }) })
   if (v.readyState >= 2) slide.dataset.ok = '1' // allaqachon yuklangan video — watchdog soxta xato bermasin
-  // Reddit mp4: audio treksi alohida faylda — sinxron oqim
+  // Reddit mp4: audio treksi alohida faylda — TO'LIQ SINXRON oqim
   const aurl = v.dataset.shaudio
   if (aurl) {
     const a = new Audio()
+    a.loop = true // video loop qilsa audio ham aylanadi — aks holda 1-aylanishdan keyin video JIM qoladi (shikoyat: "ovozi bo'lmay qolmoqda")
     const AURLS = [aurl, aurl.replace('AUDIO_128', 'AUDIO_64'), aurl.replace(/DASH_AUDIO_\d+\.mp4/, 'DASH_audio.mp4')]
     let tr = 0
     const setA = () => { if (tr < AURLS.length) { a.src = AURLS[tr++]; return true } return false }
     setA()
     a.onerror = () => { if (setA()) a.load() }
+    a.addEventListener('playing', () => { a._shAok = 1; shFailStreak = 0 })
     v.addEventListener('play', () => { if (a.src) { try { a.currentTime = v.currentTime; if (!shMuted) a.play().catch(() => {}) } catch {} } })
     v.addEventListener('pause', () => { try { a.pause() } catch {} })
     v.addEventListener('seeked', () => { try { a.currentTime = v.currentTime } catch {} })
     const syncM = () => { a.muted = v.muted; if (!v.muted && !v.paused) a.play().catch(() => {}) }
     v.addEventListener('volumechange', syncM)
     v.addEventListener('play', syncM)
+    // DRIFT-TUZATISH: audio videodan 0.35s'dan ko'p qo'zisa — qayta sinxron; to'xtab qolsa — yana o'yqotiladi
+    v.addEventListener('timeupdate', () => {
+      if (v.paused || !a.src || a.readyState < 2) return
+      if (Math.abs(a.currentTime - v.currentTime) > 0.35) { try { a.currentTime = v.currentTime } catch {} }
+      if (a.paused) a.play().catch(() => {})
+    })
+    // JIMLIK NAZORATI: video 5s o'ynaydi (ovoz yoniq), lekin alohida audio fayli o'lmagan bo'lsa —
+    // bunday OVOZSIZ video lentaDA TURMAYDI: slayd o'chiriilib keyingisi ko'rsatiladi
+    v.addEventListener('playing', () => {
+      clearTimeout(slide._shauw)
+      slide._shauw = setTimeout(() => {
+        if (!slide.isConnected || slide.dataset.on !== '1' || v.paused || v.readyState < 2) return
+        if (v.muted || shMuted) return // foydalanuvchi o'zi o'chirgan bo'lsa — bu jimlik emas
+        if (a.error || a.networkState === 3 || (a.paused && !a._shAok)) shDropSlide(slide, 'mute')
+      }, 5000)
+    })
     v._shAudio = a
   }
   v.addEventListener('click', () => shTap(slide, v))
@@ -1156,9 +1181,12 @@ function shSetMuted(m) {
   if (!shWrap) return
   qs('#sh-m', shWrap).textContent = m ? '🔇' : '🔊'
   qsa('video', shWrap).forEach((v) => { v.muted = m; if (v._shAudio) { v._shAudio.muted = m; if (!m && !v.paused) v._shAudio.play().catch(() => {}) } })
-  // YT iframe: postMessage bilan (reload'siz — tez); yuklanmaganlari URL'i yangilanadi
+  // YT iframe: faqat FAOL slaydga unmute+play qilinadi — preload'dagi keyingi video FONDA
+  // ovozli o'ynashi mumkin emas (begona ovoz — shikoyat); yuklanmaganlari URL'i yangilanadi
   qsa('iframe[data-shyt]', shWrap).forEach((f) => {
-    if (f.dataset.loaded === '1') { shYTpost(f, m ? 'mute' : 'unMute'); if (!m) shYTpost(f, 'playVideo') }
+    const ons = f.closest('.sh-slide')
+    const act = ons && ons.dataset.on === '1'
+    if (f.dataset.loaded === '1') { shYTpost(f, m ? 'mute' : 'unMute'); if (!m && act) shYTpost(f, 'playVideo') }
     else if (f.dataset.shsrc) { const id = (f.dataset.shsrc.match(/embed\/([^?&]+)/) || [])[1]; if (id) f.dataset.shsrc = shYTURL(id) }
   })
   // DM iframe mute param — URL yangilaymiz; faol bo'lsa reload
@@ -1222,42 +1250,43 @@ function shActivate(w, slide) {
       ifr.src = ifr.dataset.shsrc
       shBindFrame(ifr)
     }
-    // Qora ekran himoyasi: 5s ichida yuklanmasa — xabar + 2.5s'dan keyin avto-keyingi slayd
-    slide.classList.remove('sh-fail')
-    const ld = qs('.sh-load', slide)
-    if (ld) ld.style.display = ifr.dataset.ok === '1' ? 'none' : ''
-    clearTimeout(slide._shwd)
-    clearTimeout(slide._shauto)
-    slide._shwd = setTimeout(() => {
-      // VIDEO SLAYD HIMoyasi: video yuklangan/o'ynayotgan bo'lsa — iframe-watchdog uni "yuklanmadi"
-      // deb SANAMASIN (avval video slaydlar dataset.ok'siz qolardi → o'ynayotgan mp4 ham 12s'da
-      // soxta "fail" bo'lib, 3 soxta sakrashdan keyin lenta TO'XTARDI — "5-6 tadan keyin qotmoqda")
-      const vv = qs('video', slide)
-      if (vv && (vv.readyState >= 2 || !vv.paused)) { shFailStreak = 0; return }
-      if (!slide.dataset.ok && shWrap && slide.isConnected) {
-        slide.classList.add('sh-fail')
-        const l2 = qs('.sh-load', slide)
-        if (l2) l2.style.display = 'none'
-        // Avto-o'tish: faqat sozlama yoqilganda, 3 ketma-ket muvaffaqiyatsizlikdan keyin to'xtaydi
-        shFailStreak++
-        if (S.prefs.shadv && shFailStreak < 3 && slide.dataset.on === '1') {
-          slide._shauto = setTimeout(() => { if (shWrap && slide.dataset.on === '1' && slide.dataset.ok !== '1') { shGo(+slide.dataset.shi + 1); toast('⏭ Video yuklanmadi — keyingi', 1500) } }, 3200)
-        } else if (shFailStreak >= 3) toast('⚠️ Bir nechta video yuklanmadi — internetni tekshiring', 3000)
-      } else shFailStreak = 0
-    }, 12000) // 6.5→12s: sekin tarmoqda ham yuklanadigan videoga imkoniyat (erta sakrash yo'q)
-    // YT IJRO KUZATUVI: iframe yuklandi lekin player 9s ichida o'ynamasa (bloklangan/bot-devor) — avto-keyingi
-    if (ifr.dataset.shyt) {
-      clearTimeout(slide._shytw)
-      slide._shytw = setTimeout(() => {
-        if (shWrap && slide.isConnected && slide.dataset.on === '1' && slide.dataset.ok === '1' && slide.dataset.playing !== '1') {
-          shFailStreak++
-          if (S.prefs.shadv && shFailStreak < 3) {
-            slide.classList.add('sh-fail')
-            slide._shauto = setTimeout(() => { if (shWrap && slide.dataset.on === '1' && slide.dataset.playing !== '1') { shGo(+slide.dataset.shi + 1); toast('⏭ Video ochilmadi — keyingi', 1500) } }, 2200)
-          } else if (shFailStreak >= 3) toast('⚠️ Videolar ochilmayapti — internetni tekshiring', 3000)
-        } else if (slide.dataset.playing === '1') shFailStreak = 0
-      }, 15000) // 9→15s: handshake + kengroq oyna — o'ynayotgan video hech qachon sakramaydi
+  }
+  // QORA EKRAN HIMOYASI (hamma slayd uchun — VIDEO HAM iframe): 10s ichida slayd "jonlanmasa"
+  // — bunday video lentaDA TURMAYDI: slayd butunlay o'chirilib, keyingisi ko'rsatiladi
+  // (foydalanuvchi talabi: qora ekran ko'rsatadigan video lentaGA UBORILMASIN).
+  // AVVAL bu nazorat FAQAT iframe slaydlarda edi — video slaydlar (post/DASH mp4) umuman
+  // nazoratsiz qora qolardi (shikoyat: "2 ta ko'rsatib bittasi qora ekran bo'lib qolmoqda").
+  slide.classList.remove('sh-fail')
+  const ld = qs('.sh-load', slide)
+  const vidReady = v && v.readyState >= 2
+  if (ld) ld.style.display = ((ifr && ifr.dataset.ok === '1') || vidReady) ? 'none' : ''
+  clearTimeout(slide._shwd)
+  clearTimeout(slide._shauto)
+  slide._shwd = setTimeout(() => {
+    // O'ynayotgan/yuklangan video hech qachon "yuklanmadi" deb sanalmasin (soxta-fail tarixi)
+    const vv = qs('video', slide)
+    if (vv && (vv.readyState >= 2 || !vv.paused)) { shFailStreak = 0; return }
+    if (slide.dataset.ok === '1') { shFailStreak = 0; return }
+    if (!shWrap || !slide.isConnected) return
+    shFailStreak++
+    if (shFailStreak <= 4) shDropSlide(slide, 'load')
+    else {
+      const l2 = qs('.sh-load', slide)
+      if (l2) l2.style.display = 'none'
+      slide.classList.add('sh-fail')
+      toast('⚠️ Bir nechta video yuklanmadi — internetni tekshiring', 3000)
     }
+  }, 10000) // 12→10s: qora ekran qisqa turadi; soxta-fail readyState nazorati bilan himoyalangan
+  // YT IJRO KUZATUVI: iframe yuklandi lekin player 15s ichida o'ynamasa (bloklangan/bot-devor) — olib tashlanadi
+  if (ifr && ifr.dataset.shyt) {
+    clearTimeout(slide._shytw)
+    slide._shytw = setTimeout(() => {
+      if (shWrap && slide.isConnected && slide.dataset.on === '1' && slide.dataset.ok === '1' && slide.dataset.playing !== '1') {
+        shFailStreak++
+        if (shFailStreak <= 4) shDropSlide(slide, 'play')
+        else toast('⚠️ Videolar ochilmayapti — internetni tekshiring', 3000)
+      } else if (slide.dataset.playing === '1') shFailStreak = 0
+    }, 15000)
   }
   // PRELOAD: keyingi slayd YT bo'lsa — 1.5s'dan keyin fonda (mute) yuklanadi → scroll qilsa DARHAL ijro
   // (Tejamkor rejim yoniq bo'lsa oldindan yuklanmaydi)
@@ -1272,6 +1301,30 @@ function shActivate(w, slide) {
       shBindFrame(nf)
     }
   }, 600) // 1500→600ms: keyingi video ertaroq yuklanadi — suringanda DARHAL ijro
+}
+// ISHLAMAYDIGAN SLAYDNI O'CHIRISH (foydalanuvchi talabi: qora ekran / ovozsiz / ochiqsiz video
+// lentaDA QOLMASIN — "faqat ko'rsatadigan, ovozi joyida videolarni uzat"): slayd DOMdan va
+// shList'dan o'chiriilib, xato-belgi bilan "ko'rildi" qilinadi — bu sessiyada VA keyingi
+// sessiyalarda qaytmaydi. Keyingi slayd darhol faollashadi. Internet butunlay uzilgan
+// holatda lenta birdan o'chib ketmasin — 4 ketma-ket xatodan keyin eski failbox rejimi.
+function shDropSlide(slide, why) {
+  if (!shWrap || !slide || !slide.isConnected) return
+  clearTimeout(slide._shwd); clearTimeout(slide._shauto); clearTimeout(slide._shytw); clearTimeout(slide._shseen); clearTimeout(slide._shauw)
+  const i = +slide.dataset.shi || 0
+  const it = shList[i]
+  if (it) { const k = shKey(it); shBad.add(k); try { shSeen.set(k, Date.now()); shSeenSave() } catch {} }
+  const wasOn = slide.dataset.on === '1'
+  try { const vv = qs('video', slide); if (vv) { vv.pause(); if (vv._shAudio) vv._shAudio.pause() } } catch {}
+  slide.remove()
+  shList.splice(i, 1)
+  qsa('.sh-slide', shWrap).forEach((s, k) => { s.dataset.shi = k })
+  if (wasOn) {
+    toast('⏭ Video ishlamadi — keyingisi', 1400)
+    const nx = qs(`.sh-slide[data-shi="${i}"]`, shWrap)
+    if (nx) shActivate(shWrap, nx)
+    else setTimeout(() => { if (shWrap && !qs('.sh-slide[data-on="1"]', shWrap)) { const f = qs('.sh-slide', shWrap); if (f) { f.scrollIntoView({ block: 'start' }); shActivate(shWrap, f) } } }, 900)
+  }
+  if (shList.length - i < 4) shMore() // lenta oxiri yaqinlashdi — oldindan to'ldiramiz
 }
 function shDeactivate(slide) {
   slide.dataset.on = ''
@@ -1300,7 +1353,7 @@ function shAppend(items, force) {
   // takror YO'Q. Avval umuman ko'rilmaganlar; hovuz batamom ko'rilgandagina (force)
   // qayta aylanadi — lenta hech qachon to'xtamaydi.
   const seenD = new Set(shList.map(shKey))
-  const pick = (arr) => arr.filter((it) => { const k = shKey(it); if (seenD.has(k)) return false; seenD.add(k); return true })
+  const pick = (arr) => arr.filter((it) => { const k = shKey(it); if (seenD.has(k) || shBad.has(k)) return false; seenD.add(k); return true })
   const unseen = pick(items.filter((it) => !shSeen.has(shKey(it))))
   const use = unseen.length ? unseen : (force ? pick(items).slice(0, 12) : [])
   if (!use.length) return 0
