@@ -247,14 +247,15 @@ function trendSkeleton() {
 // ZUDLIK keshi: oxirgi 1-sahifa localStorage'da (3 kun) — lenta HAR QAYTA OCHILGANDA, hatto ilova
 // qayta ishga tushganda/oflaynda ham darhol chiziladi (fon yangilanadi). Bu "lenta sekin" muammosi yechimi.
 function trendCacheSave(items) {
-  try { localStorage.setItem('g50_trend_c2', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
+  try { localStorage.setItem('g50_trend_c3', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
 }
 function trendCacheAge() {
-  try { const d = JSON.parse(localStorage.getItem('g50_trend_c2') || ''); return d && d.t ? Date.now() - d.t : Infinity } catch { return Infinity }
+  try { const d = JSON.parse(localStorage.getItem('g50_trend_c3') || ''); return d && d.t ? Date.now() - d.t : Infinity } catch { return Infinity }
 }
 function trendCacheGet() {
   try {
-    const d = JSON.parse(localStorage.getItem('g50_trend_c2') || '')
+    // c3: eski c2 keshdagi Anilan-Minecraft videolari BATAMOM unutiladi (foydalanuvchi: "eski shunday" — keshda qolib ketgandi)
+    const d = JSON.parse(localStorage.getItem('g50_trend_c3') || '')
     // 3 kun — mavzular tezroq yangilanadi (random algoritm bilan har safar xilma-xil ko'rinish uchun)
     if (d && d.items && d.items.length && Date.now() - d.t < 3 * 864e5) return d.items
   } catch {}
@@ -269,6 +270,10 @@ function shShuffle(a) {
 // videolari Reels/Shorts lentasida UMUMAN ko'rinmaydi — latin + kirill sarlavhalar bo'yicha,
 // bo'shliq/belgilar olib tashlab tekshiriladi (Minecraft, Maynkraft, Майнкрафт, Minе Kraf...)
 const shBadT = (t) => { try { const s = String(t || '').toLowerCase().replace(/[\s_\-.,!?()[\]:'"«»]/g, ''); return /minecraft|minekraf|maynkraft|майнкрафт|минекрафт/.test(s) } catch { return false } }
+// VIDEO-ID QATIY BLOK (server BLOCK_VIDS bilan bir xil): sarlavhasida "minecraft" yozilmagan
+// Anilan-dublaj o'yin videolari ID bo'yicha kesiladi — manba siri tufayli klient faqat yt-ID ko'radi.
+const shBadId = new Set(['A0VSlf71MBg','Jd-ve41f-aY','iTdKFb675xM','N1W5nsZKLaE','TMHOBYLjUw8','xpnmQhCFceY','l6pjLj-v0FE','eiQb0DeZGSk','qhmMzT-5OSQ','G7aNRr0R-sk','o4fAgHxlJAw','by4wzlyfwUQ','ThhEzyvVeZI','Fa2ghDWxPBI','xJ5gtl7UzBs'])
+const shBadV = (x) => shBadId.has(String(x && (x.yt || x.embed) || ''))
 // Barqaror ID: serverda id bo'lmasa (eski kesh/kod) manba+native-id'dan sintetik qilinadi —
 // kartalarning data-trend/data-tv qiymati bilan klik-qidiruv AYNAN mos kelishi uchun
 const shTrendId = (x) => x && (x.id || (x.yt ? 'yt' + x.yt : x.mp4 ? 'mk' + x.mp4 : x.ig ? 'ig' + x.ig : x.fb ? 'fb' + x.fb : x.embed ? 'dm' + x.embed : x.url ? 'n' + String(x.url).slice(-40) : ''))
@@ -299,8 +304,8 @@ async function loadTrend(reset) {
     const q = `?page=${trendPage}` + (trendCat !== 'all' ? '&cat=' + trendCat : '') + (trendCat === 'all' && trendPage === 1 ? '&cats=' + encodeURIComponent(catsParam()) : '')
     const r = await api('/trend' + q)
     // ID NORMALIZATSIYA: kartalar data-tn/data-tv qiymati bilan qidiruv aynan mos bo'lishi uchun
-    // (serverda id bo'lmasa — sintetik) + Shorts'larda Minecraft filtri
-    const list = (r.items || []).filter((x) => (x.kind === 'short' || x.kind === 'video') ? !shBadT(x.title) : true)
+    // (serverda id bo'lmasa — sintetik) + Shorts'larda Minecraft filtri (sarlavha + video-ID)
+    const list = (r.items || []).filter((x) => (x.kind === 'short' || x.kind === 'video') ? (!shBadT(x.title) && !shBadV(x)) : true)
     for (const x of list) if (x && !x.id) x.id = shTrendId(x)
     if (!list.length && trendPage === 1 && !trendCat) {
       // Vaqtinchalik bo'sh — 1.5s dan keyin avtomatik qayta urinish
@@ -476,7 +481,7 @@ function reelHTML(p) {
 }
 // Reels holati (alohida bo'lim): reelPosts + kesh (oflaynda ham ochiladi)
 let reelPosts = [], reelsEnd = false, reelsBusy = false
-const RKEY = 'g50_reels_c3' // v3: eski keshdagi o'chirilgan test/Minecraft reel'lar QATIY bekor (shikoyat: "boshidagi 2 ta minecraft hech yo'qolmadi")
+const RKEY = 'g50_reels_c4' // v4: eski keshdagi o'chirilgan test/Minecraft reel'lar QATIY bekor (shikoyat: "boshidagi 2 ta minecraft hech yo'qolmadi")
 function reelsCacheSave() {
   try { localStorage.setItem(RKEY, JSON.stringify({ t: Date.now(), posts: reelPosts.slice(0, 30).map((p) => ({ ...p, meta: p.meta || null })) })) } catch {}
 }
@@ -503,7 +508,7 @@ async function loadReels(reset) {
   try {
     const before = fromCache ? 0 : (reelPosts.length ? reelPosts[reelPosts.length - 1].id : 0)
     const r = await api('/reels' + (before ? '?before=' + before : ''))
-    // MINECRAFT FILTR: sarlavhasida/matinida Minecraft eslatuvchi postlar umuman olmaydi
+    // MINECRAFT FILTR: sarlavhasida/matinida Minecraft eslatuvchi postlar umuman olmaydi (ID-blok ham)
     const list = (Array.isArray(r) ? r : r.posts || []).filter((p) => !shBadT(p.text_body) && !shBadT(p.title))
     for (const p of list) if (p.media_id && p.meta) P2P.note(String(p.media_id), { chat: 0, ...p.meta })
     if (fromCache) {
@@ -988,7 +993,7 @@ const shMarkSeen = (it) => { try { shSeen.set(shKey(it), Date.now()); shSeenSave
 const shNormPosts = (list) => (Array.isArray(list) ? list : []).filter((p) => p && p.media_kind === 'video' && !shBadT(p.text_body)).map((p) => ({ t: 'post', p }))
 // LIVE efirlar chiqariladi — ular qotib sekin ishlaydi (chet el jonli efirlari foydalanuvchi shikoyati)
 // MINECRAFT QATIY FILTR: foydalanuvchi "tagi bilan o'chirib yo'q qilib tashla" — hech qanday yo'l bilan kirmasin
-const shNormTrend = (list) => (Array.isArray(list) ? list : []).filter((x) => x && (x.kind === 'short' || x.kind === 'video') && !x.live && !shBadT(x.title)).map((x) => { if (!x.id) x.id = shTrendId(x); return { t: 'trend', x } })
+const shNormTrend = (list) => (Array.isArray(list) ? list : []).filter((x) => x && (x.kind === 'short' || x.kind === 'video') && !x.live && !shBadT(x.title) && !shBadV(x)).map((x) => { if (!x.id) x.id = shTrendId(x); return { t: 'trend', x } })
 
 // YouTube player (nocookie — engilroq, O'zbekistonda ishonchli) + enablejsapi (postMessage boshqaruvi — reload'siz pauza/play)
 // MUHIM: iframe HAR DOIM mute=1 bilan yuklanadi (preload qilingan keyingi video FONDA OVOZLI
@@ -1342,14 +1347,16 @@ function shActivate(w, slide) {
         shBindFrame(ifr)
         if (!shMuted) setTimeout(() => { try { if (slide.isConnected) { shYTpost(ifr, 'unMute'); shYTpost(ifr, 'playVideo') } } catch {} }, 1500) // yangi player mute=1 bilan ochiladi — ovozni tiklaymiz
         clearTimeout(slide._shytw)
-        slide._shytw = setTimeout(ytCheck, 7000)
+        // 5s: qayta yuklangan player ham o'ynamasa — soxta emas (qora ekran qisqa tursin)
+        slide._shytw = setTimeout(ytCheck, 5000)
         return
       }
       shFailStreak++
       if (shFailStreak <= 4) shDropSlide(slide, 'play')
       else toast('⚠️ Videolar ochilmayapti — internetni tekshiring', 3000)
     }
-    slide._shytw = setTimeout(ytCheck, 7000)
+    // 4.5s: player yuklandi lekin o'ynamasa — tez aniqlansin (qora ekran shikoyati: "yana chiqyapti")
+    slide._shytw = setTimeout(ytCheck, 4500)
   }
   // PRELOAD: keyingi slayd YT bo'lsa — 1.5s'dan keyin fonda (mute) yuklanadi → scroll qilsa DARHAL ijro
   // (Tejamkor rejim yoniq bo'lsa oldindan yuklanmaydi)

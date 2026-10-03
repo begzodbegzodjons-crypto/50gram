@@ -1455,6 +1455,10 @@ async function fT(url: string, ms: number, cacheTtl = 600): Promise<Response | n
   } catch { return null }
 }
 // Sertifikatlangan o'zbek kanallari — haqiqiy qidiruv orqali topilgan va tekshirilgan (komik, hazil, dubljaz, vines)
+// ANILAN KANALLARI OLIB TASHLANDI (2026-10, foydalanuvchi 5+ marta shikoyat qilgan): 3 ta Anilan
+// kanal (Dublaj/UZ/DUBLAJ) 100% MINECRAFT o'yin videolari — sarlavhalarida ko'pincha "minecraft"
+// yozilmaydi ("MEN BIR BLOK USTIDA 100 KUN OMON QOLDIM..."), shuning uchun sarlavha-filtri ularni
+// USHLAY OLMAEDI. Yagona ishonchli yechim: kanal manbasini BATAMOM olib tashlash + BLOCK_VIDS.
 const UZ_CHANNELS = [
   "UCd5_-70CbGPmmz2YusxX1zQ", // YANGI TV — komik sketchlar
   "UCZm8kCDX5sFagGux3qz5hRg", // Umidjon Murodullayev — qisqa hazillar
@@ -1463,10 +1467,14 @@ const UZ_CHANNELS = [
   "UCfKQvap5T1SKGBRgZKhyhXg", // MANGU_YT
   "UCuXexJqac0W-TUTab-Yqt8g", // ANYONE SHOW — qisqa hazillar
   "UCfjrghi9WYjRAd9B9zArkFQ", // Uzbek Vines
-  "UCIU-k8B7_Cd8AJOtncj4hOQ", // Anilan Dublaj UZ
-  "UCoqpEBq2svog4P1bk-Is1rA", // Anilan UZ
-  "UCXMqPws1-cBxaXX9asB0WiA", // Anilan DUBLAJ
 ]
+// MINECRAFT VIDEO-ID QATIY BLOK: Anilan kanallarining so'nggi videolari — eski hovuz/CDN/kyent
+// keshlarida qolganlari ham qayta ko'rinishi MUMKIN EMAS (foydalanuvchi: "batamom o'chir").
+const BLOCK_VIDS = new Set([
+  "A0VSlf71MBg", "Jd-ve41f-aY", "iTdKFb675xM", "N1W5nsZKLaE", "TMHOBYLjUw8", // Anilan Dublaj UZ
+  "xpnmQhCFceY", "l6pjLj-v0FE", "eiQb0DeZGSk", "qhmMzT-5OSQ", "G7aNRr0R-sk", // Anilan UZ
+  "o4fAgHxlJAw", "by4wzlyfwUQ", "ThhEzyvVeZI", "Fa2ghDWxPBI", "xJ5gtl7UzBs", // Anilan DUBLAJ
+])
 // Kanal RSS: tez (~300ms/kanal, parallel), videoId+sarlavha+ko'rish soni+yuklangan vaqt bor
 async function uzChannelShorts(): Promise<any[]> {
   const feeds = await Promise.all(UZ_CHANNELS.map(async (ch) => {
@@ -1799,7 +1807,9 @@ async function buildVideoPool(env: Env): Promise<{ shorts: any[]; vids: any[] }>
   // Maynkraft/Майнкрафт videolari hovuzga UMUMAN kirmasin — Anilan-dublaj kanallari yangi
   // videolari asosan Minecraft bo'lgani uchun sarlavha bo'yicha qat'iy kesiladi (latin+kirill).
   const BAD_RE = /minecraft|minekraf|maynkraft|минекрафт|майнкрафт/i
-  const noBad = (arr: any[]) => (arr || []).filter((v: any) => v && !BAD_RE.test(String(v.title || "")))
+  // Sarlavha-filtri + VIDEO-ID blok: sarlavhasida "minecraft" yozilmagan o'yin videolari ham
+  // (Anilan dublaj uslubi) ID bo'yicha kesiladi — foydalanuvchi "batamom o'chir" dedi.
+  const noBad = (arr: any[]) => (arr || []).filter((v: any) => v && !BAD_RE.test(String(v.title || "")) && !BLOCK_VIDS.has(String(v.yt || "")))
   const chan = noBad(chan0), uz = noBad(uz0), dm = noBad(dm0)
   // Foydalanuvchi manbalari: yaroqli vidyo (yt/mp4) va rasmlar (img) — dedupe, BOMBA-reklama yo'q
   const mm: any[] = []
@@ -1843,7 +1853,8 @@ async function buildVideoPool(env: Env): Promise<{ shorts: any[]; vids: any[] }>
   return { shorts: shorts.slice(0, 72), vids: [] }
 }
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  const ck = "https://trend.50gram.internal/poolv14"
+  // v15: Anilan-Minecraft videolari bosilgan eski hovuz BATAMOM bekor (v14'da qolganlari ko'rinmasin)
+  const ck = "https://trend.50gram.internal/poolv15"
   const meta = await cacheGetJSON<{ shorts: any[]; vids: any[] }>(ck)
   if (meta && meta.data && meta.data.shorts?.length) {
     if (now() - meta.t < POOL_FRESH_MS) return meta.data
@@ -2036,7 +2047,8 @@ async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  const cacheKey = "https://trend.50gram.internal/t13?p=" + page + "&cat=" + onlyCat
+  // t14: eski CDN-keshlarda qolgan Minecraft/junk sahifalar darhol yo'qolsin
+  const cacheKey = "https://trend.50gram.internal/t14?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
