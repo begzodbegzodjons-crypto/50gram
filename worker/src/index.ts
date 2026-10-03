@@ -36,6 +36,9 @@ export interface Env {
   // MY_IG: Instagram profil nomi — ochiq (public) akkaunt bo'lishi shart
   MY_YT?: string
   MY_IG?: string
+  // IG ochiq akkaunt ham server-IP'dan bloklansa — foydalanuvchi o'z brauzeridan 'sessionid'
+  // cookie qiymatini beradi (wrangler secret put MY_IG_COOKIE) — shunda IG API ishonchli ochiladi
+  MY_IG_COOKIE?: string
   __db?: Db
   // Statik assetlar binlash (wrangler.toml [assets] binding) — APK yuklab olish uchun
   ASSETS?: { fetch: (req: Request) => Promise<Response> }
@@ -1456,10 +1459,11 @@ async function ytMine(env: Env): Promise<any[]> {
 }
 // Instagram: datacenter-IP'larga IG cheklov qilishi mumkin — 3 bosqichli zanjir, muvaffaqiyatsizlik jim o'tadi
 const IG_HEADERS: Record<string, string> = { "x-ig-app-id": "936619743392459", accept: "application/json" }
-async function igWebProfile(user: string): Promise<any[]> {
+async function igWebProfile(env: Env, user: string): Promise<any[]> {
+  const sess = String(env.MY_IG_COOKIE || "").trim()
   const hosts = [
-    { u: "https://www.instagram.com/api/v1/users/web_profile_info/?username=" + encodeURIComponent(user), h: { ...IG_HEADERS, ...TREND_UA } },
-    { u: "https://i.instagram.com/api/v1/users/web_profile_info/?username=" + encodeURIComponent(user), h: { ...IG_HEADERS, "user-agent": "Instagram 219.0.0.12.117 Android" } },
+    { u: "https://www.instagram.com/api/v1/users/web_profile_info/?username=" + encodeURIComponent(user), h: { ...IG_HEADERS, ...TREND_UA, ...(sess ? { cookie: "sessionid=" + sess } : {}) } },
+    { u: "https://i.instagram.com/api/v1/users/web_profile_info/?username=" + encodeURIComponent(user), h: { ...IG_HEADERS, "user-agent": "Instagram 219.0.0.12.117 Android", ...(sess ? { cookie: "sessionid=" + sess } : {}) } },
   ]
   for (const { u, h } of hosts) {
     const r = await fT2(u, h, 8000, 1800)
@@ -1524,7 +1528,7 @@ async function igMine(env: Env): Promise<any[]> {
   const users = listVar(env.MY_IG)
   if (!users.length) return []
   const lists = await Promise.all(users.map(async (u) => {
-    const a = await igWebProfile(u).catch(() => [] as any[])
+    const a = await igWebProfile(env, u).catch(() => [] as any[])
     if (a.length) return a
     return igRsshub(u).catch(() => [] as any[])
   }))

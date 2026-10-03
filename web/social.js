@@ -1568,6 +1568,9 @@ function openShorts(list, startIdx = 0) {
       // Ulashish FAQAT platform postlari uchun va FAQAT ilova havolasi bilan — trend/akkaunt
       // kontentidan manba URL'i UMUMAN chiqmaydi (manba SIR, yuklab olish/uzatish yo'q)
       if (e.target.closest('[data-ssh]')) return share((it.p.text_body || '50 Gram Shorts').slice(0, 100), location.origin + location.pathname)
+      // YT slaydga bosish = PLAY: autoplay bloklansa (ba'zi WebView) — bosganda jonlanadi
+      const yf = slide.querySelector('iframe[data-shyt]')
+      if (yf && yf.dataset.loaded === '1' && slide.dataset.playing !== '1') { shYTpost(yf, 'playVideo'); if (!shMuted) shYTpost(yf, 'unMute'); return }
       if (e.target.closest('[data-sdel]')) {
         if (!(await confirmBox('Video o‘chirilsinmi?', 'O‘chirish'))) return
         try { await del('/posts/' + it.p.id); if (it.p.media_id) Store.remove([String(it.p.media_id)]); shList.splice(+slide.dataset.shi, 1); slide.remove(); qsa('.sh-slide', sc).forEach((s, i) => (s.dataset.shi = i)); toast('O‘chirildi') } catch (er) { toast('⚠️ ' + er.message) }
