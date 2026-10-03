@@ -51,8 +51,11 @@ TEST_PHONES = ""
 # MY_YT: YouTube kanal ID (UC...) yoki @handle, vergul bilan ajratilgan. Shorts tabi olinadi.
 # MY_IG: Instagram profil nomi (ochiq/public akkaunt bo'lishi shart), vergul bilan.
 # reels + rasmlar avtomatik olinib, algoritm bo'yicha Reels lentaSiga aralashtiriladi.
+# VAQTINCHALIK YANGI TV turibdi (sinov) — foydalanuvchi o'z kanalini/akkauntini yuborganda almashadi:
 MY_YT = "UCd5_-70CbGPmmz2YusxX1zQ"
-MY_IG = "nasa"
+MY_IG = ""
+# IG serveri Cloudflare IP'larini bloklasa — foydalanuvchi brauzeridan olingan 'sessionid'
+# cookie qiymatini secret qilib qo'shish kerak: npx wrangler secret put MY_IG_COOKIE
 
 # Secretlar (terminalda bir marta):
 #   npx wrangler secret put DATABASE_URL     # TiDB Cloud -> Connect -> Serverless Driver URL

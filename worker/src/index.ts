@@ -1734,13 +1734,15 @@ async function buildVideoPool(env: Env): Promise<{ shorts: any[]; vids: any[] }>
   }
   const se = uz.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt)).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
   const dd = dm.filter((v: any) => v && v.embed && !seen.has(v.embed) && seen.add(v.embed))
+  // Mine itemlar umumiy hovuz bilan ham kesishadi (foydalanuvchi kanali RSS'da ham bo'lsa — takror slot yo'q)
+  const mmo = mm.filter((v: any) => !v.yt || !seen.has(v.yt))
   const shorts: any[] = []
   let mi = 0, ci = 0, si = 0, di = 0
   // PLATFORM ROUND-ROBIN: har aylanishda FOYDALANUVCHI kontenti ×2 + kanal + qidiruv + DM
   // (foydalanuvchi akkauntlari yetib borguncha har 5 tadan 2 tasi uning kontenti — keyin qolganlar)
-  while ((mi < mm.length || ci < ch.length || si < se.length || di < dd.length) && shorts.length < 72) {
-    if (mi < mm.length) shorts.push(mm[mi++]) // FOYDALANUVCHI (mahfiy manba)
-    if (mi < mm.length) shorts.push(mm[mi++]) // FOYDALANUVCHI ×2 — algoritm kuchli ko'rsin
+  while ((mi < mmo.length || ci < ch.length || si < se.length || di < dd.length) && shorts.length < 72) {
+    if (mi < mmo.length) shorts.push(mmo[mi++]) // FOYDALANUVCHI (mahfiy manba)
+    if (mi < mmo.length) shorts.push(mmo[mi++]) // FOYDALANUVCHI ×2 — algoritm kuchli ko'rsin
     if (ci < ch.length) shorts.push(ch[ci++]) // YouTube kanal (round-robin — boshqa kanal)
     if (si < se.length) shorts.push(se[si++]) // YouTube qidiruv
     if (di < dd.length) shorts.push(dd[di++]) // Dailymotion
