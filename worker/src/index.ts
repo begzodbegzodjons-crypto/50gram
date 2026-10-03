@@ -1696,7 +1696,7 @@ async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  const cacheKey = "https://trend.50gram.internal/t11?p=" + page + "&cat=" + onlyCat
+  const cacheKey = "https://trend.50gram.internal/t12?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
@@ -1753,7 +1753,11 @@ async function trend(c: C) {
     for (const { it, t } of results) if (t && t !== it.title) it.title = t
   }
   items = items.filter((x) => x && x.title)
-  for (const x of items) x.id = (await sha256(x.url)).slice(0, 12)
+  // ID: manba-native id'dan (yt id/dm id/mk id — yuqorida berilgan) — URL EMAS!
+  // AVVAL id=sha256(url) edi: Mixkit bir kategoriyadagi 4-10 video BIR XIL URL'ga ega —
+  // hamma BIR XIL id chiqarardi → klient dedupe ularni tushirardi → hovuz 5-6 tagacha
+  // qisqarardi → lenta "5-6 tadan keyin qotib qolmoqda" (asosiy ildiz sabab shu edi!)
+  for (const x of items) x.id = (await sha256(x.id || x.url || x.title || String(x.time))).slice(0, 12)
   const out = { ok: true, page, items }
   const resp = json(out)
   // Video sahifasida YouTube yo'q bo'lsa 60s kesh (hovuz tuzatilgach tez yangilanadi); qolganlari 600s
