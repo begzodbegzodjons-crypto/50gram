@@ -120,30 +120,39 @@ function fwBlokli(ip: string) {
 // bo'lgan bloklar keshdan ham o'chadi (v=1 — darhol; v=0 — 90s dan eskirganlari).
 // Shuning uchun blokni yechish (unblock) butun tarmoq bo'ylab tez tarqaladi,
 // hech qanday qoldiq qolmaydi.
-let FW_KET = null as Promise<unknown> | null // ayni bor refresh (dublikatlarni birlashtirish)
-// forceIp: shu IP uchun DO'dan YANGI ro'yxat kelganda blok yo'q bo'lsa — lokal yozuvni
-// qattiq o'chir (yangi v=0 himoyasini chetlab). Faqat kutib tekshirilgan yo'lda ishlatiladi.
-async function fwYangola(env: Env, forceIp?: string) {
-  if (Date.now() - FW_YANGI < 1_000 || !env.SEC) return
+let FW_FYANGI = 0 // majburiy (bloklanganlar yo'li) refresh oxirgi vaqti
+// DO blok ro'yxatini keshga qo'llash: ro'yxatda yo'qlar o'chadi (v=1 — darhol,
+// v=0 — 90s dan eskirganlari), ro'yxatdagilar to'liq muddat bilan yoziladi (v=1).
+function fwQollash(j: any) {
+  const nw = new Set<string>()
+  for (const [ip2] of (j.blocks || []) as Array<[string, number]>) nw.add(String(ip2))
+  const t2 = Date.now()
+  for (const [ip2, e] of FW_KESH) {
+    if (nw.has(ip2)) continue
+    if (e.v === 1 || t2 - e.t > 90_000) FW_KESH.delete(ip2)
+  }
+  for (const [ip2, until] of (j.blocks || []) as Array<[string, number]>) FW_KESH.set(String(ip2), { u: Number(until), t: t2, v: 1 })
+  return nw
+}
+async function fwYangola(env: Env) {
+  if (Date.now() - FW_YANGI < 45_000 || !env.SEC) return
   FW_YANGI = Date.now()
-  if (FW_KET) return FW_KET
-  FW_KET = (async () => {
-    try {
-      const st = env.SEC!.get(env.SEC!.idFromName("global"))
-      const r = await st.fetch("https://fw/?op=refresh")
-      const j: any = await r.json()
-      const nw = new Set<string>()
-      for (const [ip2] of (j.blocks || []) as Array<[string, number]>) nw.add(String(ip2))
-      const t2 = Date.now()
-      for (const [ip2, e] of FW_KESH) {
-        if (nw.has(ip2)) continue
-        if (e.v === 1 || t2 - e.t > 90_000) FW_KESH.delete(ip2)
-      }
-      for (const [ip2, until] of (j.blocks || []) as Array<[string, number]>) FW_KESH.set(String(ip2), { u: Number(until), t: t2, v: 1 })
-      if (forceIp && !nw.has(forceIp)) FW_KESH.delete(forceIp)
-    } catch {} finally { FW_KET = null }
-  })()
-  return FW_KET
+  try {
+    const r = await env.SEC!.get(env.SEC!.idFromName("global")).fetch("https://fw/?op=refresh")
+    fwQollash(await r.json())
+  } catch {}
+}
+// Bloklangan IP uchun majburiy tekshiruv (≤50ms, 300ms interval): DO yangi ro'yxatida
+// IP yo'q bo'lsa — lokal yozuv DARHOL o'chadi. Shuning uchun blok yechilishi butun
+// tarmoqda birinchi so'rovdayoq ko'rinadi (qoldiq 404 qolmaydi).
+async function fwTekshir(env: Env, ip: string) {
+  if (!env.SEC || Date.now() - FW_FYANGI < 300) return
+  FW_FYANGI = Date.now()
+  try {
+    const r = await env.SEC!.get(env.SEC!.idFromName("global")).fetch("https://fw/?op=refresh")
+    const nw = fwQollash(await r.json())
+    if (!nw.has(ip)) FW_KESH.delete(ip)
+  } catch {}
 }
 // Oddiy so'rovlar: fon rejimida (hech qachon kutmaydi — NOL kechikish)
 function fwKeshYana(env: Env, wait: (p: Promise<unknown>) => void) {
@@ -3006,9 +3015,7 @@ export default {
       if (fwBlokli(fwip)) {
         // Blok lokal keshdan chiqdi — DO hali ham tasdiqlayaptimi? (≤50ms, faqat
         // bloklanganlar to'laydi; halol foydalanuvchi bu yo'lga umuman kirmaydi).
-        // DO yangi ro'yxatida IP yo'q bo'lsa — lokal yozuv DARHOL o'chadi (quyidagi
-        // fwBlokli false bo'ladi): blok yechilishi butun tarmoqda ≤1 so'rovda ko'rinadi.
-        try { await fwYangola(env, fwip) } catch {}
+        try { await fwTekshir(env, fwip) } catch {}
         if (fwBlokli(fwip)) return FW_404()
       }
       // TASHQI MIJOZ NAZORATI: faqat sayt (brauzer) va ilova (APK WebView/fon xizmati)
