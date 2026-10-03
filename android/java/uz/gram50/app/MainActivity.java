@@ -10,6 +10,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.view.Gravity;
 import android.view.View;
 import android.view.animation.AlphaAnimation;
@@ -48,6 +49,9 @@ public class MainActivity extends Activity {
   static final int FILE_REQ = 1001;
   static final int MEDIA_REQ = 1002;
 
+  /** Xizmat polling o'tkazib yuborishi uchun: ilova ekranda bo'lsa xizmat jim turadi (WS ko'rsatayapti) */
+  public static volatile boolean visible = true;
+
   WebView web;
   FrameLayout root;
   View splash;
@@ -73,8 +77,18 @@ public class MainActivity extends Activity {
       CallAlert.cancel(MainActivity.this);
     }
 
+    /** WS xizmatga o'z tokenini beradi — fonda polling ishlashi uchun (v2.5) */
     @JavascriptInterface
-    public String version() { return "2.4"; }
+    public void setToken(String t) {
+      try {
+        if (t == null || t.length() < 8) return;
+        KeepAliveService.token = t;
+        getSharedPreferences("g50", MODE_PRIVATE).edit().putString("token", t).apply();
+      } catch (Exception ignored) { }
+    }
+
+    @JavascriptInterface
+    public String version() { return "2.5"; }
 
     /** Web tomondan ruxsatlarni ataylab so'rash (masalan qo'ng'iroq tugmasi bosilganda). */
     @JavascriptInterface
@@ -108,7 +122,7 @@ public class MainActivity extends Activity {
     s.setCacheMode(WebSettings.LOAD_DEFAULT);
     s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     s.setJavaScriptCanOpenWindowsAutomatically(true);
-    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.4");
+    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.5");
     web.addJavascriptInterface(new Bridge(), "Android50");
 
     web.setWebViewClient(new WebViewClient() {
@@ -171,6 +185,12 @@ public class MainActivity extends Activity {
       @Override public void run() { if (web != null) ensureOsMediaPerms(null); }
     }, 1200);
 
+    // FON QO'NG'IROQLARI UCHUN BATTERY OPTIMIZATSIYA: ilova optimizatsiyadan chiqarilmasa
+    // Doze rejimi tarmoqni to'sadi — fon qo'ng'iroqlari va xabarlar kechikadi. Bir marta so'raymiz.
+    main.postDelayed(new Runnable() {
+      @Override public void run() { askBatteryOptimization(); }
+    }, 4000);
+
     // SPLASH: logotip bilan to'liq ekran — sahifa tayyor bo'lgach silliq yo'qoladi
     splash = makeSplash();
     root.addView(splash, new FrameLayout.LayoutParams(-1, -1));
@@ -184,10 +204,38 @@ public class MainActivity extends Activity {
     web.resumeTimers();
 
     // Fon xizmati: fonda ham ulanish tirik — xabarlar va qo'ng'iroqlar o'z vaqtida
+    KeepAliveService.loadToken(this);
     Intent svc = new Intent(this, KeepAliveService.class);
     if (Build.VERSION.SDK_INT >= 26) startForegroundService(svc); else startService(svc);
 
     handleCallIntent(getIntent());
+  }
+
+  /** Batareya optimizatsiyasidan chiqarish (bir marta) — fon qo'ng'iroqlari ishonchli ishlashi uchun */
+  void askBatteryOptimization() {
+    try {
+      if (Build.VERSION.SDK_INT < 23) return;
+      android.content.SharedPreferences p = getSharedPreferences("g50", MODE_PRIVATE);
+      if (p.getBoolean("batt_asked", false)) return;
+      PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+      if (pm == null || pm.isIgnoringBatteryOptimizations(getPackageName())) return;
+      p.edit().putBoolean("batt_asked", true).apply();
+      new android.app.AlertDialog.Builder(this)
+          .setTitle("Qo'ng'iroqlar o'z vaqtida kelsin")
+          .setMessage("Ilovani batareya optimizatsiyasidan chiqarish tavsiya etiladi — shunda qo'ng'iroqlar va xabarlar fonda ham o'z vaqtida yetadi (Telegram kabi).\n\nOchilgan oynada «Ha, ruxsat berish» ni tanlang.")
+          .setPositiveButton("Sozlash", new android.content.DialogInterface.OnClickListener() {
+            @Override public void onClick(android.content.DialogInterface d, int w) {
+              try {
+                startActivity(new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:" + getPackageName())));
+              } catch (Exception e) {
+                try { startActivity(new Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)); } catch (Exception ignored) { }
+              }
+            }
+          })
+          .setNegativeButton("Keyinroq", null)
+          .show();
+    } catch (Exception ignored) { }
   }
 
   // ---------------- SPLASH ----------------
@@ -406,11 +454,18 @@ public class MainActivity extends Activity {
   @Override
   protected void onResume() {
     super.onResume();
+    visible = true; // ilova ekranda — xizmat polling to'xtatadi (WS ko'rsatayapti)
     if (web != null) {
       web.resumeTimers();
       // Ilovaga qaytganda WebSocket qayta ulanadi + fon qo'ng'irog'i UI'da ko'rinadi
       try { web.evaluateJavascript("try{window.__appResume&&window.__appResume()}catch(e){}", null); } catch (Exception e) { }
     }
+  }
+
+  @Override
+  protected void onPause() {
+    super.onPause();
+    visible = false; // xizmat pollingni yoqadi (ilova ekranda emas endi)
   }
 
   // MUHIM: onPause'da pauseTimers() CHAQIRILMAYDI — fonda JS tirik turadi,

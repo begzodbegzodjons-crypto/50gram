@@ -244,15 +244,15 @@ function obsTrend() {
 function trendSkeleton() {
   return `<div class="tgrid">${Array(6).fill('<div class="tcard sk"><div class="skimg"></div><div class="tcb"><b>‎</b><small>‎</small></div></div>').join('')}</div>`
 }
-// ZUDLIK keshi: oxirgi 1-sahifa sessionStorage'da — lenta HAR QAYTA OCHILGANDA darhol chiziladi (fon yangilanadi)
-// Bu "lenta juda sekin ochmoqda" shikoyatining client-tarafi yechimi.
+// ZUDLIK keshi: oxirgi 1-sahifa localStorage'da (7 kun) — lenta HAR QAYTA OCHILGANDA, hatto ilova
+// qayta ishga tushganda/oflaynda ham darhol chiziladi (fon yangilanadi). Bu "lenta sekin" muammosi yechimi.
 function trendCacheSave(items) {
-  try { sessionStorage.setItem('g50_trend_p1', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
+  try { localStorage.setItem('g50_trend_c', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
 }
 function trendCacheGet() {
   try {
-    const d = JSON.parse(sessionStorage.getItem('g50_trend_p1') || '')
-    if (d && d.items && Date.now() - d.t < 5 * 60 * 1000) return d.items
+    const d = JSON.parse(localStorage.getItem('g50_trend_c') || '')
+    if (d && d.items && d.items.length && Date.now() - d.t < 7 * 864e5) return d.items
   } catch {}
   return null
 }
@@ -293,7 +293,7 @@ async function loadTrend(reset) {
     if (!list.length) trendEnd = true
     if (trendPage === 1 && trendCat === 'all') trendCacheSave(trendItems)
     renderTrend()
-  } catch (e) { if (reset) $('feedlist').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`; trendPage-- } finally { trendBusy = false }
+  } catch (e) { if (reset && !trendItems.length) $('feedlist').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`; trendPage-- } finally { trendBusy = false }
 }
 function openTrendNews(x) {
   tintAdd(x.cat)
@@ -345,25 +345,55 @@ $('trendchips').addEventListener('click', (e) => {
   loadTrend(true)
 })
 
-// ============ Umumiy lenta (postlar/reels) ============
+// ============ Umumiy lenta (postlar) + OFLAYN KESHI ============
+// Kesh: oxirgi postlar localStorage'da — lenta HAR SAFAR darhol ko'rinadi (internet sekin/o'chiq bo'lsa ham),
+// yangilari fonda tortilib birlashtiriladi — yuklash uzilishi foydalanuvchiga sezilmaydi.
+const feedCacheKey = () => 'g50_feed_' + feedMode
+function feedCacheSave() {
+  try { localStorage.setItem(feedCacheKey(), JSON.stringify({ t: Date.now(), posts: feedPosts.slice(0, 30).map((p) => ({ ...p, meta: p.meta || null })) })) } catch {}
+}
+function feedCacheGet() {
+  try {
+    const d = JSON.parse(localStorage.getItem(feedCacheKey()) || '')
+    if (d && Array.isArray(d.posts) && d.posts.length && Date.now() - d.t < 7 * 864e5) return d.posts
+  } catch {}
+  return null
+}
 async function loadFeed(reset) {
   if (feedBusy) return
-  if (reset) { feedPosts = []; feedEnd = false; $('feedlist').innerHTML = '<div class="spin"></div>' }
+  const fromCache = !!reset
+  if (reset) {
+    feedEnd = false
+    if (!feedPosts.length) {
+      const c = feedCacheGet()
+      if (c) { feedPosts = c.slice(); renderFeed() }
+    }
+    if (!feedPosts.length) $('feedlist').innerHTML = '<div class="spin"></div>'
+  }
   if (feedEnd) return
   feedBusy = true
   try {
-    const before = feedPosts.length ? feedPosts[feedPosts.length - 1].id : 0
-    const r = feedMode === 'reels'
-      ? await api('/reels' + (before ? '?before=' + before : ''))
-      : await api(`/feed?mode=${feedMode}${before ? '&before=' + before : ''}`)
+    // reset'da doim eng YANGI sahifa tortiladi (kesh bo'lsa birlashtiriladi) — yangi postlar yo'qolmaydi
+    const before = fromCache ? 0 : (feedPosts.length ? feedPosts[feedPosts.length - 1].id : 0)
+    const r = await api(`/feed?mode=${feedMode}${before ? '&before=' + before : ''}`)
     const list = Array.isArray(r) ? r : r.posts || []
     for (const p of list) if (p.media_id && p.meta) P2P.note(String(p.media_id), { chat: 0, ...p.meta })
-    feedPosts.push(...list)
+    if (fromCache) {
+      const seen = new Set(list.map((x) => x.id))
+      feedPosts = list.concat(feedPosts.filter((x) => !seen.has(x.id)))
+    } else {
+      const seen = new Set(feedPosts.map((x) => x.id))
+      feedPosts.push(...list.filter((x) => !seen.has(x.id)))
+    }
     if (list.length < 20) feedEnd = true
-    feedMode === 'reels' ? renderReels() : renderFeed()
-  } catch (e) { $('feedlist').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>` } finally { feedBusy = false }
+    renderFeed()
+    feedCacheSave()
+  } catch (e) {
+    if (!feedPosts.length) $('feedlist').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`
+    // Keshdan ko'rsatilgan bo'lsa — xato jim o'tkaziladi (kontent turadi, uzilish sezilmaydi)
+  } finally { feedBusy = false }
 }
-// ---------------- Reels: vertikal video lenta ----------------
+// ---------------- Reels: vertikal video lenta (alohida dock bo'limi) ----------------
 function reelHTML(p) {
   const who = p.chat ? `<div class="rw" data-who="c${p.chat.id}">${avHTML(p.chat, 38, { chat: true })}<b>${esc(p.chat.title)}</b></div>`
     : `<div class="rw" data-who="u${p.author?.id || 0}">${avHTML(p.author, 38)}<b>${esc(uname(p.author))}</b></div>`
@@ -383,12 +413,57 @@ function reelHTML(p) {
     <div class="rtap"></div>
   </div>`
 }
+// Reels holati (alohida bo'lim): reelPosts + kesh (oflaynda ham ochiladi)
+let reelPosts = [], reelsEnd = false, reelsBusy = false
+const RKEY = 'g50_reels_c'
+function reelsCacheSave() {
+  try { localStorage.setItem(RKEY, JSON.stringify({ t: Date.now(), posts: reelPosts.slice(0, 30).map((p) => ({ ...p, meta: p.meta || null })) })) } catch {}
+}
+function reelsCacheGet() {
+  try {
+    const d = JSON.parse(localStorage.getItem(RKEY) || '')
+    if (d && Array.isArray(d.posts) && d.posts.length && Date.now() - d.t < 7 * 864e5) return d.posts
+  } catch {}
+  return null
+}
+async function loadReels(reset) {
+  if (reelsBusy) return
+  const fromCache = !!reset
+  if (reset) {
+    reelsEnd = false
+    if (!reelPosts.length) {
+      const c = reelsCacheGet()
+      if (c) { reelPosts = c.slice(); renderReels() }
+    }
+    if (!reelPosts.length) $('reelslist').innerHTML = '<div class="spin"></div>'
+  }
+  if (reelsEnd) return
+  reelsBusy = true
+  try {
+    const before = fromCache ? 0 : (reelPosts.length ? reelPosts[reelPosts.length - 1].id : 0)
+    const r = await api('/reels' + (before ? '?before=' + before : ''))
+    const list = Array.isArray(r) ? r : r.posts || []
+    for (const p of list) if (p.media_id && p.meta) P2P.note(String(p.media_id), { chat: 0, ...p.meta })
+    if (fromCache) {
+      const seen = new Set(list.map((x) => x.id))
+      reelPosts = list.concat(reelPosts.filter((x) => !seen.has(x.id)))
+    } else {
+      const seen = new Set(reelPosts.map((x) => x.id))
+      reelPosts.push(...list.filter((x) => !seen.has(x.id)))
+    }
+    if (list.length < 10) reelsEnd = true
+    renderReels()
+    reelsCacheSave()
+  } catch (e) {
+    if (!reelPosts.length) $('reelslist').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`
+  } finally { reelsBusy = false }
+}
 function renderReels() {
-  const box = $('feedlist')
-  $('t-feed').classList.add('reelmode')
-  box.innerHTML = feedPosts.length
-    ? `<div class="reels">${feedPosts.map(reelHTML).join('')}</div>${feedEnd ? '' : '<div class="hint" style="text-align:center;padding:12px">Pastga suring — yana videolar 🎬</div>'}`
-    : `<div class="empty"><span class="big">🎬</span>Hali video yo‘q. Lenta tabida 🎬 Reels ni tanlab video post joylang!</div>`
+  const box = $('reelslist')
+  if (!box) return
+  box.innerHTML = reelPosts.length
+    ? `<div class="reels">${reelPosts.map(reelHTML).join('')}</div>${reelsEnd ? '<div class="hint" style="text-align:center;padding:12px">Hammasi ko‘rildi ✨</div>' : '<div class="hint" style="text-align:center;padding:12px">Pastga suring — yana videolar 🎬</div>'}`
+    : `<div class="empty"><span class="big">🎬</span>Hali Reels yo‘q. Yuqoridagi <b>📹</b> tugmasi bilan o‘z videongizni joylang!<br><small style="color:var(--xira)">⚡ Shorts esa internetdan jonli videolar keltiradi</small></div>`
   hydrate(box)
   if (reelsObserver) reelsObserver.disconnect()
   const rd = qs('.reels', box)
@@ -399,7 +474,7 @@ function renderReels() {
         if (en.isIntersecting && en.intersectionRatio > 0.6) { v.play().catch(() => {}); v.muted = false }
         else v.pause()
       }
-    }, { root: qs('#t-feed'), threshold: [0, 0.6, 1] })
+    }, { root: qs('#t-reels'), threshold: [0, 0.6, 1] })
     qsa('.reel video', box).forEach((v) => reelsObserver.observe(v))
   }
 }
@@ -414,7 +489,32 @@ function renderFeed() {
     : `<div class="empty"><span class="big">📰</span>${feedMode === 'subs' ? 'Obuna bo‘lgan kanallaringizda hali post yo‘q' : 'Hali postlar yo‘q. Birinchi bo‘lib yangilik yoki e’lon joylang!'}</div>`
   hydrate(box)
 }
-$('feedseg').onclick = (e) => { const d = e.target.closest('[data-m]'); if (!d) return; feedMode = d.dataset.m; qsa('#feedseg div').forEach((x) => x.classList.toggle('on', x === d)); $('b-post').classList.toggle('hide', feedMode === 'reels' || feedMode === 'trend'); $('t-feed').classList.toggle('reelmode', feedMode === 'reels'); $('trendchips').classList.toggle('hide', feedMode !== 'trend'); feedMode === 'trend' ? loadTrend(true) : loadFeed(true) }
+$('feedseg').onclick = (e) => { const d = e.target.closest('[data-m]'); if (!d) return; feedMode = d.dataset.m; qsa('#feedseg div').forEach((x) => x.classList.toggle('on', x === d)); $('b-post').classList.toggle('hide', feedMode === 'trend'); $('trendchips').classList.toggle('hide', feedMode !== 'trend'); feedMode === 'trend' ? loadTrend(true) : loadFeed(true) }
+// --- Reels bo'limi: kliklar (like/izoh/ulashish/o'chirish/shorts) ---
+$('reelslist').addEventListener('click', async (e) => {
+  const reel = e.target.closest('[data-reel]')
+  if (!reel) return
+  const p = reelPosts.find((x) => x.id === +reel.dataset.reel); if (!p) return
+  if (e.target.closest('[data-like]')) {
+    try {
+      const r = await post(`/posts/${p.id}/like`); p.liked = r.liked; p.like_count = r.like_count
+      const b = qs('[data-like]', reel); b.className = p.liked ? 'on' : ''; b.innerHTML = `${p.liked ? '❤️' : '🤍'}<i>${p.like_count || 0}</i>`
+      if (p.liked) { const f = document.createElement('span'); f.className = 'fly'; f.textContent = '❤️'; reel.appendChild(f); setTimeout(() => f.remove(), 1200); vibrate(10) }
+    } catch (er) { toast('⚠️ ' + er.message) }
+    return
+  }
+  if (e.target.closest('[data-cmt]')) return commentsSheet(p, null)
+  if (e.target.closest('[data-psh]')) return share((p.text_body || '50 Gram Reels').slice(0, 100), location.origin + location.pathname)
+  if (e.target.closest('[data-pdel]')) {
+    if (!(await confirmBox('Video o‘chirilsinmi?', 'O‘chirish'))) return
+    try { await del('/posts/' + p.id); if (p.media_id) Store.remove([String(p.media_id)]); reelPosts = reelPosts.filter((x) => x !== p); renderReels(); reelsCacheSave() } catch (er) { toast('⚠️ ' + er.message) }
+    return
+  }
+  const w = e.target.closest('[data-who]')
+  if (w) { const v = w.dataset.who; if (v[0] === 'u') openUser(+v.slice(1)); else { const c = S.chats.get(+v.slice(1)); c && c.joined !== false ? openChat(c.id) : chatPreview(p.chat) } ; return }
+  // To'liq ekran Shorts rejimi (TikTok uslubi)
+  return shortsStart({ post: p })
+})
 $('feedlist').addEventListener('click', async (e) => {
   if (feedMode === 'trend') {
     const tn = e.target.closest('[data-tn]')
@@ -422,30 +522,6 @@ $('feedlist').addEventListener('click', async (e) => {
     const tv = e.target.closest('[data-tv]')
     if (tv) { const x = trendItems.find((v) => v.id === tv.dataset.tv); if (x) { if (x.kind === 'short') return shortsStart({ trend: x }); openTrendVideo(x) } }
     return
-  }
-  if (feedMode === 'reels') {
-    const reel = e.target.closest('[data-reel]')
-    if (!reel) return
-    const p = feedPosts.find((x) => x.id === +reel.dataset.reel); if (!p) return
-    if (e.target.closest('[data-like]')) {
-      try {
-        const r = await post(`/posts/${p.id}/like`); p.liked = r.liked; p.like_count = r.like_count
-        const b = qs('[data-like]', reel); b.className = p.liked ? 'on' : ''; b.innerHTML = `${p.liked ? '❤️' : '🤍'}<i>${p.like_count || 0}</i>`
-        if (p.liked) { const f = document.createElement('span'); f.className = 'fly'; f.textContent = '❤️'; reel.appendChild(f); setTimeout(() => f.remove(), 1200); vibrate(10) }
-      } catch (er) { toast('⚠️ ' + er.message) }
-      return
-    }
-    if (e.target.closest('[data-cmt]')) return commentsSheet(p, null)
-    if (e.target.closest('[data-psh]')) return share((p.text_body || '50 Gram Reels').slice(0, 100), location.origin + location.pathname)
-    if (e.target.closest('[data-pdel]')) {
-      if (!(await confirmBox('Video o‘chirilsinmi?', 'O‘chirish'))) return
-      try { await del('/posts/' + p.id); if (p.media_id) Store.remove([String(p.media_id)]); feedPosts = feedPosts.filter((x) => x !== p); renderReels() } catch (er) { toast('⚠️ ' + er.message) }
-      return
-    }
-    const w = e.target.closest('[data-who]')
-    if (w) { const v = w.dataset.who; if (v[0] === 'u') openUser(+v.slice(1)); else { const c = S.chats.get(+v.slice(1)); c && c.joined !== false ? openChat(c.id) : chatPreview(p.chat) } ; return }
-    // To'liq ekran Shorts rejimi (TikTok uslubi)
-    return shortsStart({ post: p })
   }
   if (e.target.closest('[data-more]')) return loadFeed()
   const el = e.target.closest('[data-post]'); if (!el) return
@@ -466,6 +542,7 @@ $('feedlist').addEventListener('click', async (e) => {
   if (w) { const v = w.dataset.who; if (v[0] === 'u') openUser(+v.slice(1)); else { const c = S.chats.get(+v.slice(1)); c && c.joined !== false ? openChat(c.id) : chatPreview(p.chat) } }
 })
 $('t-feed').addEventListener('scroll', (e) => { const t = e.target; if (t.scrollHeight - t.scrollTop - t.clientHeight < 600) { if (feedMode === 'trend') loadTrend(); else loadFeed() } }, { passive: true })
+$('t-reels').addEventListener('scroll', (e) => { const t = e.target; if (t.scrollHeight - t.scrollTop - t.clientHeight < 900) loadReels() }, { passive: true })
 async function commentsSheet(p, el) {
   let list = []
   try { list = await api(`/posts/${p.id}/comments`) } catch (e) { return toast('⚠️ ' + e.message) }
@@ -473,7 +550,7 @@ async function commentsSheet(p, el) {
   const sh = sheet(h3('Izohlar') + `<div id="cm-l" style="max-height:55vh;overflow:auto">${draw()}</div><div class="inrow"><input class="inp" id="cm-i" maxlength="1000" placeholder="Izoh yozing…"><button class="btn" id="cm-s" style="width:auto">➤</button></div>`)
   const send = async () => {
     const i = qs('#cm-i', sh), t = i.value.trim(); if (!t) return
-    try { const k = await post(`/posts/${p.id}/comments`, { text_body: t }); i.value = ''; list.push(k.user ? k : { ...k, user: S.me, text_body: t, created_at: Date.now() }); p.comment_count = (p.comment_count || 0) + 1; qs('#cm-l', sh).innerHTML = draw(); if (el && el.isConnected) { el.outerHTML = postHTML(p); hydrate($('feedlist')) } else if (feedMode === 'reels') renderReels() } catch (er) { toast('⚠️ ' + er.message) }
+    try { const k = await post(`/posts/${p.id}/comments`, { text_body: t }); i.value = ''; list.push(k.user ? k : { ...k, user: S.me, text_body: t, created_at: Date.now() }); p.comment_count = (p.comment_count || 0) + 1; qs('#cm-l', sh).innerHTML = draw(); if (el && el.isConnected) { el.outerHTML = postHTML(p); hydrate($('feedlist')) } else { try { renderReels() } catch {} } } catch (er) { toast('⚠️ ' + er.message) }
   }
   qs('#cm-s', sh).onclick = send
   qs('#cm-i', sh).onkeydown = (e) => e.key === 'Enter' && send()
@@ -499,12 +576,46 @@ function postSheet(preChatId = 0) {
       if (file) { const video = file.type.startsWith('video/'); const blob = video ? file : await resizeImage(file, 1600, 0.85); media_id = await upload(blob, file.name); media_kind = video ? 'video' : 'photo'; meta = mediaInfo(media_id) }
       const p = await post('/posts', { text_body: text, media_id, media_kind, meta, chat_id: +qs('#np-w', sh).value })
       closeSheet(sh)
-      if (feedMode === 'all' || feedMode === 'subs') { feedPosts.unshift(p); renderFeed() }
-      toast('✅ Joylandi — video bo‘lsa Reels’da ko‘rinadi 🎬')
+      if (feedMode === 'all' || feedMode === 'subs') { feedPosts.unshift(p); renderFeed(); feedCacheSave() }
+      toast('✅ Joylandi — video bo‘lsa Reels bo‘limida ko‘rinadi 🎬')
     } catch (e) { toast('⚠️ ' + e.message); btn.disabled = false; btn.textContent = 'Joylash' }
   }
 }
 $('b-post').onclick = () => postSheet(0)
+
+// ---------------- 📹 REELS JOYLASH — Reels bo'limidan to'g'ridan-to'g'ri ----------------
+// Videolar shifrlangan holda yuklanadi (AES-GCM) va tarmoq qurilmalarida taqsimlanadi (P2P gibrid xotira).
+function reelSheet() {
+  let file = null
+  const sh = sheet(h3('🎬 Reels joylash') + `<div class="hint">📹 Video tanlanadi va <b>shifrlangan holda</b> yuklanadi 🔒 — tarmoqdagi qurilmalarda taqsimlanadi, serverda faqat shifr saqlanadi.</div>
+    <div id="rl-pv" class="rl-pv" data-rpick><span class="rl-ic">📹</span><b>Video tanlash</b><small>Vertikal video — maks 30 MB</small></div>
+    <textarea class="inp" id="rl-t" rows="2" maxlength="1000" placeholder="Izoh… (ixtiyoriy)"></textarea>
+    <button class="btn big" id="rl-s" disabled>⬆️ Joylash</button>`)
+  const pick = qs('#rl-pv', sh)
+  pick.onclick = async () => {
+    file = await pickFile('video/*'); if (!file) return
+    pick.innerHTML = `<video src="${URL.createObjectURL(file)}" style="width:100%;max-height:44vh;border-radius:14px;background:#000;display:block" muted playsinline loop autoplay></video>`
+    qs('#rl-s', sh).disabled = false
+  }
+  qs('#rl-s', sh).onclick = async () => {
+    if (!file) return
+    const btn = qs('#rl-s', sh); btn.disabled = true
+    try {
+      const id = await upload(file, file.name || 'reels.mp4', (p) => { btn.textContent = '⏳ Yuklanmoqda ' + Math.round(p * 100) + '%' })
+      btn.textContent = '⏳ Joylanmoqda…'
+      const p = await post('/posts', { text_body: qs('#rl-t', sh).value.trim(), media_id: id, media_kind: 'video', meta: mediaInfo(id) })
+      closeSheet(sh)
+      const ex = reelPosts.findIndex((x) => x.id === p.id)
+      if (ex < 0) reelPosts.unshift(p)
+      reelsEnd = false
+      renderReels(); reelsCacheSave()
+      tabGo('t-reels')
+      toast('✅ Reels joylandi — barcha foydalanuvchilar ko‘radi 🎬')
+    } catch (e) { toast('⚠️ ' + e.message); btn.disabled = false; btn.textContent = '⬆️ Joylash' }
+  }
+}
+$('b-rupload').onclick = () => reelSheet()
+$('b-rshorts').onclick = () => shortsStart({})
 
 // ---------------- Kontaktlar ----------------
 async function loadContactsQuiet() {
@@ -854,7 +965,7 @@ function shClose() {
 }
 async function shortsStart(opt = {}) {
   try {
-    let posts = shNormPosts(feedPosts)
+    let posts = shNormPosts(reelPosts)
     if (opt.post && !posts.some((x) => x.p.id === opt.post.id)) posts.unshift({ t: 'post', p: opt.post })
     // TREND SHORTS TO'SIQ QILMAYDI: keshda bo'lsa darhol qo'shamiz, yo'q bo'lsa ilova OCHILGACH fonda yuklanadi.
     // Avval: shortsStart ikkala API'ni ketma-ket kutardi — sekin API butun Shorts'ni bloklaydi (asosiy sekinlik sababi).

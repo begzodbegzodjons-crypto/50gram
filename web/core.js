@@ -767,6 +767,7 @@ function tabGo(id) {
   qsa('.dock button').forEach((b) => b.classList.toggle('on', b.dataset.t === id))
   if (id === 't-contacts') loadContacts()
   if (id === 't-feed') (feedMode === 'trend' ? loadTrend(true) : loadFeed(true))
+  if (id === 't-reels') loadReels(true)
   if (id === 't-channels') renderChannels()
   if (id === 't-me') renderMe()
 }
@@ -780,6 +781,8 @@ async function startApp() {
   try { setMe(await api('/me')) } catch (e) { if (!S.token) return }
   if (!S.me.first_name) { $('auth').classList.remove('hide'); $('main').classList.add('hide'); step('a-prof'); return }
   post('/ping').catch(() => {})
+  // APK: token'ni native tomonga beramiz — fon xizmati qo'ng'iroqlarni polling bilan oladi (v2.5)
+  try { window.Android50 && window.Android50.setToken && window.Android50.setToken(S.token) } catch {}
   // Avtomatik ruxsat: birinchi bosishda kamera/mikrofonni bir marta so'raymiz —
   // shundan keyin qo'ng'iroqlar va ovozli xabarlar oynasiz ishlaydi (rtc.js)
   try { window.__50warmup && window.__50warmup() } catch {}

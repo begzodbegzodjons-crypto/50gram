@@ -554,7 +554,7 @@ const sendPack = (path) => {
 const sendGif = (g) => S.cur && sendRaw(S.cur, { kind: 'gif', meta: withReply({ g }) }).catch(() => {})
 
 // Matn maydoni
-function autoGrow() { const i = $('inp'); i.style.height = 'auto'; i.style.height = Math.min(140, i.scrollHeight) + 'px' }
+function autoGrow() { const i = $('inp'); i.style.height = 'auto'; i.style.height = Math.min(96, i.scrollHeight) + 'px' }
 function setSendIcon() { const has = $('inp').value.trim() || editId; $('b-send').textContent = has ? (editId ? '✔' : '➤') : recMode === 'round' ? '⭕' : '🎤' }
 let typingSent = 0
 $('inp').addEventListener('input', () => {

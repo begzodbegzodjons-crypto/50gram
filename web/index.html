@@ -70,9 +70,13 @@
       </div>
       <div class="tab" id="t-feed">
         <header class="top"><h1>Lenta</h1><div class="sp"></div><button class="ic" id="b-shorts" title="Shorts">⚡</button><button class="ic" id="b-post" title="Post">＋</button></header>
-        <div class="seg" id="feedseg"><div class="on" data-m="trend">🔥 Trend</div><div data-m="all">Hammasi</div><div data-m="subs">Obunalarim</div><div data-m="reels">🎬 Reels</div></div>
+        <div class="seg" id="feedseg"><div class="on" data-m="trend">🔥 Trend</div><div data-m="all">Hammasi</div><div data-m="subs">Obunalarim</div></div>
         <div id="trendchips" class="trendchips"></div>
         <div id="feedlist" class="feed"></div>
+      </div>
+      <div class="tab" id="t-reels">
+        <header class="top"><h1>Reels</h1><div class="sp"></div><button class="ic" id="b-rshorts" title="Internet Shorts">⚡</button><button class="ic" id="b-rupload" title="Reels joylash">📹</button></header>
+        <div id="reelslist" class="feed"></div>
       </div>
       <div class="tab" id="t-channels">
         <header class="top"><h1>Kanallar</h1><div class="sp"></div><button class="ic" id="b-create" title="Yaratish">＋</button></header>
@@ -84,6 +88,7 @@
       <button class="on" data-t="t-chats"><i>💬</i><span>Chatlar</span><b id="badge" class="bdg hide"></b></button>
       <button data-t="t-contacts"><i>👥</i><span>Kontaktlar</span></button>
       <button data-t="t-feed"><i>📰</i><span>Lenta</span></button>
+      <button data-t="t-reels"><i>🎬</i><span>Reels</span></button>
       <button data-t="t-channels"><i>📢</i><span>Kanallar</span></button>
       <button data-t="t-me"><i>👤</i><span>Profil</span></button>
     </nav>
@@ -108,8 +113,7 @@
     <div id="d-reply" class="replybar hide"><div class="rb-t"><b id="rb-n"></b><span id="rb-x"></span></div><button class="ic tr" id="rb-close">✕</button></div>
     <div id="d-comp" class="yoz">
       <button class="yb" id="b-attach" title="Biriktirish">📎</button>
-      <textarea id="inp" rows="1" placeholder="Xabar…"></textarea>
-      <button class="yb" id="b-emoji" title="Emoji, stiker, GIF">😊</button>
+      <div class="inwrap"><textarea id="inp" rows="1" placeholder="Xabar…"></textarea><button class="in-emoji" id="b-emoji" title="Emoji, stiker, GIF">😊</button></div>
       <button class="yb asos" id="b-send" title="Bosib turing: ovoz. Bosing: rejim">🎤</button>
       <div id="recbar" class="recbar hide"><span class="dot"></span><b id="rec-t">0:00</b><span class="mut">← bekor qilish uchun suring</span></div>
     </div>

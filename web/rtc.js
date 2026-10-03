@@ -126,8 +126,14 @@ window.__50call = (act, id) => {
   const ev = pendingNativeCall
   if (act === 'answer') {
     pendingNativeCall = null
-    if (ev && !CALL) incomingCall(ev) // UI hali yaratilmagan (fon rejimi) — yaratamiz
-    if (CALL && String(CALL.id) === String(id)) { nativeCallCancel(); acceptCall() }
+    if (ev && !CALL) { incomingCall(ev); acceptCall(); return } // UI hali yaratilmagan (fon rejimi) — yaratamiz
+    if (CALL && String(CALL.id) === String(id)) { nativeCallCancel(); acceptCall(); return }
+    // Bildirishnoma orqali javob, lekin JS hodisani olmagan (WS o'lgan/fon) — qo'ng'iroqni serverdan olamiz
+    nativeCallCancel()
+    api('/calls/pending').then((r) => {
+      if (r && r.call && !CALL) { incomingCall({ call_id: r.call.call_id, video: r.call.video, from: r.call.from }); acceptCall() }
+      else if (!CALL) post(`/calls/${id}/status`, { status: 'declined' }).catch(() => {})
+    }).catch(() => { toast('Qo‘ng‘iroqqa ulanolmadik — internetni tekshiring') })
   } else if (act === 'decline') {
     pendingNativeCall = null
     nativeCallCancel()
