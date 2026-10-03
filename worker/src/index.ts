@@ -350,8 +350,12 @@ async function authOtp(c: C) {
   // BERILADI (qayta kirish). Operator raqamlari (DEV_PHONES) — yagona istisno, doim kiradi.
   // Haqiqiy SMS (Eskiz) ulanganda bu qo'riqchi shart emas — kod faqat haqiqiy egasiga boradi.
   if (!smsOn && !test) {
-    const ex = await c.db.one("SELECT id, logout_at, token_exp FROM users WHERE phone=?", [phone])
-    if (ex && !ex.logout_at && +(ex.token_exp || 0) > t && !devPhones.includes(phone))
+    const ex = await c.db.one("SELECT id, logout_at, token_exp, last_seen FROM users WHERE phone=?", [phone])
+    // BAND qoidasi: sessiya yaroqli VA (logout qilmagan YOKI hisob hali TIRIK — oxirgi
+    // faollik 24 soat ichida: ping/storageBeat har daqiqada keladi). last_seen sharti
+    // masofaviy logout'ni bekor qiladi: boshqa qurilma hali ishlatayotgan bo'lsa raqam
+    // BAND qoladi (paralel yo'q). Haqiqiy chiqish last_seen=0 qiladi → raqam OCHIQ.
+    if (ex && +(ex.token_exp || 0) > t && (!ex.logout_at || +(ex.last_seen || 0) > t - 86_400_000) && !devPhones.includes(phone))
       return fail("Bu raqam band — tizimda mavjud. Kod olish uchun avval ilovadan chiqish (Logout) qiling", 409)
   }
   // SINOV REJIMI (SMS hali ulanmagan): HAR QANDAY raqam kodni ilova ICHIDA oladi —
@@ -399,9 +403,9 @@ async function authVerify(c: C) {
     await c.db.run("INSERT INTO users(id,phone,created_at,last_seen,token_exp) VALUES(?,?,?,?,?)", [id, phone, tnow, tnow, texp])
     u = await c.db.one(`SELECT ${USER_COLS} FROM users WHERE id=?`, [id])
   } else {
-    // Kirish → hisob yana FAOL bo'ldi: logout bayrog'i tozalanadi, sessiya muddati yangilanadi.
-    // Endi boshqa hech kim shu raqamga kod ola olmaydi (paralel ishlatish YO'Q).
-    await c.db.run("UPDATE users SET logout_at=NULL, token_exp=? WHERE id=?", [texp, u.id])
+    // Kirish → hisob yana FAOL bo'ldi: logout bayrog'i tozalanadi, sessiya muddati va
+    // faollik yangilanadi. Endi boshqa hech kim shu raqamga kod ola olmaydi (paralel YO'Q).
+    await c.db.run("UPDATE users SET logout_at=NULL, token_exp=?, last_seen=? WHERE id=?", [texp, tnow, u.id])
   }
   const token = await signJwt({ sub: String(u.id) }, c.env.JWT_SECRET, 180 * 86400)
   return json({ token, user: pubUser(u, u.id), is_new: !u.first_name })
@@ -409,9 +413,10 @@ async function authVerify(c: C) {
 
 async function authLogout(c: C) {
   // MUALLIF TIZIMI: chiqish — hisob "bo'shaydi" → shu raqamga yana kod beriladi.
+  // last_seen=0: "hozir faol" belgisi o'chadi — qayta kirish DARHOL ochiladi.
   // Chiqmagan faol hisob esa "BAND" qoladi — boshqa qurilmadan shu raqamga kod
   // olib bo'lmaydi (bir raqam — bir faol foydalanuvchi, paralel ishlatish yo'q).
-  await c.db.run("UPDATE users SET logout_at=? WHERE id=?", [now(), c.uid])
+  await c.db.run("UPDATE users SET logout_at=?, last_seen=0 WHERE id=?", [now(), c.uid])
   return json({ ok: true })
 }
 
@@ -2717,7 +2722,8 @@ async function storageBeat(c: C) {
     const score = Math.min(1, online / Math.max(DAY, t - n.first_beat))
     await c.db.run("UPDATE nodes SET quota=?, used=?, online_ms=?, score=?, last_beat=? WHERE user_id=?", [quota, used, online, score, t, c.uid])
   }
-  await c.db.run("UPDATE users SET last_seen=? WHERE id=?", [t, c.uid])
+  // last_seen + token_exp (sliding sessiya): faol qurilma sessiyasini hech qachon o'chirib qo'ymaydi
+  await c.db.run("UPDATE users SET last_seen=?, token_exp=? WHERE id=?", [t, t + 180 * 86400 * 1000, c.uid])
   const drops = (await c.db.q(
     "SELECT h.media_id FROM peer_have h JOIN media m ON m.id=h.media_id WHERE h.user_id=? AND m.dropped=1 LIMIT 200", [c.uid])).map((r) => r.media_id)
   if (drops.length) await c.db.run(`DELETE FROM peer_have WHERE user_id=? AND media_id IN (${ph(drops)})`, [c.uid, ...drops])
@@ -2757,7 +2763,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/health", async () => json({ ok: true, app: "50 Gram" }), true],
   ["GET", "/me", getMe],
   ["PATCH", "/me", patchMe],
-  ["POST", "/ping", async (c) => { await c.db.run("UPDATE users SET last_seen=? WHERE id=?", [now(), c.uid]); return json({ ok: true, now: now() }) }],
+  ["POST", "/ping", async (c) => { const t = now(); await c.db.run("UPDATE users SET last_seen=?, token_exp=? WHERE id=?", [t, t + 180 * 86400 * 1000, c.uid]); return json({ ok: true, now: t }) }],
   ["GET", "/users/:id", getUser],
   ["GET", "/search", search],
   ["GET", "/discover", discover],
