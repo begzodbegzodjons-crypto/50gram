@@ -335,24 +335,14 @@ async function circle(c: C) {
 async function authOtp(c: C) {
   const phone = normPhone(c.b.phone)
   const t = now()
-  const devPhones = (c.env.DEV_PHONES || "").split(",").map((x) => x.trim()).filter(Boolean)
   const smsOn = smsConfigured(c.env)
   const test = (c.env.TEST_PHONES || "").split(",").map((x) => x.trim().split(":")).find(([p]) => p === phone)
-  // SINOV REJIMI (SMS hali ulanmagan): kod ilova ICHIDA qaytariladigan raqamlar:
-  // ① DEV_PHONES (operator) — DOIM ② hisobi HALI YO'Q yangi raqamlar — ommaga o'sish uchun
-  // (foydalanuvchi: "dastur o'zidan sms kod bersin, eskiz keyin ulanadi"). MAVJUD hisoblar
-  // faqat operator raqami bilan ochiladi — boshqaning hisobiga kirish yo'li YO'Q (himoya saqlanadi).
-  // MUHIM: javob berilmaydigan raqamlarga otp qatori YOZILMAYDI — aks holda 503'dan keyingi
-  // urinish "1 daqiqa kuting" 429 oladi va foydalanuvchi QAMALIB QOLADI (shikoyat).
+  // SINOV REJIMI (SMS hali ulanmagan): HAR QANDAY raqam kodni ilova ICHIDA oladi —
+  // "avvalgiday": raqam kiritildi → kod darhol qizil yozuvda ko'rinadi, HECH QANDAY
+  // to'siq yo'q (eski hisoblar ham shu yo'l bilan erkin kiradi — muallif talabi).
+  // Eskiz ulanganda (smsOn=true) bu tarmoq o'chadi — o'sha paytdan haqiqiy SMS yuboriladi.
   let devSelf = false
-  if (!smsOn && !test && c.env.DEV_MODE === "1") {
-    if (devPhones.includes(phone)) devSelf = true
-    else {
-      const ex = await c.db.one("SELECT id FROM users WHERE phone=?", [phone])
-      if (ex) return fail("Bu raqamga kod hozircha SMS orqali yuboriladi — SMS tasdiqlash tez orada ulanadi", 503)
-      devSelf = true
-    }
-  }
+  if (!smsOn && !test && c.env.DEV_MODE === "1") devSelf = true
   // Kutish muddati: haqiqiy SMS (Eskiz) pullik/pumping-xavfli — 55s; ilova-ichki kod bepul — 20s
   const cd = smsOn ? 55000 : 20000
   const prev = await c.db.one("SELECT sent_at FROM otp WHERE phone=?", [phone])
