@@ -2306,75 +2306,61 @@ async function adminDump(c: C) {
 }
 async function adminPurge(c: C) {
   adminOK(c)
+  // Cloudflare Workers free plan: 50 subrequest limit — shuning uchun HAR CHAQIRUVDA
+  // BITTA foydalanuvchi tozalanadi (qolganlari "left" ichida qaytariladi, qayta-qayta chaqiriladi).
   const ids: number[] = Array.isArray(c.b.users) ? c.b.users.map(Number).filter(Boolean) : []
+  const id = ids[0]
+  if (!id) return json({ done: [], left: [] })
+  const rest = ids.slice(1)
   const gone: string[] = []
-  const delBy = async (tbl: string, col: string, vals: unknown[]) => {
-    if (!vals.length) return
-    await c.db.run(`DELETE FROM ${tbl} WHERE ${col} IN (${ph(vals)})`, vals)
+  const u = await c.db.one("SELECT id,phone FROM users WHERE id=?", [id])
+  if (!u) return json({ done: [`${id}:yo'q`], left: rest })
+  // Postlar (reels) + bog'liqlari
+  await c.db.run("DELETE FROM post_likes WHERE post_id IN (SELECT id FROM posts WHERE author_id=?)", [id])
+  await c.db.run("DELETE FROM post_comments WHERE post_id IN (SELECT id FROM posts WHERE author_id=?)", [id])
+  await c.db.run("DELETE FROM posts WHERE author_id=?", [id])
+  // Media (egasi bu foydalanuvchi bo'lgan barcha fayllar)
+  await c.db.run("DELETE FROM media_chunks WHERE media_id IN (SELECT id FROM media WHERE owner_id=?)", [id])
+  await c.db.run("DELETE FROM peer_have WHERE media_id IN (SELECT id FROM media WHERE owner_id=?)", [id])
+  await c.db.run("DELETE FROM pin_jobs WHERE media_id IN (SELECT id FROM media WHERE owner_id=?)", [id])
+  await c.db.run("DELETE FROM media WHERE owner_id=?", [id])
+  // Xabarlar: avval bog'liq reaksiyalar (xabarlar o'chishidan OLDIN), keyin xabarlar
+  await c.db.run("DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE sender_id=?)", [id])
+  await c.db.run("DELETE FROM poll_votes WHERE message_id IN (SELECT id FROM messages WHERE sender_id=?)", [id])
+  await c.db.run("DELETE FROM msg_comments WHERE message_id IN (SELECT id FROM messages WHERE sender_id=?)", [id])
+  await c.db.run("DELETE FROM messages WHERE sender_id=?", [id])
+  // Chatlar: a'zosi bo'lgan barcha suhbat (test user) to'liq o'chadi
+  const mem = await c.db.q("SELECT DISTINCT chat_id FROM chat_members WHERE user_id=?", [id])
+  const chatIds = mem.map((x) => x.chat_id)
+  if (chatIds.length) {
+    await c.db.run(`DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE chat_id IN (${ph(chatIds)}))`, chatIds)
+    await c.db.run(`DELETE FROM poll_votes WHERE message_id IN (SELECT id FROM messages WHERE chat_id IN (${ph(chatIds)}))`, chatIds)
+    await c.db.run(`DELETE FROM msg_comments WHERE message_id IN (SELECT id FROM messages WHERE chat_id IN (${ph(chatIds)}))`, chatIds)
+    await c.db.run(`DELETE FROM messages WHERE chat_id IN (${ph(chatIds)})`, chatIds)
+    await c.db.run(`DELETE FROM msg_comments WHERE chat_id IN (${ph(chatIds)})`, chatIds)
+    await c.db.run(`DELETE FROM chat_members WHERE chat_id IN (${ph(chatIds)})`, chatIds)
+    await c.db.run(`DELETE FROM join_requests WHERE chat_id IN (${ph(chatIds)})`, chatIds)
+    await c.db.run(`DELETE FROM chats WHERE id IN (${ph(chatIds)})`, chatIds)
   }
-  for (const id of ids) {
-    const u = await c.db.one("SELECT id,phone FROM users WHERE id=?", [id])
-    if (!u) { gone.push(`${id}:yo'q`); continue }
-    // Postlar (reels) + bog'liqlari
-    const posts = await c.db.q("SELECT id FROM posts WHERE author_id=?", [id])
-    const pids = posts.map((x) => x.id)
-    await delBy("post_likes", "post_id", pids)
-    await delBy("post_comments", "post_id", pids)
-    await delBy("posts", "id", pids)
-    // Media (egasi bu foydalanuvchi bo'lgan barcha fayllar)
-    const meds = await c.db.q("SELECT id FROM media WHERE owner_id=?", [id])
-    const mids = meds.map((x) => x.id)
-    await delBy("media_chunks", "media_id", mids)
-    await delBy("peer_have", "media_id", mids)
-    await delBy("pin_jobs", "media_id", mids)
-    await delBy("media", "id", mids)
-    // Xabarlar (guruhlarga yozganlari ham)
-    const msgs = await c.db.q("SELECT id FROM messages WHERE sender_id=?", [id])
-    const msgids = msgs.map((x) => x.id)
-    await delBy("reactions", "message_id", msgids)
-    await delBy("poll_votes", "message_id", msgids)
-    await delBy("msg_comments", "message_id", msgids)
-    await delBy("messages", "sender_id", [id])
-    // Chatlar: a'zosi bo'lgan barcha suhbat (test user) to'liq o'chadi
-    const owned = await c.db.q("SELECT id FROM chats WHERE owner_id=?", [id])
-    const mem = await c.db.q("SELECT DISTINCT chat_id FROM chat_members WHERE user_id=?", [id])
-    const chatIds = [...new Set([...owned.map((x) => x.id), ...mem.map((x) => x.chat_id)])]
-    for (const ch of chatIds) {
-      const cm = await c.db.q("SELECT id FROM messages WHERE chat_id=?", [ch])
-      const cmids = cm.map((x) => x.id)
-      await delBy("reactions", "message_id", cmids)
-      await delBy("poll_votes", "message_id", cmids)
-      await delBy("msg_comments", "message_id", cmids)
-      await delBy("messages", "chat_id", [ch])
-      await delBy("chat_members", "chat_id", [ch])
-      await delBy("join_requests", "chat_id", [ch])
-      await delBy("msg_comments", "chat_id", [ch])
-      await delBy("chats", "id", [ch])
-    }
-    // Istoryalar
-    const sts = await c.db.q("SELECT id FROM stories WHERE user_id=?", [id])
-    await delBy("story_views", "story_id", sts.map((x) => x.id))
-    await delBy("story_views", "viewer_id", [id])
-    await delBy("stories", "user_id", [id])
-    // Qo'ng'iroqlar, efirlar
-    await c.db.run("DELETE FROM calls WHERE caller_id=? OR callee_id=?", [id, id])
-    const lives = await c.db.q("SELECT id FROM lives WHERE user_id=?", [id])
-    for (const l of lives) await delBy("live_viewers", "live_id", [l.id])
-    await delBy("lives", "user_id", [id])
-    await delBy("live_viewers", "user_id", [id])
-    // Aloqa jadvallari
-    await c.db.run("DELETE FROM contacts WHERE owner_id=? OR phone=?", [id, u.phone])
-    await c.db.run("DELETE FROM blocks WHERE user_id=? OR blocked_id=?", [id, id])
-    await delBy("push_subs", "user_id", [id])
-    await delBy("wallets", "user_id", [id])
-    await delBy("nodes", "user_id", [id])
-    await delBy("peer_have", "user_id", [id])
-    await delBy("pin_jobs", "user_id", [id])
-    await c.db.run("DELETE FROM otp WHERE phone=?", [u.phone])
-    await delBy("users", "id", [id])
-    gone.push(`${id}:ok(${pids.length}post,${mids.length}media,${chatIds.length}chat)`)
-  }
-  return json({ done: gone })
+  // Istoryalar
+  await c.db.run("DELETE FROM story_views WHERE viewer_id=? OR story_id IN (SELECT id FROM stories WHERE user_id=?)", [id, id])
+  await c.db.run("DELETE FROM stories WHERE user_id=?", [id])
+  // Qo'ng'iroqlar, efirlar
+  await c.db.run("DELETE FROM calls WHERE caller_id=? OR callee_id=?", [id, id])
+  await c.db.run("DELETE FROM live_viewers WHERE user_id=? OR live_id IN (SELECT id FROM lives WHERE user_id=?)", [id, id])
+  await c.db.run("DELETE FROM lives WHERE user_id=?", [id])
+  // Aloqa jadvallari
+  await c.db.run("DELETE FROM contacts WHERE owner_id=? OR phone=?", [id, u.phone])
+  await c.db.run("DELETE FROM blocks WHERE user_id=? OR blocked_id=?", [id, id])
+  await c.db.run("DELETE FROM push_subs WHERE user_id=?", [id])
+  await c.db.run("DELETE FROM wallets WHERE user_id=?", [id])
+  await c.db.run("DELETE FROM nodes WHERE user_id=?", [id])
+  await c.db.run("DELETE FROM peer_have WHERE user_id=?", [id])
+  await c.db.run("DELETE FROM pin_jobs WHERE user_id=?", [id])
+  await c.db.run("DELETE FROM otp WHERE phone=?", [u.phone])
+  await c.db.run("DELETE FROM users WHERE id=?", [id])
+  gone.push(`${id}:ok`)
+  return json({ done: gone, left: rest })
 }
 // ================== /VAQTINCHALIK admin vositasi ==================
 const routes: Array<[string, string, H, boolean?]> = [
