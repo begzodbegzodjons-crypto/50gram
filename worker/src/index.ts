@@ -195,6 +195,11 @@ async function ensureSchema(db: Db) {
     "CREATE INDEX IF NOT EXISTS idx_pc_parent ON post_comments (parent_id)",
     "CREATE TABLE IF NOT EXISTS comment_reacts (comment_id BIGINT NOT NULL, user_id BIGINT NOT NULL, emoji VARCHAR(8) NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY(comment_id,user_id,emoji))",
     "CREATE INDEX IF NOT EXISTS idx_creacts_c ON comment_reacts (comment_id)",
+    // Task 56: paralel-kirish himoyasi — logout bayrog'i va sessiya muddati (ms)
+    "ALTER TABLE users ADD COLUMN logout_at BIGINT NULL",
+    "ALTER TABLE users ADD COLUMN token_exp BIGINT NULL",
+    // Eski foydalanuvchilar: sessiya muddati = ro'yxatdan o'tgan vaqt + 180 kun (taxmin, JWT muddati bilan mos)
+    "UPDATE users SET token_exp = created_at + 15552000000 WHERE token_exp IS NULL",
   ]
   for (const s of stmts) { try { await db.run(s) } catch {} }
   try {
@@ -333,13 +338,24 @@ async function circle(c: C) {
 
 // ------------------------- Auth -------------------------
 async function authOtp(c: C) {
+  await ensureSchema(c.db)
   const phone = normPhone(c.b.phone)
   const t = now()
+  const devPhones = (c.env.DEV_PHONES || "").split(",").map((x) => x.trim()).filter(Boolean)
   const smsOn = smsConfigured(c.env)
   const test = (c.env.TEST_PHONES || "").split(",").map((x) => x.trim().split(":")).find(([p]) => p === phone)
+  // PARALEL KIRISH HIMOYASI (muallif tizimi): hisob tizimda FAOL bo'lsa — logout qilmagan
+  // VA sessiyasi hali yaroqli (token_exp o'tmagan) — shu raqamga yangi kod BERILMAYDI:
+  // "raqam band — tizimda mavjud". Logout qilingan yoki sessiyasi eskirgan hisobga KOD
+  // BERILADI (qayta kirish). Operator raqamlari (DEV_PHONES) — yagona istisno, doim kiradi.
+  // Haqiqiy SMS (Eskiz) ulanganda bu qo'riqchi shart emas — kod faqat haqiqiy egasiga boradi.
+  if (!smsOn && !test) {
+    const ex = await c.db.one("SELECT id, logout_at, token_exp FROM users WHERE phone=?", [phone])
+    if (ex && !ex.logout_at && +(ex.token_exp || 0) > t && !devPhones.includes(phone))
+      return fail("Bu raqam band — tizimda mavjud. Kod olish uchun avval ilovadan chiqish (Logout) qiling", 409)
+  }
   // SINOV REJIMI (SMS hali ulanmagan): HAR QANDAY raqam kodni ilova ICHIDA oladi —
-  // "avvalgiday": raqam kiritildi → kod darhol qizil yozuvda ko'rinadi, HECH QANDAY
-  // to'siq yo'q (eski hisoblar ham shu yo'l bilan erkin kiradi — muallif talabi).
+  // "avvalgiday": raqam kiritildi → kod darhol qizil yozuvda ko'rinadi.
   // Eskiz ulanganda (smsOn=true) bu tarmoq o'chadi — o'sha paytdan haqiqiy SMS yuboriladi.
   let devSelf = false
   if (!smsOn && !test && c.env.DEV_MODE === "1") devSelf = true
@@ -375,14 +391,28 @@ async function authVerify(c: C) {
     fail("Kod noto‘g‘ri")
   }
   await c.db.run("DELETE FROM otp WHERE phone=?", [phone])
+  await ensureSchema(c.db)
+  const tnow = now(), texp = tnow + 180 * 86400 * 1000
   let u = await c.db.one(`SELECT ${USER_COLS} FROM users WHERE phone=?`, [phone])
   if (!u) {
     const id = newId()
-    await c.db.run("INSERT INTO users(id,phone,created_at,last_seen) VALUES(?,?,?,?)", [id, phone, now(), now()])
+    await c.db.run("INSERT INTO users(id,phone,created_at,last_seen,token_exp) VALUES(?,?,?,?,?)", [id, phone, tnow, tnow, texp])
     u = await c.db.one(`SELECT ${USER_COLS} FROM users WHERE id=?`, [id])
+  } else {
+    // Kirish → hisob yana FAOL bo'ldi: logout bayrog'i tozalanadi, sessiya muddati yangilanadi.
+    // Endi boshqa hech kim shu raqamga kod ola olmaydi (paralel ishlatish YO'Q).
+    await c.db.run("UPDATE users SET logout_at=NULL, token_exp=? WHERE id=?", [texp, u.id])
   }
   const token = await signJwt({ sub: String(u.id) }, c.env.JWT_SECRET, 180 * 86400)
   return json({ token, user: pubUser(u, u.id), is_new: !u.first_name })
+}
+
+async function authLogout(c: C) {
+  // MUALLIF TIZIMI: chiqish — hisob "bo'shaydi" → shu raqamga yana kod beriladi.
+  // Chiqmagan faol hisob esa "BAND" qoladi — boshqa qurilmadan shu raqamga kod
+  // olib bo'lmaydi (bir raqam — bir faol foydalanuvchi, paralel ishlatish yo'q).
+  await c.db.run("UPDATE users SET logout_at=? WHERE id=?", [now(), c.uid])
+  return json({ ok: true })
 }
 
 // ------------------------- Profil -------------------------
@@ -2721,6 +2751,7 @@ type H = (c: C) => Promise<Response>
 const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/auth/otp", authOtp, true],
   ["POST", "/auth/verify", authVerify, true],
+  ["POST", "/auth/logout", authLogout],
   ["GET", "/avatar/u/:id", (c) => avatar(c, "users"), true],
   ["GET", "/avatar/c/:id", (c) => avatar(c, "chats"), true],
   ["GET", "/health", async () => json({ ok: true, app: "50 Gram" }), true],

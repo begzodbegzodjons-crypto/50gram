@@ -658,6 +658,8 @@ $('b-prof').onclick = async () => {
 }
 function setMe(u) { S.me = { ...(S.me || {}), ...u }; localStorage.setItem('g50_me', JSON.stringify(S.me)) }
 function logout(silent) {
+  // Serverga ham xabar: hisob "chiqdi" → shu raqam endi kod olish uchun OCHIQ (muallif tizimi).
+  try { if (S.token) fetch(API + '/auth/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + S.token }, keepalive: true }) } catch {}
   localStorage.removeItem('g50_token'); localStorage.removeItem('g50_me')
   S.token = ''; S.me = null
   try { S.ws && S.ws.close() } catch {}
