@@ -178,7 +178,7 @@ body.dark .chead{background:rgba(16,23,42,.86);box-shadow:0 1px 0 rgba(255,255,2
 .mrow .gav{width:32px;flex-shrink:0}
 
 /* — Xabar pufagi: kirituvchi uchun Telegram-uslubidagi YORQIN gradient + 3D qirra — */
-.m{max-width:min(78%,520px);padding:8px 12px 7px;border-radius:20px;line-height:1.38;position:relative;word-wrap:break-word;overflow-wrap:anywhere;background:var(--u);border:1px solid rgba(255,255,255,.65);box-shadow:0 1px 2px rgba(18,28,68,.08),0 6px 18px rgba(18,28,68,.07),inset 0 1px 0 rgba(255,255,255,.85);animation:kir .18s ease;font-size:var(--msgfs,14.5px)}
+.m{max-width:min(78%,520px);padding:8px 12px 7px;border-radius:var(--mrad,20px);line-height:1.38;position:relative;word-wrap:break-word;overflow-wrap:anywhere;background:var(--u);border:1px solid rgba(255,255,255,.65);box-shadow:0 1px 2px rgba(18,28,68,.08),0 6px 18px rgba(18,28,68,.07),inset 0 1px 0 rgba(255,255,255,.85);animation:kir .18s ease;font-size:var(--msgfs,14.5px)}
 body.dark .m{border-color:rgba(255,255,255,.07);box-shadow:0 2px 10px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.04)}
 .mrow.me .m{background:linear-gradient(135deg,#3E86FF 0%,#7C5CFF 100%);color:#fff;border-color:transparent;box-shadow:inset 0 1.5px 0 rgba(255,255,255,.3),inset 0 -2px 0 rgba(0,0,0,.14),0 6px 18px rgba(88,110,255,.42)}
 .mrow:not(.me) .m.tail{border-bottom-left-radius:6px}
@@ -283,6 +283,25 @@ body.dark .m{border-color:rgba(255,255,255,.07);box-shadow:0 2px 10px rgba(0,0,0
 .joinbar,.robar{position:relative;z-index:3;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:var(--sirt);display:flex;gap:8px;justify-content:center}
 .joinbar .btn,.robar .btn{flex:1;max-width:420px}
 .replybar{position:relative;z-index:3;display:flex;align-items:center;gap:8px;background:var(--sirt);padding:8px 14px;border-top:1px solid var(--chiziq)}
+.selbar{position:relative;z-index:3;display:flex;align-items:center;gap:10px;background:var(--sirt);padding:8px 14px;border-top:1px solid var(--chiziq);animation:slidein .2s ease}
+.selbar b{flex:1;font-size:14.5px;font-weight:750}
+.selbar .ic.red{color:var(--qizil)}
+/* Tanlash rejimi (belgilab o'chirish) */
+.selmode .mrow{cursor:pointer;padding:2px 4px;border-radius:12px}
+.selmode .mrow.sel{background:var(--asos-och)}
+.sck{display:none;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:2px solid var(--xira);font-size:12px;color:transparent;flex-shrink:0;margin-bottom:10px;transition:.12s}
+.selmode .sck{display:flex}
+.mrow.sel .sck{background:var(--grad);border-color:transparent;color:#fff}
+/* Kontekst menyu — pastdan chiqadigan oyna (har doim to'liq ko'rinadi, ichkariga suriladi) */
+.sheet .shrx{display:flex;justify-content:space-between;padding:4px 8px 12px;border-bottom:1px solid var(--chiziq);margin-bottom:4px;font-size:26px}
+.sheet .shrx span{cursor:pointer;padding:2px 6px;border-radius:10px;transition:.1s}
+.sheet .shrx span:hover{transform:scale(1.25)}
+.ctxl div.it{padding:13px 14px;cursor:pointer;display:flex;gap:14px;align-items:center;border-radius:12px;font-size:15.5px;font-weight:600;transition:background .12s}
+.ctxl div.it:hover,.ctxl div.it:active{background:var(--sirt2)}
+.ctxl div.it span{font-size:19px;width:26px;text-align:center}
+.ctxl div.red{color:var(--qizil)}
+/* Animatsiyalarni o'chirish (sozlamadan) */
+body.noanim *,body.noanim *::before,body.noanim *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 .replybar .rb-t{flex:1;border-left:3px solid var(--asos);padding-left:9px;min-width:0}
 .replybar b{color:var(--asos);font-size:13px;display:block}
 .replybar span{font-size:13.5px;color:var(--xira);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
@@ -542,10 +561,13 @@ body.dark .sheet .grab{background:linear-gradient(90deg,#31415F,#42527A);box-sha
 
 /* ---------- Reels: vertikal video lenta ---------- */
 #feedlist.feed:has(.reels),#reelslist.feed:has(.reels){padding:0}
-#t-feed.reelmode,#t-reels:has(.reels){scroll-snap-type:y mandatory;overscroll-behavior:contain}
+/* Reels ro'yxati — TO'LIQ EKRAN vertikal sliyd (YouTube/Instagram Reels uslubi): har video ekranga to'liq tushadi */
+#t-reels:has(.reels){scroll-snap-type:y mandatory;overscroll-behavior:contain;padding-bottom:0}
+#t-reels:has(.reels) .top{display:none}
+#t-reels:has(.reels) #reelslist{padding:0;gap:0}
 .reels{display:flex;flex-direction:column}
-.reel{position:relative;scroll-snap-align:start;scroll-snap-stop:always;height:78vh;height:76dvh;min-height:380px;background:#000;border-radius:0;overflow:hidden}
-.reel video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.reel{position:relative;scroll-snap-align:start;scroll-snap-stop:always;height:100vh;height:100dvh;min-height:0;background:#000;border-radius:0;overflow:hidden}
+.reel video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
 .reel .rshade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.35),transparent 22%,transparent 55%,rgba(0,0,0,.72));pointer-events:none}
 .reel .rbot{position:absolute;left:12px;right:76px;bottom:16px;color:#fff;display:flex;flex-direction:column;gap:6px;z-index:2}
 .reel .rw{display:flex;align-items:center;gap:8px;font-size:15px;text-shadow:0 1px 6px rgba(0,0,0,.5)}

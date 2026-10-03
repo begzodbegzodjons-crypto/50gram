@@ -87,6 +87,7 @@ $('d-pinbar').addEventListener('click', (e) => {
 })
 function closeChat() {
   S.cur = null
+  if (selMode) exitSel()
   $('dialog').classList.remove('open')
   $('picker').classList.remove('on')
   renderChats()
@@ -139,7 +140,7 @@ async function joinChat(id, hash) {
 }
 $('d-info').onclick = () => {
   const c = S.chats.get(S.cur); if (!c) return
-  if (c.type === 'direct') { if (!c.saved && c.peer) openUser(c.peer.id) } else openChatInfo(c.id)
+  if (c.type === 'direct') { if (!c.saved && c.peer) openUser(c.peer.id, { inChat: true }) } else openChatInfo(c.id)
 }
 $('d-av').onclick = (e) => { if (!e.target.closest('[data-story]')) $('d-info').onclick() }
 $('d-more').onclick = () => $('d-info').onclick()
@@ -196,9 +197,15 @@ function merge(id, msgs, users) {
     if (!m || m.chat_id !== id) continue
     if (m.client_id) list = list.filter((x) => !(x.pending && x.client_id === m.client_id))
     const i = list.findIndex((x) => x.id === m.id)
+    if (m.deleted) {
+      // O'chirilgan xabar ro'yxatdan BUTUNLAY yopiladi (tosh qoldig'i emas) — media ham bo'shatiladi
+      const old = list[i]
+      if (old && old.meta?.media_id) Store.remove([String(old.meta.media_id)])
+      if (i >= 0) list.splice(i, 1)
+      continue
+    }
     if (i >= 0) {
       const old = list[i]
-      if (m.deleted && old.meta?.media_id) Store.remove([String(old.meta.media_id)])
       if (old.p2p && !m.p2p) list[i] = m
       else if (!m.p2p) list[i] = m
     } else list.push(m)
@@ -226,7 +233,7 @@ function renderMsgs(force) {
   const list = S.msgs.get(S.cur) || []
   const atBottom = force || box.scrollHeight - box.scrollTop - box.clientHeight < 140
   const keys = [], rows = []
-  if (c.joined !== false) { keys.push('older'); rows.push('<div class="sys" data-older style="cursor:pointer">⬆️ Avvalgi xabarlarni yuklash</div>') }
+  if (c.joined !== false && !selMode) { keys.push('older'); rows.push('<div class="sys" data-older style="cursor:pointer">⬆️ Avvalgi xabarlarni yuklash</div>') }
   let lastDay = '', prev = null
   for (let i = 0; i < list.length; i++) {
     const m = list[i]
@@ -300,17 +307,29 @@ function msgHTML(m, c, prev, next) {
   const meta = `<span class="meta">${m.p2p ? '<span title="Qurilmalar tarmog‘idan tiklangan">🕸</span>' : ''}${m.edited ? 'tahrirlandi ' : ''}${fmtTime(m.created_at)}${tick}</span>`
   const rx = m.reactions && Object.keys(m.reactions).length
     ? `<div class="rx">${Object.entries(m.reactions).map(([e, us]) => `<span data-rx="${esc(e)}" class="${us.includes(S.me.id) ? 'mine' : ''}">${esc(e)} ${us.length}</span>`).join('')}</div>` : ''
+  // Tanlash rejimi: har qatorda belgi ko'rinadi
+  const sck = selMode ? `<span class="sck ${selSet.has(m.id) ? 'on' : ''}">✓</span>` : ''
   // Task 29: kanal postlarining izohlari — post ostida chiroyli tugma (izohlar soni bilan)
   const cmt = c.type === 'channel' && m.id > 0 && !m.deleted
     ? `<div class="cmtb" data-cmt="${m.id}"><i>💬</i><b>${m.comment_count ? m.comment_count + ' ta izoh' : 'Izoh qoldirish'}</b></div>` : ''
   const sig = c.type === 'channel' && c.settings?.signatures && u ? `<small class="mut" style="display:block">— ${esc(uname(u))}</small>` : ''
-  return `<div class="mrow ${me ? 'me' : ''}" data-mid="${m.id}" ${m.client_id ? `data-cid="${esc(m.client_id)}"` : ''}>${gav}<div class="m ${bare || emo ? 'bare' : ''} ${emo ? 'emo' : ''} ${sameNext ? '' : 'tail'}">${fwd}${sender}${rp}${body}${sig}${meta}${rx}${cmt}</div></div>`
+  return `<div class="mrow ${me ? 'me' : ''} ${selMode && selSet.has(m.id) ? 'sel' : ''}" data-mid="${m.id}" ${m.client_id ? `data-cid="${esc(m.client_id)}"` : ''}>${gav}<div class="m ${bare || emo ? 'bare' : ''} ${emo ? 'emo' : ''} ${sameNext ? '' : 'tail'}">${fwd}${sender}${rp}${body}${sig}${meta}${rx}${cmt}</div>${sck}</div>`
 }
 const findMsg = (id) => (S.msgs.get(S.cur) || []).find((m) => String(m.id) === String(id))
 
 // ---------------- Xabarlardagi bosishlar ----------------
 let curAudio = null
 $('msgs').addEventListener('click', async (e) => {
+  // Tanlash rejimi: bosilgan xabar belgilanadi
+  if (selMode) {
+    const row = e.target.closest('.mrow')
+    if (row && row.dataset.mid && +row.dataset.mid > 0) {
+      const id = +row.dataset.mid
+      selSet.has(id) ? selSet.delete(id) : selSet.add(id)
+      renderMsgs(); updateSelbar()
+    }
+    return
+  }
   const t = e.target
   if (t.closest('[data-older]')) return loadOlder()
   const uEl = t.closest('[data-u]'); if (uEl) return openUser(+uEl.dataset.u)
@@ -387,11 +406,60 @@ async function loadOlder() {
   } catch (e) { toast('⚠️ ' + e.message); if (el) el.textContent = '⬆️ Avvalgi xabarlarni yuklash' }
 }
 
-// ---------------- Kontekst menyu ----------------
+// ---------------- Kontekst menyu (Telegram-uslubidagi pastki oyna) ----------------
+// ESKIRGAN MUAMMO TUGATILDI: avval suzuvchi oyna ekrandan chiqib ketardi (ro'yxat yarimi ko'rinar-di).
+// Endi pastdan chiqadigan sheet — ekranga TO'LIQ sig'adi, ichkariga suriladi (max-height + scroll).
+let selMode = false, selSet = new Set()
+function enterSel(m) {
+  selMode = true; selSet = new Set()
+  if (m && m.id > 0) selSet.add(m.id)
+  document.body.classList.add('selmode')
+  $('selbar').classList.remove('hide')
+  renderMsgs(); updateSelbar()
+}
+function exitSel() {
+  selMode = false; selSet.clear()
+  document.body.classList.remove('selmode')
+  $('selbar').classList.add('hide')
+  renderMsgs()
+}
+function updateSelbar() {
+  const t = $('sel-n'); if (t) t.textContent = selSet.size + ' ta tanlandi'
+  const b = $('sel-del'); if (b) b.disabled = !selSet.size
+}
+async function deleteSelected() {
+  const ids = [...selSet].filter((x) => x > 0)
+  if (!ids.length) return
+  if (!(await confirmBox(ids.length + ' ta xabar o‘chirilsinmi?', 'O‘chirish'))) return
+  toast('⏳ O‘chirilmoqda…')
+  let ok = 0
+  for (const id of ids) {
+    try { const r = await del('/messages/' + id); merge(S.cur, [r]); ok++ } catch (e) {}
+  }
+  saveChatLocal(S.cur); renderMsgs(); scheduleChats()
+  toast(ok ? '🗑 ' + ok + ' ta xabar o‘chirildi' : '⚠️ O‘chirib bo‘lmadi')
+  exitSel()
+}
+async function clearChatConfirm(c) {
+  if (!c) return
+  const direct = c.type === 'direct'
+  if (!(await confirmBox(direct ? 'Butun yozishma o‘chirilsinmi? Suhbatdoshingizda ham o‘chadi.' : 'Barcha xabarlar o‘chirilsinmi?', 'Tozalash'))) return
+  try {
+    await del('/chats/' + c.id + '/messages')
+    S.msgs.set(c.id, []); S.since.set(c.id, 0)
+    c.pinned_id = 0; c.last_message = null
+    IDB.del('chats', S.me.id + ':' + c.id)
+    if (S.cur === c.id) { renderMsgs(); renderPinned(); renderHeader() }
+    scheduleChats()
+    toast('🧹 Suhbat tozalandi')
+  } catch (e) { toast('⚠️ ' + e.message) }
+}
 let pressT = 0
 function ctxMenu(m, x, y) {
   const c = S.chats.get(S.cur)
-  if (!m || m.id <= 0 || m.p2p || !c) return
+  if (!m || !c) return
+  if (selMode) { if (m.id > 0) { selSet.has(m.id) ? selSet.delete(m.id) : selSet.add(m.id); renderMsgs(); updateSelbar() } return }
+  if (m.id <= 0 || m.p2p) return
   vibrate(10)
   const mine = m.sender_id === S.me.id
   const adm = c.role === 'owner' || c.role === 'admin'
@@ -403,27 +471,24 @@ function ctxMenu(m, x, y) {
   if (!m.deleted && mine && m.kind === 'text') items.push(['edit', '✏️', 'Tahrirlash'])
   if (!m.deleted && !protect && m.kind !== 'call' && m.kind !== 'poll') items.push(['fwd', '↪️', 'Uzatish'])
   if (!m.deleted && m.meta?.media_id && !protect && ['photo', 'video', 'file', 'voice', 'round'].includes(m.kind)) items.push(['save', '⬇️', 'Saqlab olish'])
-  if (!m.deleted && (mine || (c.type !== 'direct' && adm))) items.push(['del', '🗑', 'O‘chirish', 'red'])
   if (!m.deleted && m.id > 0 && (c.type === 'direct' || adm)) items.push(['pin', '📌', S.chats.get(S.cur)?.pinned_id === m.id ? 'Qadashdan olish' : 'Yuqoriga qadash'])
-  const bg = document.createElement('div'); bg.className = 'ctxbg'
-  const box = document.createElement('div'); box.className = 'ctx'
-  box.innerHTML = (canReact ? `<div class="rxr">${REACTS.map((r) => `<span data-r="${r}">${r}</span>`).join('')}</div>` : '') +
-    items.map(([k, i, t, cl]) => `<div class="it ${cl || ''}" data-k="${k}"><span>${i}</span>${t}</div>`).join('')
-  document.body.append(bg, box)
-  const W = innerWidth, H = innerHeight, r = box.getBoundingClientRect()
-  box.style.left = Math.max(8, Math.min(x, W - r.width - 8)) + 'px'
-  box.style.top = Math.max(8, Math.min(y, H - r.height - 8)) + 'px'
-  const close = () => { bg.remove(); box.remove() }
-  bg.onclick = close
-  box.onclick = async (e) => {
-    const rr = e.target.closest('[data-r]'); if (rr) { close(); return reactTo(m, rr.dataset.r) }
+  if (!m.deleted && m.id > 0) items.push(['sel', '☑️', 'Tanlash'])
+  // O'chirish: o'z xabari yoki bevosita suhbatda qarshi tomonniki ham (Telegram uslubi); guruhda admin
+  if (!m.deleted && (mine || c.type === 'direct' || adm)) items.push(['del', '🗑', 'O‘chirish', 'red'])
+  items.push(['clear', '🧹', 'Suhbatni tozalash', 'red'])
+  const sh = sheet((canReact ? `<div class="rxr shrx">${REACTS.map((r) => `<span data-r="${r}">${r}</span>`).join('')}</div>` : '') +
+    `<div class="ctxl">${items.map(([k, i, t, cl]) => `<div class="it ${cl || ''}" data-k="${k}"><span>${i}</span>${t}</div>`).join('')}</div>`)
+  sh.onclick = async (e) => {
+    const rr = e.target.closest('[data-r]'); if (rr) { closeSheet(sh); return reactTo(m, rr.dataset.r) }
     const it = e.target.closest('[data-k]'); if (!it) return
-    close()
+    closeSheet(sh)
     const k = it.dataset.k
     if (k === 'reply') { replyTo = m; editId = 0; setReply(); $('inp').focus() }
     if (k === 'copy') copy(m.body)
     if (k === 'edit') { editId = m.id; replyTo = null; $('inp').value = m.body; setReply(); autoGrow(); $('inp').focus() }
     if (k === 'fwd') forwardMsg(m)
+    if (k === 'sel') enterSel(m)
+    if (k === 'clear') clearChatConfirm(c)
     if (k === 'pin') { try { const r2 = await post(`/messages/${m.id}/pin`, { on: S.chats.get(S.cur)?.pinned_id !== m.id }); S.chats.get(S.cur).pinned_id = r2.pinned_id; renderPinned(); toast(r2.pinned_id ? '📌 Xabar qadaldi' : 'Qadash olindi') } catch (er) { toast('⚠️ ' + er.message) } }
     if (k === 'save') { try { const u = await mediaUrl(m.meta.media_id); const a = document.createElement('a'); a.href = u; a.download = m.meta.name || ('50gram-' + m.id); document.body.appendChild(a); a.click(); a.remove() } catch (er) { toast('⚠️ ' + er.message) } }
     if (k === 'del') {
@@ -434,6 +499,7 @@ function ctxMenu(m, x, y) {
 }
 $('msgs').addEventListener('contextmenu', (e) => { const row = e.target.closest('.mrow'); if (!row) return; e.preventDefault(); ctxMenu(findMsg(row.dataset.mid), e.clientX, e.clientY) })
 $('msgs').addEventListener('touchstart', (e) => {
+  if (selMode) return
   const row = e.target.closest('.mrow'); if (!row) return
   const t = e.touches[0]
   pressT = setTimeout(() => { pressT = -1; ctxMenu(findMsg(row.dataset.mid), t.clientX, t.clientY) }, 480)
@@ -441,7 +507,10 @@ $('msgs').addEventListener('touchstart', (e) => {
 $('msgs').addEventListener('touchmove', () => { if (pressT > 0) clearTimeout(pressT) }, { passive: true })
 $('msgs').addEventListener('touchend', (e) => { if (pressT === -1) e.preventDefault(); else clearTimeout(pressT); pressT = 0 })
 // Ikki marta bosish — tezkor 👍
-$('msgs').addEventListener('dblclick', (e) => { const row = e.target.closest('.mrow'); const m = row && findMsg(row.dataset.mid); if (m && m.id > 0 && !m.deleted) reactTo(m, '❤️') })
+$('msgs').addEventListener('dblclick', (e) => { if (selMode) return; const row = e.target.closest('.mrow'); const m = row && findMsg(row.dataset.mid); if (m && m.id > 0 && !m.deleted) reactTo(m, '❤️') })
+// Tanlash rejimi tugmalari
+$('sel-x').onclick = () => exitSel()
+$('sel-del').onclick = () => deleteSelected()
 async function reactTo(m, emoji) {
   if (!m || m.id <= 0) return
   try { merge(S.cur, [await post(`/messages/${m.id}/react`, { emoji })]); renderMsgs(); saveChatLocal(S.cur) } catch (e) { toast('⚠️ ' + e.message) }
@@ -866,7 +935,7 @@ async function openDirectWith(uid) {
     openChat(c.id)
   } catch (e) { toast('⚠️ ' + e.message) }
 }
-async function openUser(uid) {
+async function openUser(uid, opt = {}) {
   if (!uid) return
   if (uid === S.me?.id) return tabGo('t-me')
   let u
@@ -888,6 +957,7 @@ async function openUser(uid) {
     <div class="rows">
       ${isC ? '' : '<div data-a="add"><span class="ri">➕</span><div class="rt">Kontaktlarga qo‘shish</div></div>'}
       ${u.username ? '<div data-a="share"><span class="ri">🔗</span><div class="rt">Profilni ulashish</div></div>' : ''}
+      ${opt.inChat ? '<div data-a="clear"><span class="ri">🧹</span><div class="rt red">Suhbatni tozalash</div></div>' : ''}
       <div data-a="block"><span class="ri">🚫</span><div class="rt red">${u.i_blocked ? 'Blokdan chiqarish' : 'Bloklash'}</div></div>
     </div>`)
   sh.onclick = async (e) => {
@@ -900,6 +970,11 @@ async function openUser(uid) {
     if (a === 'un') copy('@' + u.username)
     if (a === 'share') share('50 Gram: @' + u.username, location.origin + location.pathname + '#@' + u.username)
     if (a === 'add') { closeSheet(sh); contactForm({ phone: u.phone || '', first_name: u.first_name, last_name: u.last_name }) }
+    if (a === 'clear') {
+      closeSheet(sh)
+      const cc = [...S.chats.values()].find((x) => x.type === 'direct' && !x.saved && x.peer?.id === u.id)
+      clearChatConfirm(cc)
+    }
     if (a === 'block') {
       if (!u.i_blocked && !(await confirmBox(uname(u) + ' bloklansinmi? U sizga yoza olmaydi va qo‘ng‘iroq qila olmaydi.', 'Bloklash'))) return
       try { u.i_blocked ? await del('/blocks/' + u.id) : await post('/blocks/' + u.id); toast(u.i_blocked ? '✅ Blokdan chiqarildi' : '🚫 Bloklandi'); closeSheet(sh) } catch (er) { toast('⚠️ ' + er.message) }
@@ -933,7 +1008,7 @@ on('message', async (ev) => {
       if (S.cur === id && !document.hidden) markRead(id)
       else {
         c.unread = (c.unread || 0) + 1
-        if (!c.muted) { beep(); notifyLocal(chatName(c), msgPreview(m, c), id) }
+        if (!c.muted && !quietNow()) { beep(); notifyLocal(chatName(c), msgPreview(m, c), id) }
       }
     }
   }
@@ -967,6 +1042,17 @@ on('pinned', (ev) => {
   if (c) { c.pinned_id = ev.message ? ev.message.id : 0; if (ev.message) merge(ev.chat_id, [ev.message]) }
   if (S.cur === ev.chat_id) renderPinned()
   if (ev.message && S.cur !== ev.chat_id) toast('📌 Yangi e’lon qadaldi')
+})
+on('chat_cleared', (ev) => {
+  const id = ev.chat_id
+  S.msgs.set(id, [])
+  S.since.set(id, ev.now || 0)
+  const c = S.chats.get(id)
+  if (c) { c.pinned_id = 0; c.last_message = null }
+  IDB.del('chats', S.me.id + ':' + id)
+  if (S.cur === id) { renderMsgs(); renderPinned(); renderHeader() }
+  scheduleChats()
+  toast('🧹 Suhbatdosh suhbatni tozaladi')
 })
 on('chat_deleted', async (ev) => {
   const id = ev.chat_id

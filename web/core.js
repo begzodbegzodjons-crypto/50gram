@@ -12,8 +12,10 @@ const S = {
   chats: new Map(), contacts: [], stories: [], lives: [], users: new Map(),
   cur: null, msgs: new Map(), since: new Map(), typing: new Map(),
   ws: null, wsOk: false, serverNow: 0, handlers: {}, tab: 't-chats', sha: new Map(), mk: new Map(),
-  prefs: { sounds: 1, vibrate: 1, preview: 1, autoload: 1, push: 1, ...JSON.parse(localStorage.getItem('g50_prefs') || '{}') },
+  prefs: { sounds: 1, vibrate: 1, preview: 1, autoload: 1, push: 1, shauto: 1, shadv: 1, shdbl: 1, shq: 0, nightmute: 0, noanim: 0, ...JSON.parse(localStorage.getItem('g50_prefs') || '{}') },
 }
+// Tungi ovozsizlik (23:00–07:00): bildirishnoma ovozi/tebranishi o'chadi — o'qilmagan belgisi qoladi
+const quietNow = () => { if (!S.prefs.nightmute) return false; const h = new Date().getHours(); return h >= 23 || h < 7 }
 // Sozlamalar: lokal + serverga sinxron (barcha qurilmalarda bir xil)
 function savePrefs(patch, sync = true) {
   S.prefs = { ...S.prefs, ...patch }
@@ -795,6 +797,8 @@ async function startApp() {
   setInterval(() => { if (!document.hidden) { loadStories().catch(() => {}); loadLives() } }, 60000)
   setInterval(() => { for (const [k, t] of S.typing) if (t.until < Date.now()) { S.typing.delete(k); scheduleChats(); if (S.cur === k) renderHeader() } }, 1500)
   handleHash()
+  // Trend videolari fonda tayyorlanadi — Reels bo'limi ochilganda DARHOL qiziq videolar chiqadi
+  setTimeout(() => { try { window.warmTrend && window.warmTrend() } catch {} }, 1800)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {})
     sendPrefsToSW()

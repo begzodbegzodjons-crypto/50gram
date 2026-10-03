@@ -471,7 +471,7 @@ function renderReels() {
     reelsObserver = new IntersectionObserver((es) => {
       for (const en of es) {
         const v = en.target
-        if (en.isIntersecting && en.intersectionRatio > 0.6) { v.play().catch(() => {}); v.muted = false }
+        if (en.isIntersecting && en.intersectionRatio > 0.6) { if (S.prefs.shauto) v.play().catch(() => {}); v.muted = false }
         else v.pause()
       }
     }, { root: qs('#t-reels'), threshold: [0, 0.6, 1] })
@@ -766,7 +766,7 @@ function shBindVideo(v) {
   v.addEventListener('error', () => { const l = qs('.sh-load', slide); if (l) l.style.display = 'none'; slide.classList.add('sh-fail') }, { once: true })
   v.addEventListener('play', () => slide.classList.remove('paused'))
   v.addEventListener('pause', () => slide.classList.add('paused'))
-  v.addEventListener('canplay', () => { if (slide.dataset.on === '1') v.play().catch(() => {}) })
+  v.addEventListener('canplay', () => { if (slide.dataset.on === '1' && S.prefs.shauto) v.play().catch(() => {}) })
   // Reddit mp4: audio treksi alohida faylda — sinxron oqim
   const aurl = v.dataset.shaudio
   if (aurl) {
@@ -791,7 +791,7 @@ function shTap(slide, v) {
   if (t - shLastTap < 300) {
     clearTimeout(shTapTimer); shLastTap = 0
     const it = shList[+slide.dataset.shi]
-    if (it && it.t === 'post') shLike(it.p, slide, true) // ikki marta bosish = like
+    if (it && it.t === 'post' && S.prefs.shdbl) shLike(it.p, slide, true) // ikki marta bosish = like (sozlamadan o'chiriladi)
     return
   }
   shLastTap = t
@@ -799,6 +799,27 @@ function shTap(slide, v) {
     if (!v || !v.src) return
     v.paused ? v.play().catch(() => {}) : v.pause()
   }, 260)
+}
+// Tez trend Shorts: xotira-kesh → qurilma-kesh → tarmoq (zudlik uchun)
+async function trendShortsFast() {
+  let tr = shNormTrend(trendItems.filter((x) => x.kind === 'short'))
+  if (!tr.length) { const c = trendCacheGet(); if (c) tr = shNormTrend(c.filter((x) => x.kind === 'short')) }
+  if (!tr.length) {
+    try { const r = await api('/trend?cat=video&page=1'); tr = shNormTrend((r && r.items) || r || []) } catch {}
+  }
+  return tr
+}
+// Ilova ochilishida trend videolari fonda tayyorlanadi — Reels/Shorts DARHOL qiziq kontent bilan ochiladi
+window.warmTrend = () => {
+  try {
+    if (trendItems.length) return
+    const c = trendCacheGet()
+    if (c) { trendItems = c.slice(); return }
+    api('/trend?cat=video&page=1').then((r) => {
+      const list = (r && r.items) || r || []
+      if (Array.isArray(list) && list.length && !trendItems.length) { trendItems = list; trendCacheSave(list) }
+    }).catch(() => {})
+  } catch {}
 }
 async function shLike(p, slide, burst) {
   try {
@@ -835,11 +856,11 @@ function shActivate(w, slide) {
   const v = qs('video', slide)
   if (v) {
     v.muted = shMuted
-    if (v.preload !== 'auto') v.preload = 'auto'
-    v.play().catch(() => {})
+    if (!S.prefs.shq && v.preload !== 'auto') v.preload = 'auto'
+    if (S.prefs.shauto) v.play().catch(() => {})
   }
   const nx = qs(`.sh-slide[data-shi="${i + 1}"] video`, w)
-  if (nx) nx.preload = 'auto'
+  if (nx && !S.prefs.shq) nx.preload = 'auto'
   // Boshqa slaydlar: video pauza; YT iframe postMessage pauza (yuklangan holatda qoladi — orqaga qaytsa TEGISHLI tez);
   // boshqa iframelar (IG/DM og'ir) — src bo'shatiladi. Bu reload'siz pauza = scroll tezligi.
   qsa('.sh-slide', w).forEach((s) => {
@@ -875,29 +896,31 @@ function shActivate(w, slide) {
         slide.classList.add('sh-fail')
         const l2 = qs('.sh-load', slide)
         if (l2) l2.style.display = 'none'
-        // Avto-o'tish: 3 ketma-ket muvaffaqiyatsizlikdan keyin to'xtaydi
+        // Avto-o'tish: faqat sozlama yoqilganda, 3 ketma-ket muvaffaqiyatsizlikdan keyin to'xtaydi
         shFailStreak++
-        if (shFailStreak < 3 && slide.dataset.on === '1') {
-          slide._shauto = setTimeout(() => { if (shWrap && slide.dataset.on === '1' && slide.dataset.ok !== '1') { shGo(+slide.dataset.shi + 1); toast('⏭ Video yuklanmadi — keyingi', 1500) } }, 2500)
+        if (S.prefs.shadv && shFailStreak < 3 && slide.dataset.on === '1') {
+          slide._shauto = setTimeout(() => { if (shWrap && slide.dataset.on === '1' && slide.dataset.ok !== '1') { shGo(+slide.dataset.shi + 1); toast('⏭ Video yuklanmadi — keyingi', 1500) } }, 3200)
         } else if (shFailStreak >= 3) toast('⚠️ Bir nechta video yuklanmadi — internetni tekshiring', 3000)
       } else shFailStreak = 0
-    }, 5000)
+    }, 6500)
     // YT IJRO KUZATUVI: iframe yuklandi lekin player 9s ichida o'ynamasa (bloklangan/bot-devor) — avto-keyingi
     if (ifr.dataset.shyt) {
       clearTimeout(slide._shytw)
       slide._shytw = setTimeout(() => {
         if (shWrap && slide.isConnected && slide.dataset.on === '1' && slide.dataset.ok === '1' && slide.dataset.playing !== '1') {
           shFailStreak++
-          if (shFailStreak < 3) {
+          if (S.prefs.shadv && shFailStreak < 3) {
             slide.classList.add('sh-fail')
-            slide._shauto = setTimeout(() => { if (shWrap && slide.dataset.on === '1' && slide.dataset.playing !== '1') { shGo(+slide.dataset.shi + 1); toast('⏭ Video ochilmadi — keyingi', 1500) } }, 1800)
-          } else toast('⚠️ Videolar ochilmayapti — internetni tekshiring', 3000)
+            slide._shauto = setTimeout(() => { if (shWrap && slide.dataset.on === '1' && slide.dataset.playing !== '1') { shGo(+slide.dataset.shi + 1); toast('⏭ Video ochilmadi — keyingi', 1500) } }, 2200)
+          } else if (shFailStreak >= 3) toast('⚠️ Videolar ochilmayapti — internetni tekshiring', 3000)
         } else if (slide.dataset.playing === '1') shFailStreak = 0
       }, 9000)
     }
   }
   // PRELOAD: keyingi slayd YT bo'lsa — 1.5s'dan keyin fonda (mute) yuklanadi → scroll qilsa DARHAL ijro
+  // (Tejamkor rejim yoniq bo'lsa oldindan yuklanmaydi)
   clearTimeout(w._shpre)
+  if (S.prefs.shq) return
   w._shpre = setTimeout(() => {
     const ns = qs(`.sh-slide[data-shi="${i + 1}"]`, w)
     const nf = ns && qs('iframe[data-shyt]', ns)
@@ -935,6 +958,23 @@ async function shMore() {
       const items = shNormPosts(r)
       if (items.length < 10) shPostsEnd = true
       shAppend(items)
+    } else if (shMode === 'mix') {
+      // MIX: avval platform Reels tugaydi, keyin internet Shorts uzluksiz davom etadi
+      if (!shPostsEnd) {
+        const posts = shList.filter((x) => x.t === 'post')
+        const before = posts.length ? Math.min(...posts.map((x) => x.p.id)) : 0
+        const r = await api('/reels' + (before ? '?before=' + before : ''))
+        const items = shNormPosts(r)
+        if (items.length < 10) shPostsEnd = true
+        shAppend(items)
+      }
+      if (shPostsEnd && shWrap) {
+        shTrPage++
+        const r = await api('/trend?cat=video&page=' + shTrPage)
+        const items = shNormTrend(r)
+        if (!items.length) shTrPage = 0 // cheksiz lenta
+        shAppend(items)
+      }
     } else {
       shTrPage++
       const r = await api('/trend?cat=video&page=' + shTrPage)
@@ -967,19 +1007,29 @@ function shClose() {
 async function shortsStart(opt = {}) {
   try {
     if (opt.reelsOnly) {
-      // REELS rejim: faqat foydalanuvchilar joylagan videolar
+      // REELS rejim: foydalanuvchilar videolari + trend Shorts davomi — bo'sh viewer hech qachon ochilmaydi
       let posts = shNormPosts(reelPosts)
       if (opt.post && !posts.some((x) => x.p.id === opt.post.id)) posts.unshift({ t: 'post', p: opt.post })
       if (!posts.length) { try { posts = shNormPosts(await api('/reels')) } catch {} }
-      if (!posts.length) return false // hali Reels yo'q — ro'yxatdagi holat ko'rinadi
-      shMode = 'reels'
+      if (!posts.length) {
+        // Platformada hali reel yo'q — internet Shorts DARHOL ochiladi (qiziq kontent kutmasdan ko'rinadi)
+        const tr = await trendShortsFast()
+        if (!tr.length) return false
+        shMode = 'trend'
+        shTrPage = 1
+        openShorts(tr, 0)
+        if (tr.length < 4) { api('/trend?cat=video&page=2').then((r) => { const more = shNormTrend((r && r.items) || r || []); if (more.length && shWrap && shMode === 'trend') shAppend(more) }).catch(() => {}) }
+        return true
+      }
+      shMode = 'mix'
       const idx = opt.post ? posts.findIndex((x) => x.p.id === opt.post.id) : 0
       openShorts(posts, Math.max(0, idx))
+      // Trend videolar fonda biriktiriladi — Reels tugagach tomosha uzilmaydi
+      trendShortsFast().then((tr) => { if (tr.length && shWrap && shMode === 'mix') shAppend(tr) }).catch(() => {})
       return true
     }
     // SHORTS rejim: internetdan trend videolar
-    let tr = shNormTrend(trendItems.filter((x) => x.kind === 'short'))
-    if (!tr.length) { try { const r = await api('/trend?cat=video&page=1'); tr = shNormTrend((r && r.items) || r || []) } catch {} }
+    const tr = await trendShortsFast()
     if (opt.trend && !tr.some((x) => x.x.id === opt.trend.id)) tr.unshift({ t: 'trend', x: opt.trend })
     if (!tr.length) return toast('⚡ Shorts hali tayyor emas — birozdan so‘ng urinib ko‘ring')
     shMode = 'trend'
@@ -994,7 +1044,7 @@ function openShorts(list, startIdx = 0) {
   shClose()
   shList = list
   shPostsEnd = false; shTrPage = 1
-  const isReels = shMode === 'reels'
+  const isReels = shMode !== 'trend'
   const w = document.createElement('div')
   w.id = 'shorts'
   w.innerHTML = `<div class="sh-top"><button class="sh-x" id="sh-x">✕</button><b>${isReels ? '🎬 Reels' : '⚡ Shorts'}</b><div class="sh-sp"></div>${isReels ? '<button class="sh-mute" id="sh-add" title="Reels joylash">➕</button><button class="sh-mute" id="sh-yt" title="Internet Shorts">⚡</button>' : ''}<button class="sh-mute" id="sh-m">${shMuted ? '🔇' : '🔊'}</button></div>

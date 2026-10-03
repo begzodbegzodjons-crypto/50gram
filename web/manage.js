@@ -24,7 +24,7 @@ async function openChatInfo(id) {
       (adm || (!ch && c.permissions?.invite)) && joined ? row('add', '➕', 'A‘zo qo‘shish') : '',
     ])}
     ${adm ? rowsHTML([row('edit', '✏️', 'Tahrirlash', 'Nom, tavsif, rasm, username'), row('announce', '📣', ch ? 'E’lon yuborish' : 'Xabar yozish', ch ? 'Obunachilarga darhol yetkaziladi' : 'Guruhga yangilik joylash'), row('stats', '📊', 'Statistika', 'A’zolar, xabarlar, ko‘rishlar'), row('type', c.is_public ? '🌐' : '🔒', ch ? 'Kanal turi' : 'Guruh turi', c.is_public ? 'Ochiq — qidiruvda ko‘rinadi' : 'Yopiq — faqat havola orqali'), !ch ? row('perms', '🛡', 'Ruxsatlar', 'A‘zolar nima qila oladi') : '', row('settings', '⚙️', 'Sozlamalar', ch ? 'Imzo, reaksiyalar, himoya' : 'Sekin rejim, reaksiyalar, himoya'), row('revoke', '♻️', 'Havolani yangilash', 'Eski havola ishlamay qoladi')]) : ''}
-    ${rowsHTML([joined ? row('export', '📥', 'Tarixni zaxiralash', 'Chat tarixini .txt faylga yuklab olish') : ''])}
+    ${rowsHTML([joined ? row('export', '📥', 'Tarixni zaxiralash', 'Chat tarixini .txt faylga yuklab olish') : '', joined && adm ? row('clear', '🧹', 'Suhbatni tozalash', 'Barcha xabarlar hamma uchun o‘chiriladi', 'red') : ''])}
     ${rowsHTML([
       !joined ? row('join', '✅', ch ? 'Obuna bo‘lish' : 'Qo‘shilish') : '',
       joined && !owner ? row('leave', '🚪', ch ? 'Obunani bekor qilish' : 'Guruhdan chiqish', '', 'red') : '',
@@ -41,6 +41,7 @@ async function openChatInfo(id) {
     if (a === 'members') membersSheet(c)
     if (a === 'requests') requestsSheet(c)
     if (a === 'export') { closeSheet(sh); exportChat(id) }
+    if (a === 'clear') { closeSheet(sh); clearChatConfirm(S.chats.get(id) || c) }
     if (a === 'add') pickUsers('A‘zo qo‘shish', async (ids) => { await post(`/chats/${id}/members`, { user_ids: ids }); toast('✅ Qo‘shildi'); loadChats() })
     if (a === 'edit') editChatSheet(c)
     if (a === 'type') typeSheet(c)
@@ -327,6 +328,7 @@ async function renderMe() {
     prow('notif', '🔔', '#FF3B5C', '#FF6B81', 'Bildirishnomalar', 'Push, ovoz, tebranish'),
     prow('priv', '🔒', '#7C5CFF', '#4dabf7', 'Maxfiylik va xavfsizlik', 'Raqam, faollik, bloklar'),
     prow('view', '🎨', '#00C2E0', '#22C55E', 'Ko‘rinish va ovoz', 'Mavzu, aksent rang, shrift, fon'),
+    prow('reels', '🎬', '#F0389B', '#7C5CFF', 'Reels va Shorts', 'Ijro, ovoz, sifat, ikki bosish layk'),
     prow('stick', '🎈', '#FF9F0A', '#FF3B5C', 'Stikerlar', 'Animatsiyali paketlar'),
     prow('wallet', '💎', '#FFB020', '#FF9F0A', 'Coin va martaba', 'Balans, kunlik bonus, TOP'),
     prow('data', '🗂', '#37B24D', '#0CA678', 'Ma’lumotlar va xotira', 'Zaxira va tozalash'),
@@ -351,6 +353,7 @@ $('melist').addEventListener('click', async (e) => {
   if (a === 'notif') pgNotifications()
   if (a === 'priv') pgPrivacy()
   if (a === 'view') pgAppearance()
+  if (a === 'reels') pgReels()
   if (a === 'stick') pgStickers()
   if (a === 'wallet') pgWallet()
   if (a === 'data') pgData()
@@ -387,6 +390,7 @@ function pgNotifications() {
     psw('p-sounds', '🔊', '#2E7BFF', '#7C5CFF', 'Ovozli signallar', 'Xabar va qo‘ng‘iroq tovushlari', !!S.prefs.sounds ? 1 : 0),
     psw('p-vibrate', '📳', '#FF9F0A', '#FFB020', 'Tebranish', 'Bosishlarda va yangi xabarda', !!S.prefs.vibrate ? 1 : 0),
     psw('p-preview', '👀', '#37B24D', '#0CA678', 'Xabar matni bildirishnomada', 'O‘chiq bo‘lsa faqat «Yangi xabar» ko‘rinadi', !!S.prefs.preview ? 1 : 0),
+    psw('nightmute', '🌙', '#7048E8', '#9775FA', 'Tungi ovozsizlik', '23:00 – 07:00 orasida ovoz va tebranish o‘chadi', !!S.prefs.nightmute ? 1 : 0),
     psw('livealerts', '🔴', '#E52550', '#FF3B5C', 'Jonli efir ogohlantirishlari', 'Do‘stlaringiz efiri boshlanganda', S.prefs.livealerts !== 0 ? 1 : 0),
     psw('p-autoload', '⬇️', '#4dabf7', '#2E7BFF', 'Medianini avtomatik yuklash', 'Rasm/video oldindan yuklanadi', !!S.prefs.autoload ? 1 : 0),
   ]), (p) => {
@@ -406,7 +410,26 @@ function pgNotifications() {
         return
       }
       if (k === 'livealerts') { savePrefs({ livealerts: S.prefs.livealerts !== 0 ? 0 : 1 }); w.classList.toggle('on', S.prefs.livealerts !== 0); return }
+      if (k === 'nightmute') { savePrefs({ nightmute: S.prefs.nightmute ? 0 : 1 }); w.classList.toggle('on', !!S.prefs.nightmute); toast(S.prefs.nightmute ? '🌙 Tungi ovozsizlik yoqildi (23:00–07:00)' : 'Tungi ovozsizlik o‘chirildi'); return }
       if (k.startsWith('p-')) { const key = k.slice(2); savePrefs({ [key]: S.prefs[key] ? 0 : 1 }); w.classList.toggle('on', !!S.prefs[key]); if (key === 'autoload') document.body.classList.toggle('noauto', !S.prefs.autoload) }
+    }
+  })
+}
+// Reels va Shorts sozlamalari (гибкая настройка)
+function pgReels() {
+  openPage('Reels va Shorts', rowsHTML([
+    psw('p-shauto', '▶️', '#F0389B', '#7C5CFF', 'Avtomatik ijro', 'Videolar o‘zi boshlanadi', !!S.prefs.shauto ? 1 : 0),
+    psw('p-shadv', '⏭', '#FF6A3D', '#C8102E', 'Keyingi videoga avto-o‘tish', 'Video ochilmasa keyingisiga o‘tiladi', !!S.prefs.shadv ? 1 : 0),
+    psw('p-shdbl', '❤️', '#FF3B5C', '#FF6B81', 'Ikki bosish bilan layk', 'Videoga ikki marta bosing', !!S.prefs.shdbl ? 1 : 0),
+    psw('p-shq', '🍃', '#37B24D', '#0CA678', 'Tejamkor rejim', 'Keyingi videolar oldindan yuklanmaydi — trafik kamayadi', !!S.prefs.shq ? 1 : 0),
+  ]), (p) => {
+    p.onclick = (e) => {
+      const s = e.target.closest('[data-psw]'); if (!s) return
+      const k = s.dataset.psw, w = qs('.sw', s)
+      if (k === 'p-shauto') { savePrefs({ shauto: S.prefs.shauto ? 0 : 1 }); w.classList.toggle('on', !!S.prefs.shauto) }
+      if (k === 'p-shadv') { savePrefs({ shadv: S.prefs.shadv ? 0 : 1 }); w.classList.toggle('on', !!S.prefs.shadv) }
+      if (k === 'p-shdbl') { savePrefs({ shdbl: S.prefs.shdbl ? 0 : 1 }); w.classList.toggle('on', !!S.prefs.shdbl) }
+      if (k === 'p-shq') { savePrefs({ shq: S.prefs.shq ? 0 : 1 }); w.classList.toggle('on', !!S.prefs.shq) }
     }
   })
 }
@@ -438,12 +461,16 @@ function pgAppearance() {
     <div class="sec">Aksent rang</div>
     <div class="accgrid">${ACCTS.map((a, i) => `<button data-acc="${i}" class="${i === acc ? 'on' : ''}" style="background:linear-gradient(135deg,${a[1]},${a[2]})" title="${a[0]}"><i>${i === acc ? '✓' : ''}</i></button>`).join('')}</div>
     <div class="sec">Chat</div>
-    ${rowsHTML([prow('chatview', '💬', '#00C2E0', '#2E7BFF', 'Chat ko‘rinishi', 'Shrift hajmi va suhbat foni'), prow('trendset', '🔥', '#FF6A3D', '#C8102E', 'Trend qiziqishlarim', 'Lentada nima ko‘p chiqishini tanlang')])}
+    ${rowsHTML([prow('chatview', '💬', '#00C2E0', '#2E7BFF', 'Chat ko‘rinishi', 'Shrift hajmi, fon va balonlar'), prow('trendset', '🔥', '#FF6A3D', '#C8102E', 'Trend qiziqishlarim', 'Lentada nima ko‘p chiqishini tanlang')])}
+    <div class="sec">Effektlar</div>
+    ${rowsHTML([psw('noanim', '✨', '#7048E8', '#4C6EF5', 'Animatsiyalar', 'O‘chiq bo‘lsa o‘yin effektlari va harakatlar soddalashadi', !S.prefs.noanim ? 1 : 0)])}
     <div class="hint">Aksent rang tugmalar, xabar pufaklari va havolalarni bo‘yaydi — tanlash bilan darhol qo‘llanadi.</div>`,
   (p) => {
     p.onclick = async (e) => {
       const dk = e.target.closest('[data-sw2="dark"]')
       if (dk) { const on = !document.documentElement.classList.contains('dark'); document.documentElement.classList.toggle('dark', on); localStorage.setItem('g50_dark', on ? '1' : '0'); qs('.sw', dk).classList.toggle('on', on); return }
+      const na = e.target.closest('[data-psw="noanim"]')
+      if (na) { savePrefs({ noanim: S.prefs.noanim ? 0 : 1 }); document.body.classList.toggle('noanim', !!S.prefs.noanim); qs('.sw', na).classList.toggle('on', !S.prefs.noanim); return }
       const it = e.target.closest('[data-a],[data-pg]')
       if (it) { const kk = it.dataset.a || it.dataset.pg; if (kk === 'chatview') chatViewSheet(); if (kk === 'trendset') trendInterestsSheet(); return }
       const ac = e.target.closest('[data-acc]')
@@ -594,25 +621,37 @@ function applyFont(px) {
   if (px && px >= 13) document.documentElement.style.setProperty('--msgfs', px + 'px')
   else document.documentElement.style.removeProperty('--msgfs')
 }
+// Xabar balonlari yumaloqligi (Гибкая настройка: 10–24px)
+function applyRadius(px) {
+  const v = px >= 10 && px <= 24 ? px : 20
+  document.documentElement.style.setProperty('--mrad', v + 'px')
+}
 function initChatView() {
   applyFont(+localStorage.getItem('g50_font') || 0)
   applyWall(+localStorage.getItem('g50_wall') || 0)
+  applyRadius(+localStorage.getItem('g50_mrad') || 20)
+  document.body.classList.toggle('noanim', !!S.prefs.noanim)
 }
 function chatViewSheet() {
   const cur = +localStorage.getItem('g50_font') || 15
   const curW = +localStorage.getItem('g50_wall') || 0
+  const curR = +localStorage.getItem('g50_mrad') || 20
   const sh = sheet(h3('🎨 Chat ko‘rinishi') + `
     <label class="mut">Shrift hajmi: <b id="cv-fv">${cur}px</b></label>
     <input type="range" id="cv-f" min="13" max="20" value="${cur}" style="width:100%">
+    <label class="mut" style="display:block;margin-top:10px">Balonlar yumaloqligi: <b id="cv-rv">${curR}px</b></label>
+    <input type="range" id="cv-r" min="10" max="24" value="${curR}" style="width:100%">
     <div class="pv" style="margin:10px 0"><div class="mrow me"><div class="m">Salom! Qanday ahvolda?</div></div><div class="mrow"><div class="m">Yaxshi, rahmat! 😊</div></div></div>
     <label class="mut">Suhbat foni</label>
     <div id="cv-w" style="display:flex;gap:10px;flex-wrap:wrap;padding:6px 0">
       ${WALLS.map((w, i) => `<span data-w="${i}" style="width:44px;height:44px;border-radius:12px;cursor:pointer;border:2.5px solid ${curW === i ? 'var(--asos)' : 'var(--chiziq)'};background:${w || 'var(--fon)'};display:inline-block"></span>`).join('')}
     </div>
-    <div class="hint">Shrift va fon darhol qo‘llanadi va qurilmangizda saqlanadi.</div>`)
+    <div class="hint">Shrift, balonlar va fon darhol qo‘llanadi va qurilmangizda saqlanadi.</div>`)
   const prev = (px) => { qs('.pv', sh).style.fontSize = px + 'px' }
   qs('#cv-f', sh).oninput = (e) => { $('cv-fv').textContent = e.target.value + 'px'; applyFont(+e.target.value); prev(+e.target.value) }
   qs('#cv-f', sh).onchange = (e) => { localStorage.setItem('g50_font', e.target.value); toast('✅ Saqlandi') }
+  qs('#cv-r', sh).oninput = (e) => { $('cv-rv').textContent = e.target.value + 'px'; applyRadius(+e.target.value) }
+  qs('#cv-r', sh).onchange = (e) => { localStorage.setItem('g50_mrad', e.target.value); toast('✅ Saqlandi') }
   qs('#cv-w', sh).onclick = (e) => {
     const s = e.target.closest('[data-w]'); if (!s) return
     localStorage.setItem('g50_wall', s.dataset.w)

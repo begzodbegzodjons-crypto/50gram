@@ -751,19 +751,19 @@ async function getMessages(c: C) {
   let all: any[]
   let more = false
   if (latest) {
-    // Tez ochilish: eng oxirgi N xabar bitta so'rovda (10 martagacha so'rov o'rniga 1)
-    const rows = await c.db.q("SELECT * FROM messages WHERE chat_id=? ORDER BY id DESC LIMIT " + latest, [id])
+    // Tez ochilish: eng oxirgi N xabar bitta so'rovda (10 martagacha so'rov o'rniga 1). O'chirilganlar tarixda ko'rinmaydi.
+    const rows = await c.db.q("SELECT * FROM messages WHERE chat_id=? AND deleted=0 ORDER BY id DESC LIMIT " + latest, [id])
     all = rows.reverse()
     more = rows.length === latest
   } else if (before) {
     // Orqaga sahifalash: butun tarix saqlangan — eski yozishmalar hech qachon yo'qolmaydi
-    const rows = await c.db.q("SELECT * FROM messages WHERE chat_id=? AND id<? ORDER BY id DESC LIMIT 100", [id, before])
+    const rows = await c.db.q("SELECT * FROM messages WHERE chat_id=? AND deleted=0 AND id<? ORDER BY id DESC LIMIT 100", [id, before])
     all = rows.reverse()
     more = rows.length === 100
   } else {
-    const fresh = await c.db.q("SELECT * FROM messages WHERE chat_id=? AND id>? ORDER BY id LIMIT 300", [id, after])
+    const fresh = await c.db.q("SELECT * FROM messages WHERE chat_id=? AND deleted=0 AND id>? ORDER BY id LIMIT 300", [id, after])
     const changed = since && after
-      ? await c.db.q("SELECT * FROM messages WHERE chat_id=? AND id<=? AND updated_at>? ORDER BY id LIMIT 300", [id, after, since])
+      ? await c.db.q("SELECT * FROM messages WHERE chat_id=? AND deleted=0 AND id<=? AND updated_at>? ORDER BY id LIMIT 300", [id, after, since])
       : []
     all = [...changed, ...fresh]
     more = fresh.length === 300
@@ -849,12 +849,38 @@ async function editMessage(c: C) {
   return json(await pushMsg(c, m.id))
 }
 async function deleteMessage(c: C) {
-  const m = await ownMsg(c)
+  // O'chirish ruxsati (Telegram-uslubi): o'z xabari — hamma joyda; bevosita suhbatdagi qarshi tomon xabari — ikkala tomon ham o'chiradi;
+  // guruh/kanalda — adminlar. ownMsg(needOwner=false) bilan ochiq qabul qilib, keyin qo'lda tekshiramiz.
+  const m = await ownMsg(c, false)
+  if (m.sender_id !== c.uid) {
+    const ch = await needChat(c, m.chat_id)
+    const mem = await member(c, m.chat_id)
+    const can = ch.type === "direct" || (ch.type !== "direct" && mem && isAdm(mem))
+    if (!can) fail("Faqat o‘z xabaringiz", 403)
+  }
   const mid = parse(m.meta, {}).media_id
   if (mid) await dropMedia(c.db, "id=?", [String(mid)])
   await c.db.run("UPDATE messages SET deleted=1, body=NULL, meta=NULL, updated_at=? WHERE id=?", [now(), m.id])
+  // Qadalgan xabar o'chirilsa — qadash ham olinadi
+  await c.db.run("UPDATE chats SET pinned_id=0 WHERE id=? AND pinned_id=?", [m.chat_id, m.id]).catch(() => {})
   await c.db.run("DELETE FROM reactions WHERE message_id=?", [m.id])
   return json(await pushMsg(c, m.id))
+}
+// SUHBATNI TOZALASH: barcha yozishmalar ikkala tomonda ham o'chiriladi (Telegram "Clear history" uslubi).
+// Bevosita suhbat — a'zoning o'zi, guruh/kanal — faqat admin/owner.
+async function clearChat(c: C) {
+  const id = +c.p.id
+  const ch = await needChat(c, id)
+  const mem = await member(c, id)
+  if (!mem || mem.status !== "active") fail("Ruxsat yo‘q", 403)
+  if (ch.type !== "direct" && !isAdm(mem)) fail("Faqat adminlar tozalashi mumkin", 403)
+  const t = now()
+  await c.db.run("UPDATE messages SET deleted=1, body=NULL, meta=NULL, updated_at=? WHERE chat_id=? AND deleted=0", [t, id])
+  await c.db.run("UPDATE media SET dropped=1 WHERE chat_id=? AND dropped=0", [id]).catch(() => {})
+  await c.db.run("UPDATE chats SET pinned_id=0 WHERE id=?", [id]).catch(() => {})
+  await c.db.run("UPDATE chat_members SET pinned=0 WHERE chat_id=?", [id]).catch(() => {})
+  notifyChat(c, id, { type: "chat_cleared", chat_id: id, now: t })
+  return json({ ok: true, now: t })
 }
 async function react(c: C) {
   const m = await ownMsg(c, false)
@@ -1351,22 +1377,44 @@ async function cachePutJSON(ck: string, obj: unknown): Promise<void> {
     await caches.default.put(ck, r)
   } catch {}
 }
+// Dailymotion — yana bir platforma (foydalanuvchi: "insta va boshqa platformalardan ham").
+// API'siz ochiq (key yo'q), sort=trending, embed player'ilova tomonda allaqachon qo'llanadi.
+async function dmTrending(): Promise<any[]> {
+  const r = await fT("https://api.dailymotion.com/videos?fields=id,title,duration,views_total,thumbnail_360_url,created_time&sort=trending&limit=40&shorter_than=5", 7000, 900)
+  if (!r) return []
+  try {
+    const j: any = await r.json()
+    return ((j.list || []) as any[]).map((v: any) => {
+      const dur = +v.duration || 0
+      if (!v.id || !v.title || dur < 3 || dur > 180) return null
+      return {
+        kind: "short", vid: "dm", embed: String(v.id), uz: 0, src: "dm",
+        title: String(v.title), image: String(v.thumbnail_360_url || ""),
+        views: +v.views_total || 0, duration: dur,
+        time: +v.created_time > 0 ? +v.created_time * 1000 : now(),
+        url: "https://www.dailymotion.com/video/" + v.id, cat: "video",
+      }
+    }).filter(Boolean)
+  } catch { return [] }
+}
 async function buildVideoPool(): Promise<{ shorts: any[]; vids: any[] }> {
-  // Kanal yangiliklari (vaqt bo'yicha) + qidiruv topganlari (ko'rish soni bo'yicha) — 2:1 aralashtiriladi
-  const [chan, uz] = await Promise.all([uzChannelShorts(), uzSearch()])
+  // Kanal yangiliklari (vaqt bo'yicha) + qidiruv topganlari (ko'rish soni bo'yicha) + Dailymotion trending — aralashtiriladi
+  const [chan, uz, dm] = await Promise.all([uzChannelShorts(), uzSearch(), dmTrending()])
   const seen = new Set<string>()
   const ch = chan.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt)).sort((a: any, b: any) => (b.time || 0) - (a.time || 0))
   const se = uz.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt)).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
+  const dd = dm.filter((v: any) => v && v.embed)
   const shorts: any[] = []
-  let ci = 0, si = 0
-  while ((ci < ch.length || si < se.length) && shorts.length < 48) {
+  let ci = 0, si = 0, di = 0
+  while ((ci < ch.length || si < se.length || di < dd.length) && shorts.length < 60) {
     for (let k = 0; k < 2 && ci < ch.length; k++) shorts.push(ch[ci++])
     if (si < se.length) shorts.push(se[si++])
+    if (di < dd.length) shorts.push(dd[di++]) // har 3 youtube'dan 1 Dailymotion — platforma xilma-xilligi
   }
-  return { shorts: shorts.slice(0, 48), vids: [] }
+  return { shorts: shorts.slice(0, 60), vids: [] }
 }
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  const ck = "https://trend.50gram.internal/poolv8"
+  const ck = "https://trend.50gram.internal/poolv9"
   const meta = await cacheGetJSON<{ shorts: any[]; vids: any[] }>(ck)
   if (meta && meta.data && meta.data.shorts?.length) {
     if (now() - meta.t < POOL_FRESH_MS) return meta.data
@@ -2274,6 +2322,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/chats/:id/requests/:uid/:action", requestAction],
   ["GET", "/chats/:id/messages", getMessages],
   ["POST", "/chats/:id/messages", sendMessage],
+  ["DELETE", "/chats/:id/messages", clearChat],
   ["POST", "/chats/:id/read", markRead],
   ["POST", "/chats/:id/typing", typing],
   ["PATCH", "/messages/:id", editMessage],
