@@ -1292,7 +1292,7 @@ async function uzChannelShorts(): Promise<any[]> {
         const views = vm ? +vm[1] : 0
         if (!vid || !title) continue
         out.push({
-          kind: "short", vid: "yt", yt: vid, uz: 1, src: "ch",
+          kind: "short", vid: "yt", yt: vid, uz: 1, src: "ch", chid: ch,
           title, image: "https://i.ytimg.com/vi/" + vid + "/hqdefault.jpg",
           views, duration: 0,
           time: pub ? (Date.parse(pub) || now()) : now(),
@@ -1442,20 +1442,38 @@ async function buildVideoPool(): Promise<{ shorts: any[]; vids: any[] }> {
   // Kanal yangiliklari (vaqt bo'yicha) + qidiruv topganlari (ko'rish soni bo'yicha) + Dailymotion trending — aralashtiriladi
   const [chan, uz, dm] = await Promise.all([uzChannelShorts(), uzSearch(), dmTrending()])
   const seen = new Set<string>()
-  const ch = chan.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt)).sort((a: any, b: any) => (b.time || 0) - (a.time || 0))
+  const chRaw = chan.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt))
+  // KANALLAR ROUND-ROBIN + kanal bo'yicha cheklov (3): bir kanal (masalan Minecraft-dublaj
+  // kanallari) hovuzni bosib olmasligi kerak — aks holda foydalanuvchiga DOIM bir turdagi
+  // video chiqadi ("faqat minecraft" shikoyati). Har qadamda BOSHQA kanal video qo'shiladi.
+  const byCh = new Map<string, any[]>()
+  for (const v of chRaw) { const k = String(v.chid || "?"); if (!byCh.has(k)) byCh.set(k, []); byCh.get(k)!.push(v) }
+  for (const [k, arr] of byCh) byCh.set(k, arr.sort((a: any, b: any) => (b.time || 0) - (a.time || 0)))
+  const ch: any[] = []
+  const curs = new Map([...byCh.keys()].map((k) => [k, 0] as [string, number]))
+  const perCh = new Map([...byCh.keys()].map((k) => [k, 0] as [string, number]))
+  while (true) {
+    let added = false
+    for (const k of byCh.keys()) {
+      const arr = byCh.get(k)!, i = curs.get(k)!
+      if (i >= arr.length || perCh.get(k)! >= 3) continue
+      ch.push(arr[i]); curs.set(k, i + 1); perCh.set(k, perCh.get(k)! + 1); added = true
+    }
+    if (!added) break
+  }
   const se = uz.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt)).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
   const dd = dm.filter((v: any) => v && v.embed)
   const shorts: any[] = []
   let ci = 0, si = 0, di = 0
   while ((ci < ch.length || si < se.length || di < dd.length) && shorts.length < 60) {
-    for (let k = 0; k < 2 && ci < ch.length; k++) shorts.push(ch[ci++])
+    if (ci < ch.length) shorts.push(ch[ci++]) // har safar boshqa kanaldan (round-robin)
     if (si < se.length) shorts.push(se[si++])
-    if (di < dd.length) shorts.push(dd[di++]) // har 3 youtube'dan 1 Dailymotion — platforma xilma-xilligi
+    if (di < dd.length) shorts.push(dd[di++]) // har youtube'dan 1 Dailymotion — platforma xilma-xilligi
   }
   return { shorts: shorts.slice(0, 60), vids: [] }
 }
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  const ck = "https://trend.50gram.internal/poolv10"
+  const ck = "https://trend.50gram.internal/poolv11"
   const meta = await cacheGetJSON<{ shorts: any[]; vids: any[] }>(ck)
   if (meta && meta.data && meta.data.shorts?.length) {
     if (now() - meta.t < POOL_FRESH_MS) return meta.data
