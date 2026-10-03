@@ -953,7 +953,10 @@ $('b-cimport').onclick = async () => {
 
 // ============ SHORTS: TikTok-uslubida to'liq ekran vertikal rejim ============
 // Platform Reels va trend Shorts vertikal ko'rish rejimida.
-let shMuted = localStorage.getItem('g50_shmute') !== '0'
+// BIRINCHI ochilish OVOZLI (foydalanuvchi: "mushuk ovozi yo'q reels juda ko'p" — jim ochilish
+// asosiy shikoyat edi). Foydalanuvchi 🔊 bilan o'zi o'chirsa — tanlovi xotirada qoladi.
+// Autoplay siyosati bloklasa — har video o'zi ovozsiz fallback qiladi (xavfsiz).
+let shMuted = localStorage.getItem('g50_shmute') === '1'
 let shMode = 'trend' // 'reels' — faqat platform Reels · 'trend' — internet Shorts
 let shList = [], shWrap = null, shKeyH = null, shWtTimer = null
 let shPostsEnd = false, shTrPage = 0, shBusyMore = false, shLastTap = 0, shTapTimer = null, shFailStreak = 0, shDry = 0
@@ -1009,6 +1012,18 @@ function shBindFrame(f) {
       say({ event: 'listening' }, 300)
       say({ event: 'listening' }, 2000) // sekin tarmoqda player kech tayyor bo'ladi — qayta yuboriladi
       say({ event: 'command', func: 'addEventListener', args: ['onStateChange'] }, 700)
+      // AKTIV SLAYD OVOZI: player mute=1 bilan ochiladi (autoplay siyosati) — faqat FAOL slayd
+      // tayyor bo'lgach ovoz oladi. AVVAL bu FAQAT preload'li slaydlarga yuborilardi — birinchi/
+      // jump qilingan yangi slayd JIM qolardi ("mushuk ovozi yo'q" shikoyatining ildizi).
+      // YUBORISH PAYTIDA ham faollik tekshiriladi — fon slaydlari ovoz olmaydi (begona ovoz yo'q).
+      if (!shMuted) setTimeout(() => {
+        try {
+          if (f.isConnected && slide.isConnected && slide.dataset.on === '1') {
+            f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*')
+            f.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*')
+          }
+        } catch {}
+      }, 1400)
     }
   }, { once: true })
 }
@@ -1024,6 +1039,18 @@ function shYTMsgBind(w) {
       if (typeof d === 'string') { try { d = JSON.parse(d) } catch { return } }
       if (!d || typeof d !== 'object') return
       const inf = d.info
+      // YT XATO HODISASI: video o'chirilgan/maxfiy (100), embed taqiqlangan (101/150),
+      // pleyer xatosi (2/5) — bunday video HECH QACHON o'ynamaydi. Kuta ko'rmay slayd BUTUNLAY
+      // o'chiriiladi (qora ekran lentaDA QOLMAYDI — foydalanuvchi talabi). Avval bunday embedlar
+      // 15-20s qora turib keyingina watchdog tomonidan o'chirilardi.
+      if (d.event === 'onError') {
+        const ec = typeof inf === 'number' ? inf : +((inf && (inf.data ?? inf.errorCode ?? inf.code)) || 0)
+        if (ec === 2 || ec === 5 || ec === 100 || ec === 101 || ec === 150) {
+          const fr = qsa('iframe[data-shyt]', w)
+          for (const f of fr) { try { if (f.contentWindow === e.source) { shDropSlide(f.closest('.sh-slide'), 'err'); return } } catch {} }
+        }
+        return
+      }
       const isPlay = (d.event === 'onStateChange' && (inf === 1 || inf?.state === 1 || inf?.playerState === 1))
         || (d.event === 'infoDelivery' && (inf?.playerState === 1 || +inf?.currentTime > 0.5))
         || (d.event === 'onVideoProgress' && +inf?.currentTime > 0.5)
@@ -1568,9 +1595,10 @@ function openShorts(list, startIdx = 0) {
       // Ulashish FAQAT platform postlari uchun va FAQAT ilova havolasi bilan — trend/akkaunt
       // kontentidan manba URL'i UMUMAN chiqmaydi (manba SIR, yuklab olish/uzatish yo'q)
       if (e.target.closest('[data-ssh]')) return share((it.p.text_body || '50 Gram Shorts').slice(0, 100), location.origin + location.pathname)
-      // YT slaydga bosish = PLAY: autoplay bloklansa (ba'zi WebView) — bosganda jonlanadi
+      // YT slaydga bosish = PLAY + OVOZ: autoplay bloklansa (ba'zi WebView) — bosganda jonlanadi;
+      // o'ynayotgan slaydga bosilsa ham ovoz QAYTA YUBORILADI (jim qolgan YT slaydni tuzatadi)
       const yf = slide.querySelector('iframe[data-shyt]')
-      if (yf && yf.dataset.loaded === '1' && slide.dataset.playing !== '1') { shYTpost(yf, 'playVideo'); if (!shMuted) shYTpost(yf, 'unMute'); return }
+      if (yf && yf.dataset.loaded === '1') { shYTpost(yf, 'playVideo'); if (!shMuted) shYTpost(yf, 'unMute'); return }
       if (e.target.closest('[data-sdel]')) {
         if (!(await confirmBox('Video o‘chirilsinmi?', 'O‘chirish'))) return
         try { await del('/posts/' + it.p.id); if (it.p.media_id) Store.remove([String(it.p.media_id)]); shList.splice(+slide.dataset.shi, 1); slide.remove(); qsa('.sh-slide', sc).forEach((s, i) => (s.dataset.shi = i)); toast('O‘chirildi') } catch (er) { toast('⚠️ ' + er.message) }
