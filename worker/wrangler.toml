@@ -15,9 +15,18 @@ run_worker_first = ["/api/*", "/50gram.apk", "/", "/index.html"]
 name = "USER_SOCKET"
 class_name = "UserSocket"
 
+# SEC FIREWALL — doimiy IP-bloklanganlar ombori (bitta "global" nusxa, SQLite)
+[[durable_objects.bindings]]
+name = "SEC"
+class_name = "SecFirewall"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["UserSocket"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["SecFirewall"]
 
 # Har 30 daqiqada eskirgan xabar, fayl va istoriyalarni serverdan o'chiradi
 [triggers]
@@ -31,9 +40,11 @@ binding = "AI"
 enabled = true
 
 [vars]
-# "1" bo'lsa va SMS sozlanmagan bo'lsa, kod ekranda ko'rsatiladi (FAQAT sinov uchun!)
-# ESKIZ_EMAIL/ESKIZ_PASSWORD secretlar qo'shilgach "0" ga qaytariladi
+# "1" bo'lsa, kod FAQAT DEV_PHONES'dagi raqamlarga javobda qaytariladi (boshqalarga hech qachon yo'q)
+# ESKIZ_EMAIL/ESKIZ_PASSWORD secretlar qo'shilgach "0" ga qaytariladi (haqiqiy SMS ishga tushadi)
 DEV_MODE = "1"
+# DEV kod faqat shu raqam(lar)ga: operator hisobi himoyalangan yagona istisno
+DEV_PHONES = "+998907776655"
 # Sinov raqamlari (SMS yuborilmaydi): "+998900000001:111111,+998900000002:222222"
 TEST_PHONES = ""
 

@@ -6,13 +6,18 @@ import { makeDb, ph, type Db } from "./db"
 import { signJwt, verifyJwt, sha256, randomStr, randomCode, hmacHex } from "./auth"
 import { sendSms, smsConfigured } from "./sms"
 import { pushUsers } from "./push"
+import { SecFirewall } from "./firewall"
 export { UserSocket } from "./realtime"
+export { SecFirewall }
 
 export interface Env {
   DATABASE_URL: string
   JWT_SECRET: string
   DEV_MODE?: string
   TEST_PHONES?: string
+  // DEV rejim kodi FAQAT shu raqamlarga qaytariladi (operator). Bo'sh/yo'q bo'lsa —
+  // DEV_MODE=1 bo'lsa ham HECH KIMGA kod javobda qaytmaydi (hisob o'tlash yo'li yopilgan)
+  DEV_PHONES?: string
   ESKIZ_EMAIL?: string
   ESKIZ_PASSWORD?: string
   ESKIZ_FROM?: string
@@ -23,6 +28,8 @@ export interface Env {
   VAPID_PUBLIC_KEY?: string
   VAPID_PRIVATE_KEY?: string
   USER_SOCKET: any
+  // SEC FIREWALL — doimiy IP-bloklanganlar ombori (Durable Object, "global" nusxa)
+  SEC?: { get: (id: any) => { fetch: (url: string, init?: any) => Promise<Response> }; idFromName: (s: string) => any }
   AI?: any
   __db?: Db
   // Statik assetlar binlash (wrangler.toml [assets] binding) — APK yuklab olish uchun
@@ -46,12 +53,79 @@ const CORS = {
   "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 }
 const json = (d: unknown, status = 200) =>
-  new Response(JSON.stringify(d), { status, headers: { "content-type": "application/json; charset=utf-8", ...CORS } })
+  new Response(JSON.stringify(d), { status, headers: { "content-type": "application/json; charset=utf-8", ...SEC_H, ...CORS } })
+// Xavfsizlik sarlavhalari — barcha javoblarga (klient uchun ko'rinmas, faqat brauzer qatlami)
+const SEC_H: Record<string, string> = {
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "strict-origin-when-cross-origin",
+}
 class HttpError extends Error {
   constructor(msg: string, public status = 400) { super(msg) }
 }
 const fail = (msg: string, status = 400): never => { throw new HttpError(msg, status) }
 const now = () => Date.now()
+
+// =====================================================================
+// SEC FIREWALL — izolyat-ichki qatlam (FOYDALANUVCHIGA KO'RINMAS).
+// Oddiy foydalanuvchi: NOL qo'shimcha kechikish (xotira-tekshiruvi xolos).
+// Hujumchi: milliyatlar ichida to'siladi (lokal) + doimiy blok (DO, barcha
+// shaharlarda amal qiladi). Bloklanganga javob — ODDIY "Not found" 404:
+// blok bor-yo'qligi, sababi, muddati HECH QANDAY shaklda oshkor qilinmaydi.
+// =====================================================================
+const FW_KESH = new Map<string, number>() // ip → blok muddati (doimiy bloklar keshi)
+const FW_RATE = new Map<string, { n: number; t: number }>() // 10s toshqin oynasi
+const FW_4XX = new Map<string, { n: number; t: number }>() // 10 daqiqalik 4xx oynasi
+const FW_ALOC = new Map<string, { n: number; t: number }>() // lokal ochkolar (ip|tur)
+let FW_YANGI = 0
+// TIZIM ILDIGA / ADMIN YO'LLARIGA URINISH — bitta urinishda ham 30 kun blok
+const FW_TRAP = /^\/api\/(?:adm(?:in)?|debug|trdbg|srcdbg|dump|purge|internal|root|shell|eval|config|backup|secret|telescope|actuator|\.env|phpmyadmin|wp-admin|wp-login|cgi-bin|console)(?:\/|$)/i
+// In'ektsiya / traversal belgilari (yo'l + so'rov satrida)
+const FW_INJ = /(?:\.\.[\\/]|%2e%2e(?:%2f|%5c)|<script|javascript:|onerror\s*=|union[\s+]+select|information_schema|sleep\s*\(|benchmark\s*\(|load_file|into[\s+]+outfile|waitfor[\s+]+delay|\/etc\/passwd|\$\{(?:jndi|env\())/i
+const fwIp = (req: Request) => (req.headers.get("cf-connecting-ip") || "").trim()
+const FW_404 = () => new Response("Not found", { status: 404, headers: { ...SEC_H } })
+function fwBlokli(ip: string) {
+  const u = FW_KESH.get(ip)
+  if (u && u > Date.now()) return true
+  if (u) FW_KESH.delete(ip)
+  return false
+}
+// Doimiy bloklar ro'yxatini har 45s da yangilash (fon — so'rovni kutmaydi)
+function fwKeshYana(env: Env, wait: (p: Promise<unknown>) => void) {
+  const t = Date.now()
+  if (t - FW_YANGI < 45_000 || !env.SEC) return
+  FW_YANGI = t
+  wait((async () => {
+    try {
+      const st = env.SEC!.get(env.SEC!.idFromName("global"))
+      const r = await st.fetch("https://fw/?op=refresh")
+      const j: any = await r.json()
+      for (const [ip2, until] of j.blocks || []) FW_KESH.set(String(ip2), Number(until))
+    } catch {}
+  })())
+}
+// Lokal ochko — shu izolyatda MILLIYATLAR ichida to'siq (DO javobini kutmaydi)
+function fwLokal(ip: string, kind: string, need: number, dur: number) {
+  const k = ip + "|" + kind
+  const t = Date.now()
+  const e = FW_ALOC.get(k)
+  if (!e || t - e.t > 3_600_000) { if (FW_ALOC.size > 5000) FW_ALOC.clear(); FW_ALOC.set(k, { n: 1, t }); return false }
+  e.n++
+  if (e.n >= need) { FW_KESH.set(ip, t + dur); FW_ALOC.delete(k); return true }
+  return false
+}
+// DO'ga doimiy ochko (fon rejimida — asosiy so'rov sekinlamaydi)
+function fwOchko(env: Env, wait: (p: Promise<unknown>) => void, ip: string, kind: string, weight = 1) {
+  if (!ip || !env.SEC) return
+  wait((async () => {
+    try {
+      const st = env.SEC!.get(env.SEC!.idFromName("global"))
+      const r = await st.fetch("https://fw/?op=strike", { method: "POST", body: JSON.stringify({ ip, kind, weight }) })
+      const j: any = await r.json()
+      if (j && j.until > Date.now()) FW_KESH.set(ip, j.until)
+    } catch {}
+  })())
+}
 const newId = () => Date.now() * 1000 + Math.floor(Math.random() * 1000)
 const DAY = 86400000
 const str = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max)
@@ -263,7 +337,10 @@ async function authOtp(c: C) {
     await sendSms(c.env, phone, code)
     return json({ ok: true, phone })
   }
-  if (c.env.DEV_MODE === "1") return json({ ok: true, phone, dev_code: code })
+  // DEV rejim kodi FAQAT DEV_PHONES'dagi raqamlarga (operator) qaytariladi — boshqa
+  // har qanday raqam uchun kod HECH QACHON javobda qaytmaydi (hisob o'tlash yo'li yopilgan)
+  const devPhones = (c.env.DEV_PHONES || "").split(",").map((x) => x.trim()).filter(Boolean)
+  if (c.env.DEV_MODE === "1" && devPhones.includes(phone)) return json({ ok: true, phone, dev_code: code })
   return fail("SMS xizmati sozlanmagan (ESKIZ_EMAIL/ESKIZ_PASSWORD)", 503)
 }
 async function authVerify(c: C) {
@@ -274,6 +351,13 @@ async function authVerify(c: C) {
   if (o.tries >= 5) fail("Juda ko‘p urinish. Yangi kod so‘rang", 429)
   if ((await sha256(phone + code + c.env.JWT_SECRET)) !== o.code_hash) {
     await c.db.run("UPDATE otp SET tries=tries+1 WHERE phone=?", [phone])
+    // BRUTE-FORCE HIMoyasi: noto'g'ri kod urinishlari hisobga olinadi — 12 xato/1 soat
+    // bo'lsa IP 24 soatga to'siladi (bu haqda hujumchiga ma'lumot bermaydigan javob)
+    const fip = fwIp(c.req)
+    if (fip) {
+      if (fwLokal(fip, "auth", 12, 24 * 3_600_000)) { fwOchko(c.env, c.wait, fip, "auth"); return FW_404() }
+      fwOchko(c.env, c.wait, fip, "auth")
+    }
     fail("Kod noto‘g‘ri")
   }
   await c.db.run("DELETE FROM otp WHERE phone=?", [phone])
@@ -1658,81 +1742,6 @@ async function trendEv(c: C) {
   } else fail("Noto‘g‘ri hodisa")
   return json({ ok: true })
 }
-// Tarjima zanjiri diagnostikasi (auth talab qiladi): har bosqichning holati
-async function trendTrDbg(c: C) {
-  const q = str(c.url.searchParams.get("q") || "Princess Kate surprises Sussex residents today", 300)
-  const st: any = { q }
-  try {
-    const r = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=uz&dt=t&q=" + encodeURIComponent(q), { headers: TREND_UA })
-    const txt = await r.text()
-    st.gtx = { status: r.status, isJson: txt.trim().startsWith("["), result: txt.trim().startsWith("[") ? String(JSON.parse(txt)?.[0]?.map((x: any[]) => x?.[0]).join("") || "").slice(0, 80) : txt.slice(0, 60) }
-  } catch (e: any) { st.gtx = { err: String(e?.message || e).slice(0, 80) } }
-  try {
-    const r2 = await fetch("https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=uz&q=" + encodeURIComponent(q), { headers: TREND_UA })
-    const t2 = await r2.text()
-    st.c5 = { status: r2.status, isJson: t2.trim().startsWith("["), result: t2.trim().startsWith("[") ? String(JSON.parse(t2)?.[0]?.[0] || "").slice(0, 80) : t2.slice(0, 60) }
-  } catch (e: any) { st.c5 = { err: String(e?.message || e).slice(0, 80) } }
-  try {
-    if (c.env.AI) {
-      const r3: any = await c.env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-        messages: [
-          { role: "system", content: "You are a translator. Translate to Uzbek (Latin). Reply with ONLY the translation." },
-          { role: "user", content: q.slice(0, 300) },
-        ],
-        max_tokens: 300,
-      })
-      st.ai = { result: String(r3?.response || JSON.stringify(r3).slice(0, 80)).slice(0, 80) }
-    } else st.ai = { err: "AI binding yo'q" }
-  } catch (e: any) { st.ai = { err: String(e?.message || e).slice(0, 120) } }
-  return json(st)
-}
-// Diagnostika: video manbalariga worker'dan kirish holati (status/ms/hajm)
-async function trendSrcDbg(c: C) {
-  const st: any = {}
-  const trySrc = async (name: string, url: string) => {
-    const t0 = Date.now()
-    try {
-      const r = await fetch(url, { headers: TREND_UA, signal: AbortSignal.timeout(8000) })
-      const txt = await r.text()
-      let n = 0
-      try { const j = JSON.parse(txt); n = (Array.isArray(j) ? j.length : (j.items?.length || (j.list?.length || 0))) } catch {}
-      st[name] = { status: r.status, ms: Date.now() - t0, bytes: txt.length, items: n, head: txt.slice(0, 90).replace(/\s+/g, " ") }
-    } catch (e: any) { st[name] = { err: String(e?.message || e).slice(0, 90), ms: Date.now() - t0 } }
-  }
-  await Promise.all([
-    trySrc("piped_coffee", "https://api.piped.private.coffee/trending?region=US"),
-    trySrc("piped_kavin", "https://pipedapi.kavin.rocks/trending?region=US"),
-    trySrc("invid_nerdvpn", "https://invidious.nerdvpn.de/api/v1/trending?region=US"),
-    trySrc("dm_api", "https://api.dailymotion.com/videos?fields=id&sort=trending&limit=3"),
-  ])
-  // cf.cacheEverything opsiyasi bilan (fT xuddi shunday so'raydi) — farqni ko'rish uchun
-  const t0 = Date.now()
-  try {
-    const r = await fetch("https://api.piped.private.coffee/trending?region=US", { headers: TREND_UA, signal: AbortSignal.timeout(8000), cf: { cacheTtl: 600, cacheEverything: true } } as any)
-    const txt = await r.text()
-    let n = 0; try { n = JSON.parse(txt).length } catch {}
-    st.piped_coffee_cf = { status: r.status, ms: Date.now() - t0, items: n, head: txt.slice(0, 80).replace(/\s+/g, " ") }
-  } catch (e: any) { st.piped_coffee_cf = { err: String(e?.message || e).slice(0, 90), ms: Date.now() - t0 } }
-  // fT + aynan youtubeTrending mapping simulatsiyasi
-  const t1 = Date.now()
-  try {
-    const r = await fT("https://api.piped.private.coffee/trending?region=US", 8000)
-    if (!r) st.ft_coffee = { ok: false, ms: Date.now() - t1 }
-    else {
-      const j: any = await r.json()
-      const list = Array.isArray(j) ? j : j.items || []
-      const out = (list || []).map((v: any) => { const id = String(v.url || "").split("v=")[1]; return id ? String(v.title || "") : null }).filter(Boolean)
-      st.ft_coffee = { ok: true, status: r.status, ms: Date.now() - t1, raw: list.length, mapped: out.length, sample: out.slice(0, 2) }
-    }
-  } catch (e: any) { st.ft_coffee = { ok: false, err: String(e?.message || e).slice(0, 90), ms: Date.now() - t1 } }
-  // To'liq youtubeTrending() chaqiruvi (natija sanog'i)
-  const t2 = Date.now()
-  try {
-    const yt = await youtubeTrending()
-    st.yt_full = { count: yt.length, ms: Date.now() - t2, sample: yt.slice(0, 2).map((v: any) => v.yt + " " + String(v.title).slice(0, 30)) }
-  } catch (e: any) { st.yt_full = { err: String(e?.message || e).slice(0, 90), ms: Date.now() - t2 } }
-  return json(st)
-}
 // YANGILIQ TO'LIQ O'QISH (Task 47): maqola matni SERVERDA olinadi va faqat paragraflar
 // qaytariladi — manba sayt nomi/URL/havolasi klientga UMUMAN bormaydi (foydalanuvchi talabi:
 // "to'liq o'qish" ilovada, manba SIR). id faqat hovuzdagi itemlarga mos keladi (SSRF xavfsiz).
@@ -2562,30 +2571,6 @@ async function storageStats(c: C) {
 
 // ------------------------- Router -------------------------
 type H = (c: C) => Promise<Response>
-// --- VAQTINCHA: test reel topish/o'chirish vositasi (kuchli kalit bilan; keyingi commitda O'CHIRILADI) ---
-const ADM_KEY = "g50x-adm-Tq7Wm3Zp9Rk2Vn5Xb8C"
-function admOk(c: C) { if ((c.url.searchParams.get("k") || "") !== ADM_KEY) fail("Ruxsat yo'q", 403) }
-async function admDump(c: C) {
-  admOk(c)
-  const posts = await c.db.q("SELECT p.id,p.author_id,p.chat_id,p.media_id,p.media_kind,p.text_body,p.views,p.created_at,u.first_name,u.last_name,u.phone FROM posts p LEFT JOIN users u ON u.id=p.author_id WHERE p.media_kind='video' ORDER BY p.id DESC LIMIT 50")
-  return json({ ok: true, posts })
-}
-async function admPurgeReel(c: C) {
-  admOk(c)
-  const id = +(c.url.searchParams.get("post") || 0)
-  if (!id) fail("post kerak")
-  const p = await c.db.one("SELECT id,author_id,media_id FROM posts WHERE id=? AND media_kind='video'", [id])
-  if (!p) fail("Post topilmadi", 404)
-  const cids = (await c.db.q("SELECT id FROM post_comments WHERE post_id=?", [id])).map((r) => r.id)
-  if (cids.length) {
-    await c.db.run(`DELETE FROM comment_reacts WHERE comment_id IN (${ph(cids)})`, cids).catch(() => {})
-    await c.db.run("DELETE FROM post_comments WHERE post_id=?", [id])
-  }
-  await c.db.run("DELETE FROM post_likes WHERE post_id=?", [id])
-  if (p.media_id) await dropMedia(c.db, "id=?", [String(p.media_id)])
-  await c.db.run("DELETE FROM posts WHERE id=?", [id])
-  return json({ ok: true, deleted: id, media: p.media_id || null, comments: cids.length })
-}
 const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/auth/otp", authOtp, true],
   ["POST", "/auth/verify", authVerify, true],
@@ -2649,8 +2634,6 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/trend/article", trendArticle],
   ["POST", "/trend/ev", trendEv],
   ["GET", "/trend/insights", trendInsights],
-  ["GET", "/trend/trdbg", trendTrDbg],
-  ["GET", "/trend/srcdbg", trendSrcDbg, true],
   ["POST", "/posts", createPost],
   ["DELETE", "/posts/:id", deletePost],
   ["POST", "/posts/:id/like", likePost],
@@ -2686,9 +2669,8 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/messages/:id/comments", listMsgComments],
   ["POST", "/messages/:id/comments", addMsgComment],
   ["DELETE", "/messages/:id/comments/:cid", delMsgComment],
-  // VAQTINCHA (test reel tozalash — keyingi commitda olib tashlanadi):
-  ["GET", "/adm/dump", admDump, true],
-  ["POST", "/adm/purreel", admPurgeReel, true],
+  // VAQTINCHA test vositalari O'CHIRILDI (xavfsizlik): /adm/*, /trend/trdbg, /trend/srcdbg —
+  // endi bu yo'llar firewall TRAP hisoblanadi (urinish = 30 kun blok)
 ]
 function match(method: string, path: string) {
   const parts = path.split("/").filter(Boolean)
@@ -2744,6 +2726,16 @@ async function cleanup(env: Env) {
   } catch (e) { console.log("Xotira posboni xatosi", String(e)) }
 }
 
+// 4xx skaner nazorati — chegara oshsa true (blok) qaytaradi
+function fw4xx(env: Env, wait: (p: Promise<unknown>) => void, ip: string) {
+  const e = FW_4XX.get(ip), t = Date.now()
+  if (!e || t - e.t > 600_000) { if (FW_4XX.size > 5000) FW_4XX.clear(); FW_4XX.set(ip, { n: 1, t }); return false }
+  if (++e.n <= 100) return false
+  FW_4XX.delete(ip)
+  FW_KESH.set(ip, t + 30 * 60_000)
+  fwOchko(env, wait, ip, "scan", 3)
+  return true
+}
 export default {
   async fetch(req: Request, env: Env, ctx?: { waitUntil: (p: Promise<unknown>) => void }): Promise<Response> {
     const url = new URL(req.url)
@@ -2754,6 +2746,7 @@ export default {
       const h = new Headers(asset.headers)
       h.set("Content-Disposition", 'attachment; filename="50gram.apk"')
       h.set("Cache-Control", "public, max-age=3600")
+      for (const [k, v] of Object.entries(SEC_H)) h.set(k, v)
       return new Response(asset.body, { status: asset.status, headers: h })
     }
     // index.html: HAR SAFAR qayta tasdiqlansin — APK WebView va brauzer hech qachon eski
@@ -2762,37 +2755,65 @@ export default {
       const asset = await env.ASSETS!.fetch(new Request(url.toString(), { method: "GET" }))
       const h = new Headers(asset.headers)
       h.set("Cache-Control", "no-cache, must-revalidate")
+      for (const [k, v] of Object.entries(SEC_H)) h.set(k, v)
       return new Response(asset.body, { status: asset.status, headers: h })
     }
     if (!url.pathname.startsWith("/api/")) return new Response("Not found", { status: 404 })
+    const wait = (p: Promise<unknown>) => { const s = p.catch((e) => console.log("fon xato", String(e))); ctx?.waitUntil ? ctx.waitUntil(s) : void s }
+    // ---- SEC FIREWALL: ko'rinmas himoya qatlami (oddij foydalanuvchi hech narsa sezmaydi) ----
+    const fwip = fwIp(req)
+    fwKeshYana(env, wait)
+    if (fwip) {
+      if (fwBlokli(fwip)) return FW_404()
+      // Toshqin: 1 IP → 10s ichida 80+ so'rov = darhol lokal blok + doimiy ochko
+      const rt = FW_RATE.get(fwip), tn = Date.now()
+      if (!rt || tn - rt.t > 10_000) { if (FW_RATE.size > 5000) FW_RATE.clear(); FW_RATE.set(fwip, { n: 1, t: tn }) }
+      else if (++rt.n > 80) { FW_KESH.set(fwip, tn + 15 * 60_000); fwOchko(env, wait, fwip, "flood", 2); return FW_404() }
+      // Tizim ildiziga/admin yo'llariga RUXSATGIZ kirishga urinish — DARHOL 30 kun blok
+      if (FW_TRAP.test(url.pathname)) { FW_KESH.set(fwip, Date.now() + 30 * DAY); fwOchko(env, wait, fwip, "root"); return FW_404() }
+      // In'ektsiya/traversal belgilari (yo'l + query, ikkalasi ham decode/encode holatda)
+      let dec = url.pathname + (url.search || "")
+      try { dec += " " + decodeURIComponent(dec) } catch {}
+      if (FW_INJ.test(dec)) {
+        if (fwLokal(fwip, "inj", 2, 7 * DAY)) return FW_404()
+        fwOchko(env, wait, fwip, "inj")
+      }
+      // SMS-kod so'rovlari: 1 IP → 1 soatda 25tadan ko'p so'rash = kod-pumping → 12 soat blok
+      if (url.pathname === "/api/auth/otp" && fwLokal(fwip, "otp", 25, 12 * 3_600_000)) { fwOchko(env, wait, fwip, "otp"); return FW_404() }
+    }
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS })
+    // Hajm chegarasi — ulkan payload bilan abuse (upload bo'laklari ≤1.2MB, JSON ≤2MB)
+    const clen = +(req.headers.get("content-length") || 0)
+    if (clen > 26_000_000) { if (fwip) fwOchko(env, wait, fwip, "flood", 3); return json({ error: "Hajm juda katta" }, 413) }
     const path = url.pathname.slice(4).replace(/\/+$/, "") || "/"
     try {
       if (!env.JWT_SECRET || env.JWT_SECRET.length < 16) fail("Server sozlanmagan: JWT_SECRET (kamida 16 belgi)", 500)
       if (!env.DATABASE_URL && !env.__db) fail("Server sozlanmagan: DATABASE_URL", 500)
       const db = env.__db || makeDb(env.DATABASE_URL)
-      const wait = (p: Promise<unknown>) => { const s = p.catch((e) => console.log("fon xato", String(e))); ctx?.waitUntil ? ctx.waitUntil(s) : void s }
       // WebSocket
       if (path === "/ws") {
         const payload = await verifyJwt(url.searchParams.get("token") || "", env.JWT_SECRET)
-        if (!payload) return json({ error: "Avtorizatsiya kerak" }, 401)
+        if (!payload) { if (fwip) { if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404(); fwOchko(env, wait, fwip, "tok") } return json({ error: "Avtorizatsiya kerak" }, 401) }
         if (req.headers.get("Upgrade") !== "websocket") return json({ error: "WebSocket kerak" }, 426)
         const stub = env.USER_SOCKET.get(env.USER_SOCKET.idFromName(String(payload.sub)))
         return stub.fetch(req)
       }
       const r = match(req.method, path)
-      if (!r) fail("Topilmadi", 404)
+      if (!r) { if (fwip && fw4xx(env, wait, fwip)) return FW_404(); return FW_404() }
       let uid = 0
       if (!r!.open) {
         const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "")
         const payload = await verifyJwt(token, env.JWT_SECRET)
-        if (!payload) fail("Avtorizatsiya kerak", 401)
+        if (!payload) { if (fwip) { if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404(); fwOchko(env, wait, fwip, "tok") } fail("Avtorizatsiya kerak", 401) }
         uid = Number(payload.sub)
       }
       let b: any = {}
       const ct = req.headers.get("content-type") || ""
       if (["POST", "PATCH", "DELETE"].includes(req.method) && ct.includes("json")) b = await req.json().catch(() => ({}))
-      return await r!.h({ env, db, uid, req, url, p: r!.p, b: b || {}, wait })
+      const res = await r!.h({ env, db, uid, req, url, p: r!.p, b: b || {}, wait })
+      // Skanerlash nazorati: 1 IP → 10 daqiqada 100+ xato (401/429 hisobga kirmaydi) → 30 daqiqa blok
+      if (fwip && res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 429 && fw4xx(env, wait, fwip)) return FW_404()
+      return res
     } catch (e: any) {
       if (e instanceof HttpError) return json({ error: e.message }, e.status)
       console.log("Server xatosi", e?.stack || String(e))
