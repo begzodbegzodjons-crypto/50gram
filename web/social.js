@@ -1013,15 +1013,21 @@ function shBindFrame(f) {
   }, { once: true })
 }
 // YT ijro kuzatuvi: player postMessage yubormasa (bot-devori/bloklangan video) — avto-keyingi slayd
+// QATIY DETEKTOR: faqat HAQIQIY o'ynash holati hisoblanadi. Player 'listening'ga javoban yuboradigan
+// boshlang'ich infoDelivery (playerState:0/-1) SOXTA 'playing' berib, qora ekran 10-15s qolibardi
+// (shikoyat: "2 ta ko'rsatib 3 chisi qora ekran"). Endi playerState===1 yoki currentTime>0.5 bo'lsagina.
 function shYTMsgBind(w) {
   if (w._shMsg) return
   w._shMsg = (e) => {
     try {
-      let d = typeof e.data === 'string' ? e.data : ''
-      if (!d && e.data && typeof e.data === 'object') { try { d = JSON.stringify(e.data) } catch { return } }
-      if (!d) return
-      // YT haqiqiy hodisa nomlari camelCase: infoDelivery/onStateChange/onVideoProgress (+ eski shakllar)
-      if (d.indexOf('infoDelivery') < 0 && d.indexOf('onStateChange') < 0 && d.indexOf('onVideoProgress') < 0 && d.indexOf('info_delivery') < 0 && d.indexOf('video:data') < 0) return
+      let d = e.data
+      if (typeof d === 'string') { try { d = JSON.parse(d) } catch { return } }
+      if (!d || typeof d !== 'object') return
+      const inf = d.info
+      const isPlay = (d.event === 'onStateChange' && (inf === 1 || inf?.state === 1 || inf?.playerState === 1))
+        || (d.event === 'infoDelivery' && (inf?.playerState === 1 || +inf?.currentTime > 0.5))
+        || (d.event === 'onVideoProgress' && +inf?.currentTime > 0.5)
+      if (!isPlay) return
       const fr = qsa('iframe[data-shyt]', w)
       for (const f of fr) { try { if (f.contentWindow === e.source) { f.closest('.sh-slide').dataset.playing = '1'; return } } catch {} }
     } catch {}
@@ -1057,6 +1063,7 @@ function shSlideHTML(it, i) {
   // Barchasi birdan yuklansa 40+ iframe tarmoqni bosib oladi = SEKINLIK (asosiy sabab shu edi).
   if (x.mp4) pl = `<video src="${esc(x.mp4)}" data-shsrc="${esc(x.mp4)}" loop playsinline preload="metadata" data-shaudio="${esc(x.audio || '')}" poster="${esc(x.image || '')}"></video>`
   else if (x.yt) pl = `<iframe data-shyt="1" src="about:blank" data-shsrc="${esc(shYTURL(x.yt))}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>`
+  else if (x.img) pl = `<img class="sh-img" src="${esc(x.img)}" alt="">`
   else if (x.ig) pl = `<iframe src="about:blank" data-shsrc="https://www.instagram.com/reel/${esc(x.ig)}/embed/captioned/" allow="autoplay; encrypted-media" allowfullscreen frameborder="0"></iframe>`
   else if (x.fb) pl = `<iframe src="about:blank" data-shsrc="https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(x.fb)}&autoplay=1&show_text=false&mute=${shMuted ? 1 : 0}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>`
   else pl = `<iframe src="about:blank" data-shsrc="https://geo.dailymotion.com/player.html?video=${esc(x.embed)}&autoplay=1&mute=${shMuted ? 1 : 0}" allow="autoplay; fullscreen; encrypted-media" allowfullscreen frameborder="0"></iframe>`
@@ -1064,10 +1071,9 @@ function shSlideHTML(it, i) {
   return `<div class="${x.mp4 ? 'sh-slide paused' : 'sh-slide'}" data-shi="${i}" data-ttrend="1"${bg}>
     ${pl}
     <div class="sh-load"><i></i><i></i><i></i></div>
-    <div class="sh-failbox">⏳ Video yuklanmadi — internet sekin bo'lishi mumkin<br><a href="${esc(x.url || '#')}" target="_blank" rel="noopener">Boshqa oynada ochish ↗</a> · Pastga suring — keyingi video</div>
+    <div class="sh-failbox">⏳ Yuklanmadi — internet sekin bo'lishi mumkin<br>Pastga suring — keyingi ko'rinadi</div>
     <div class="sh-shade"></div>
-    <div class="sh-bot"><b>${esc(ttl)}</b><small>${x.views ? '👁 ' + fmtN(x.views) : ''}${x.duration ? ' · ' + fmtDur(x.duration) : ''}</small></div>
-    <div class="sh-acts"><button data-ssh>↗️</button></div>
+    <div class="sh-bot">${ttl ? `<b>${esc(ttl)}</b>` : ''}<small>${x.views ? '👁 ' + fmtN(x.views) : ''}${x.duration ? ' · ' + fmtDur(x.duration) : ''}</small></div>
     <div class="sh-prog"><i></i></div>
     <div class="sh-play">▶</div>
   </div>`
@@ -1122,6 +1128,19 @@ function shBindVideo(v) {
       }, 5000)
     })
     v._shAudio = a
+  } else {
+    // JIM-VIDEO DETEKTORI (ovoz fayl ichida): video o'ynayapti (ovoz yoniq), lekin dekodlangan
+    // AUDIO bayt YO'Q = ovozsiz video — lentaDA TURMAYDI (foydalanuvchi: "mushuk ovozi yo'q reels
+    // juda ko'p ko'rsatmoqda"). Xususiyat mavjud emasligida tekshiruv o'tkazilmaydi (soxta xato yo'q).
+    v.addEventListener('playing', () => {
+      clearTimeout(slide._shsilw)
+      slide._shsilw = setTimeout(() => {
+        if (!slide.isConnected || slide.dataset.on !== '1' || v.paused || v.readyState < 2 || v.muted || shMuted) return
+        const b = v.webkitAudioDecodedByteCount
+        const moz = v.mozHasAudio
+        if ((typeof b === 'number' && b < 800) || moz === false) shDropSlide(slide, 'mute')
+      }, 3200)
+    })
   }
   v.addEventListener('click', () => shTap(slide, v))
 }
@@ -1242,11 +1261,13 @@ function shActivate(w, slide) {
       if (ifr.dataset.loaded === '1') { shYTpost(ifr, 'playVideo'); if (!shMuted) shYTpost(ifr, 'unMute') }
       else {
         ifr.dataset.loaded = '1'
+        slide.dataset.ok = '' // qayta yuklanmoqda — eskirgan ok-belgi SOXTA pass bermasin (qora ekran himoyasi)
         ifr.src = ifr.dataset.shsrc || ''
         shBindFrame(ifr)
       }
     } else if (ifr.dataset.loaded !== '1' && ifr.dataset.shsrc) {
       ifr.dataset.loaded = '1'
+      slide.dataset.ok = ''
       ifr.src = ifr.dataset.shsrc
       shBindFrame(ifr)
     }
@@ -1276,17 +1297,32 @@ function shActivate(w, slide) {
       slide.classList.add('sh-fail')
       toast('⚠️ Bir nechta video yuklanmadi — internetni tekshiring', 3000)
     }
-  }, 10000) // 12→10s: qora ekran qisqa turadi; soxta-fail readyState nazorati bilan himoyalangan
-  // YT IJRO KUZATUVI: iframe yuklandi lekin player 15s ichida o'ynamasa (bloklangan/bot-devor) — olib tashlanadi
+  }, 8000) // 12→10→8s: qora ekran qisqa turadi; soxta-fail readyState nazorati bilan himoyalangan
+  // YT IJRO KUZATUVI: iframe yuklandi lekin player 7s ichida O'YNAMASA — avval joyida 1 marta
+  // yangi player qayta yuklanadi (sekin tarmoqda ko'p yordam beradi), yana o'ynamasa — o'chiriiladi.
+  // AVVAL 15s edi + soxta 'playing' belgisi bilan deyarli ishlamasdi (qora ekran shikoyati).
   if (ifr && ifr.dataset.shyt) {
     clearTimeout(slide._shytw)
-    slide._shytw = setTimeout(() => {
-      if (shWrap && slide.isConnected && slide.dataset.on === '1' && slide.dataset.ok === '1' && slide.dataset.playing !== '1') {
-        shFailStreak++
-        if (shFailStreak <= 4) shDropSlide(slide, 'play')
-        else toast('⚠️ Videolar ochilmayapti — internetni tekshiring', 3000)
-      } else if (slide.dataset.playing === '1') shFailStreak = 0
-    }, 15000)
+    const ytCheck = () => {
+      if (!shWrap || !slide.isConnected || slide.dataset.on !== '1') return
+      if (slide.dataset.playing === '1') { shFailStreak = 0; return }
+      if (slide.dataset.ok !== '1') return // hali yuklanmadi — universal watchdog qaraydi
+      if (!slide._shrt) {
+        slide._shrt = 1 // faqat 1 marta joyida qayta yuklash
+        slide.dataset.ok = ''; slide.dataset.playing = ''
+        ifr.dataset.loaded = ''
+        ifr.src = ifr.dataset.shsrc || ''
+        shBindFrame(ifr)
+        if (!shMuted) setTimeout(() => { try { if (slide.isConnected) { shYTpost(ifr, 'unMute'); shYTpost(ifr, 'playVideo') } } catch {} }, 1500) // yangi player mute=1 bilan ochiladi — ovozni tiklaymiz
+        clearTimeout(slide._shytw)
+        slide._shytw = setTimeout(ytCheck, 7000)
+        return
+      }
+      shFailStreak++
+      if (shFailStreak <= 4) shDropSlide(slide, 'play')
+      else toast('⚠️ Videolar ochilmayapti — internetni tekshiring', 3000)
+    }
+    slide._shytw = setTimeout(ytCheck, 7000)
   }
   // PRELOAD: keyingi slayd YT bo'lsa — 1.5s'dan keyin fonda (mute) yuklanadi → scroll qilsa DARHAL ijro
   // (Tejamkor rejim yoniq bo'lsa oldindan yuklanmaydi)
@@ -1309,7 +1345,7 @@ function shActivate(w, slide) {
 // holatda lenta birdan o'chib ketmasin — 4 ketma-ket xatodan keyin eski failbox rejimi.
 function shDropSlide(slide, why) {
   if (!shWrap || !slide || !slide.isConnected) return
-  clearTimeout(slide._shwd); clearTimeout(slide._shauto); clearTimeout(slide._shytw); clearTimeout(slide._shseen); clearTimeout(slide._shauw)
+  clearTimeout(slide._shwd); clearTimeout(slide._shauto); clearTimeout(slide._shytw); clearTimeout(slide._shseen); clearTimeout(slide._shauw); clearTimeout(slide._shsilw)
   const i = +slide.dataset.shi || 0
   const it = shList[i]
   if (it) { const k = shKey(it); shBad.add(k); try { shSeen.set(k, Date.now()); shSeenSave() } catch {} }
@@ -1347,6 +1383,16 @@ function shPrune(w, idx) {
     }
   })
 }
+// RASM slaydlari (foydalanuvchi akkauntidagi rasmlar — Reels'da to'liq ekran, sekin zum efekt bilan)
+function shBindImg(s) {
+  const im = qs('img.sh-img', s)
+  if (!im || im._shBound) return
+  im._shBound = 1
+  const ok = () => { s.dataset.ok = '1'; const l = qs('.sh-load', s); if (l) l.style.display = 'none' }
+  im.addEventListener('load', ok)
+  im.addEventListener('error', () => shDropSlide(s, 'img'))
+  if (im.complete && im.naturalWidth > 0) ok() // keshdan darhol — watchdog soxta xato bermasin
+}
 function shAppend(items, force) {
   if (!items.length || !shWrap) return 0
   // DEDUPE + NO-REPEAT: sessiya ichida ham, avvalgi sessiyalarda ko'rilgan bilan ham
@@ -1362,7 +1408,7 @@ function shAppend(items, force) {
   shList.push(...use)
   sc.insertAdjacentHTML('beforeend', use.map((it, k) => shSlideHTML(it, base + k)).join(''))
   const fresh = qsa('.sh-slide', sc).slice(base)
-  fresh.forEach((s) => { qsa('video', s).forEach(shBindVideo) }) // iframe shBindFrame — faqat yuklanganda (about:blank load hodisasi aldamasligi uchun)
+  fresh.forEach((s) => { qsa('video', s).forEach(shBindVideo); shBindImg(s) }) // iframe shBindFrame — faqat yuklanganda (about:blank load hodisasi aldamasligi uchun)
   hydrate(sc)
   return use.length
 }
@@ -1507,7 +1553,7 @@ function openShorts(list, startIdx = 0) {
     w.classList.add('on')
     const sc = qs('.sh-scroll', w)
     hydrate(sc)
-    qsa('.sh-slide', sc).forEach((s, i) => { const v = qs('video', s); if (v) { if (i > 2) v.preload = 'none'; shBindVideo(v) } }) // iframe'lar lazy — faqat faol slayd yuklanadi; birinchi 3 tadan keyingi video play'da yuklanadi (tezlik)
+    qsa('.sh-slide', sc).forEach((s, i) => { const v = qs('video', s); if (v) { if (i > 2) v.preload = 'none'; shBindVideo(v) } shBindImg(s) }) // iframe'lar lazy — faqat faol slayd yuklanadi; birinchi 3 tadan keyingi video play'da yuklanadi (tezlik)
     // Boshqaruv
     w.addEventListener('click', async (e) => {
       if (e.target.closest('#sh-x')) return shClose()
@@ -1519,7 +1565,9 @@ function openShorts(list, startIdx = 0) {
       if (!it) return
       if (e.target.closest('[data-slike]')) return shLike(it.p, slide)
       if (e.target.closest('[data-scmt]')) return commentsSheet(it.p, null)
-      if (e.target.closest('[data-ssh]')) return it.t === 'post' ? share((it.p.text_body || '50 Gram Shorts').slice(0, 100), location.origin + location.pathname) : share((it.x.title || 'Shorts').slice(0, 80), it.x.url || location.origin)
+      // Ulashish FAQAT platform postlari uchun va FAQAT ilova havolasi bilan — trend/akkaunt
+      // kontentidan manba URL'i UMUMAN chiqmaydi (manba SIR, yuklab olish/uzatish yo'q)
+      if (e.target.closest('[data-ssh]')) return share((it.p.text_body || '50 Gram Shorts').slice(0, 100), location.origin + location.pathname)
       if (e.target.closest('[data-sdel]')) {
         if (!(await confirmBox('Video o‘chirilsinmi?', 'O‘chirish'))) return
         try { await del('/posts/' + it.p.id); if (it.p.media_id) Store.remove([String(it.p.media_id)]); shList.splice(+slide.dataset.shi, 1); slide.remove(); qsa('.sh-slide', sc).forEach((s, i) => (s.dataset.shi = i)); toast('O‘chirildi') } catch (er) { toast('⚠️ ' + er.message) }

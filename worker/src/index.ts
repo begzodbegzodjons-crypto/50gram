@@ -31,6 +31,11 @@ export interface Env {
   // SEC FIREWALL — doimiy IP-bloklanganlar ombori (Durable Object, "global" nusxa)
   SEC?: { get: (id: any) => { fetch: (url: string, init?: any) => Promise<Response> }; idFromName: (s: string) => any }
   AI?: any
+  // FOYDALANUVCHI MANBALARI (manba nomi klientga HECH QACHON chiqmaydi — mahfiy):
+  // MY_YT: YouTube kanal ID (UC...) yoki @handle — vergul bilan ajratilgan
+  // MY_IG: Instagram profil nomi — ochiq (public) akkaunt bo'lishi shart
+  MY_YT?: string
+  MY_IG?: string
   __db?: Db
   // Statik assetlar binlash (wrangler.toml [assets] binding) — APK yuklab olish uchun
   ASSETS?: { fetch: (req: Request) => Promise<Response> }
@@ -1395,6 +1400,162 @@ async function uzChannelShorts(): Promise<any[]> {
   return feeds.flat()
 }
 const UZ_RE = /(o['ʻ‘ʼ]?zbek|uzbek|Ўзбек|Ӯзбек|узбек|Узбек|ткент|Тошкент|Ташкент|тошкент|ткент|samarqand|samarkand|Самарканд|buxoro|bukhara|Бухара|andijon|Андижон|namangan|Наманган|nukus|Нукус|termiz|Термез|qarshi|Карши|jizzax|Жиззах|navoiy|Навои|urganch|Урганч|qo['ʻ‘ʼ]qon|Коканд|kokand|farg['ʻ‘ʼ]ona|fergana|Фергана|xorazm|Хоразм|surxondaryo|sirdaryo|qashqadaryo|chilonzor|yunusobod|zbekiston|zbekiston|Ўзбекистон|Узбекистон|o'zbekcha|oʻzbekcha)/i
+
+// ================= FOYDALANUVCHI MANBALARI (MAHFIY) =================
+// Foydalanuvchining o'z YouTube kanali va Instagram akkauntidan kontent avtomatik
+// olinadi va umumiy hovuzga ALGORITM bo'yicha aralashtiriladi. QAYSI PLATFORMADAN
+// olingani klientga UMUMAN ko'rinmaydi (url/src/yuklab olish yo'q — manba SIR).
+const listVar = (v?: string) => String(v || "").split(",").map((s) => s.trim().replace(/^@/, "")).filter(Boolean).slice(0, 6)
+
+// @handle -> UC kanal ID (1 so'rov: kanal sahifasidagi externalId)
+async function ytChannelIdOf(handle: string): Promise<string> {
+  if (/^UC[\w-]{22}$/.test(handle)) return handle
+  const r = await fT("https://www.youtube.com/@" + encodeURIComponent(handle), 8000, 3600)
+  if (!r) return ""
+  try {
+    const h = await r.text()
+    const m = h.match(/"externalId":"(UC[\w-]{22})"/) || h.match(/channel\/(UC[\w-]{22})/)
+    return m ? m[1] : ""
+  } catch { return "" }
+}
+// Kanalning SHORTS tabi (1 so'rov): 41 tagacha shorts videoId + sarlavha. Uzun videolar KIRMAYDI.
+// shortsLockupViewModel bloklari: entityId = shorts-shelf-item-{vid}, primaryText = toza sarlavha.
+async function ytShortsOfChannel(ch: string): Promise<any[]> {
+  const r = await fT("https://www.youtube.com/channel/" + ch + "/shorts", 9000, 1200)
+  if (!r) return []
+  try {
+    const h = await r.text()
+    const out: any[] = []
+    const seen = new Set<string>()
+    for (const chunk of h.split('"shortsLockupViewModel"').slice(1)) {
+      const idM = chunk.match(/"shorts-shelf-item-([\w-]{11})"/)
+      if (!idM || seen.has(idM[1])) continue
+      seen.add(idM[1])
+      const tM = chunk.match(/"primaryText":\{"content":"(.*?)"/)
+      const title = (tM ? tM[1] : "").replace(/\\u([\dA-Fa-f]{4})/g, (_, x) => { try { return String.fromCharCode(parseInt(x, 16)) } catch { return "" } }).replace(/\\u0026/g, "&").replace(/&amp;/g, "&").replace(/\\"/g, '"').replace(/\\\//g, "/").replace(/\\n/g, " ").trim()
+      const vid = idM[1]
+      out.push({
+        id: "yt" + vid, kind: "short", vid: "yt", yt: vid, uz: 1, src: "", chid: ch,
+        title: title.slice(0, 140), image: "https://i.ytimg.com/vi/" + vid + "/hqdefault.jpg",
+        views: 0, duration: 0, time: now(), url: "", cat: "video",
+      })
+      if (out.length >= 24) break
+    }
+    return out
+  } catch { return [] }
+}
+// Foydalanuvchi kanallari: @handle UC'ga aylantiriladi, shorts tabi o'qiladi
+async function ytMine(env: Env): Promise<any[]> {
+  const ids = listVar(env.MY_YT)
+  if (!ids.length) return []
+  const chans = await Promise.all(ids.map((h) => ytChannelIdOf(h).catch(() => "")))
+  const uniq = [...new Set(chans.filter(Boolean))]
+  if (!uniq.length) return []
+  const lists = await Promise.all(uniq.map((c) => ytShortsOfChannel(c).catch(() => [] as any[])))
+  return lists.flat()
+}
+// Instagram: datacenter-IP'larga IG cheklov qilishi mumkin — 3 bosqichli zanjir, muvaffaqiyatsizlik jim o'tadi
+const IG_HEADERS: Record<string, string> = { "x-ig-app-id": "936619743392459", accept: "application/json" }
+async function igWebProfile(user: string): Promise<any[]> {
+  const hosts = [
+    { u: "https://www.instagram.com/api/v1/users/web_profile_info/?username=" + encodeURIComponent(user), h: { ...IG_HEADERS, ...TREND_UA } },
+    { u: "https://i.instagram.com/api/v1/users/web_profile_info/?username=" + encodeURIComponent(user), h: { ...IG_HEADERS, "user-agent": "Instagram 219.0.0.12.117 Android" } },
+  ]
+  for (const { u, h } of hosts) {
+    const r = await fT2(u, h, 8000, 1800)
+    if (!r) continue
+    try {
+      const j: any = await r.json()
+      const edges = j?.data?.user?.edge_owner_to_timeline_media?.edges || []
+      const out: any[] = []
+      for (const e of edges) {
+        const n = e?.node || {}
+        const code = String(n.shortcode || "")
+        if (!code) continue
+        const cap = stripHtml(String(n.edge_media_to_caption?.edges?.[0]?.node?.text || ""))
+        const child = n.edge_sidecar_to_children?.edges?.[0]?.node || n
+        const vurl = String(child.video_url || n.video_url || "")
+        const iurl = String(child.display_url || n.display_url || n.thumbnail_src || "")
+        const media = vurl || iurl
+        if (!media) continue
+        out.push({
+          id: "ig" + code, kind: "short", vid: vurl ? "mp4" : "img", mp4: vurl || undefined, img: vurl ? undefined : iurl,
+          uz: 1, src: "", title: cap.slice(0, 140),
+          image: iurl, views: 0, duration: 0,
+          time: +n.taken_at_timestamp > 0 ? +n.taken_at_timestamp * 1000 : now(),
+          url: "", cat: "video",
+        })
+        if (out.length >= 12) break
+      }
+      if (out.length) return out
+    } catch {}
+  }
+  return []
+}
+// Zaxira: ochiq RSSHUB nusxalari (ba'zan ishlaydi) — media:content/enclosure URL'lari
+async function igRsshub(user: string): Promise<any[]> {
+  for (const base of ["https://rsshub.rssforever.com", "https://rsshub.app"]) {
+    const r = await fT(base + "/instagram/user/" + encodeURIComponent(user), 8000, 1800)
+    if (!r) continue
+    try {
+      const xml = await r.text()
+      const out: any[] = []
+      for (const block of xml.split("<item>").slice(1)) {
+        const link = tagGet(block, "link")
+        const code = (link.match(/\/(p|reel|reels)\/([\w-]+)/) || [])[2] || ""
+        const title = stripHtml(tagGet(block, "title")).slice(0, 140)
+        if (!code) continue
+        const mm = block.match(/<media:content[^>]+url="(https:\/\/[^"]+)"[^>]*medium="video"/) || block.match(/<media:content[^>]+url="(https:\/\/[^"]+)"/) || block.match(/<enclosure[^>]+url="(https:\/\/[^"]+)"/)
+        if (!mm) continue
+        const isVid = /medium="video"|\.(mp4|mov)/i.test(mm[0])
+        out.push({
+          id: "ig" + code, kind: "short", vid: isVid ? "mp4" : "img", mp4: isVid ? mm[1] : undefined, img: isVid ? undefined : mm[1],
+          uz: 1, src: "", title,
+          image: isVid ? "" : mm[1], views: 0, duration: 0, time: now(), url: "", cat: "video",
+        })
+        if (out.length >= 12) break
+      }
+      if (out.length) return out
+    } catch {}
+  }
+  return []
+}
+async function igMine(env: Env): Promise<any[]> {
+  const users = listVar(env.MY_IG)
+  if (!users.length) return []
+  const lists = await Promise.all(users.map(async (u) => {
+    const a = await igWebProfile(u).catch(() => [] as any[])
+    if (a.length) return a
+    return igRsshub(u).catch(() => [] as any[])
+  }))
+  return lists.flat()
+}
+// FOYDALANUVCHI HOVUZI: YT + IG — 30 daqiqa edge-kesh (IG CDN havolalari yangi qoladi)
+async function minePool(env: Env): Promise<any[]> {
+  if (!listVar(env.MY_YT).length && !listVar(env.MY_IG).length) return []
+  const ck = "https://trend.50gram.internal/minev1"
+  const meta = await cacheGetJSON<any[]>(ck)
+  if (meta && meta.data?.length) return meta.data
+  const [yt, ig] = await Promise.all([ytMine(env).catch(() => [] as any[]), igMine(env).catch(() => [] as any[])])
+  const seen = new Set<string>()
+  const out = [...yt, ...ig].filter((v) => v && !seen.has(v.id) && seen.add(v.id))
+  if (out.length) {
+    // ALGORITM: YT va IG navbatma-navbat aralashtiriladi (bitta platforma hukmronlik qilmasin)
+    for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[out[i], out[j]] = [out[j], out[i]] }
+    cWaitPut(ck, { t: now(), data: out })
+  }
+  return out
+}
+// kichik yordamchi: keshga yozish (await qilinmaydi)
+function cWaitPut(ck: string, obj: unknown): void {
+  cachePutJSON(ck, obj).catch(() => {})
+}
+async function fT2(url: string, headers: Record<string, string>, ms: number, cacheTtl = 600): Promise<Response | null> {
+  try {
+    const r = await fetch(url, { headers, signal: AbortSignal.timeout(ms), cf: { cacheTtl, cacheEverything: true } } as any)
+    return r.ok ? r : null
+  } catch { return null }
+}
 async function youtubeTrending(): Promise<any[]> {
   // Chet-el trending OLINGAN (foydalanuvchi: faqat o'zbek kontenti) — faqat UZ qidiruvi va kanallar qoladi.
   return []
@@ -1528,51 +1689,25 @@ async function dmTrendingGeneral(): Promise<any[]> {
     }).filter(Boolean)
   } catch { return [] }
 }
-// Mixkit — OCHIQ stock-video manbasi (API/kalit yo'q, bloklanmaydi). Videolar TO'G'RIDAN-TO'G'RI
-// mp4 CDN'dan o'ynaydi — iframe yo'q = YouTube/Dailymotion embed'dan bir necha baravar TEZ ijro.
-// Kategoriyalar har build'da TASODIFIY 5 ta: hayvonot, shahar, oziq-ovqat, sayohat, sport, tabiat...
-// Sarlavhalar tarjima tizimida o'zbekchaga o'giriladi. Poster rasm ham mavjud (darhal ko'rinadi).
-const MIXKIT_CATS = ["animal", "bird", "cat", "dog", "city", "food", "funny", "love", "party", "sport", "street", "sunset", "space", "rain", "snow", "wildlife", "dance", "music", "sea", "beach", "water", "flower", "night", "people", "nature", "sky", "trains", "motorcycle", "airplane", "fish"]
-async function mixkitPool(): Promise<any[]> {
-  const cats = MIXKIT_CATS.slice().sort(() => Math.random() - 0.5).slice(0, 5)
-  const lists = await Promise.all(cats.map(async (cat) => {
-    const r = await fT("https://mixkit.co/free-stock-video/" + cat + "/", 7000, 800)
-    if (!r) return []
-    try {
-      const html = await r.text()
-      const out: any[] = []
-      const chunks = html.split('data-item-grid--video-player-item-id-value="')
-      for (let i = 1; i < chunks.length && out.length < 10; i++) {
-        const q = chunks[i].indexOf('"')
-        const id = chunks[i].slice(0, q)
-        if (!/^\d+$/.test(id)) continue
-        const altM = chunks[i].match(/alt="([^"]{5,150})"/)
-        if (!altM) continue
-        const title = altM[1].replace(/\s+/g, " ").trim().replace(/\.+$/, "")
-        out.push({
-          id: "mk" + id, kind: "short", vid: "mk", mp4: "https://assets.mixkit.co/videos/" + id + "/" + id + "-720.mp4", uz: 0, src: "mk:" + cat,
-          title, image: "https://assets.mixkit.co/videos/" + id + "/" + id + "-thumb-360-0.jpg",
-          views: 0, duration: 0,
-          time: now(), url: "https://mixkit.co/free-stock-video/" + cat + "/", cat: "video",
-        })
-      }
-      return out
-    } catch { return [] }
-  }))
-  return lists.flat()
-}
-async function buildVideoPool(): Promise<{ shorts: any[]; vids: any[] }> {
+// Mixkit OLIB TASHLANDI (2026-10): stock videolar OVOZSIZ chiqardi — foydalanuvchi shikoyati
+// ("mushuk ovozi yo'q reels videolarni juda ko'p ko'rsatmoqda"). Ovozsiz kontent hovuzga kirmasin.
+async function buildVideoPool(env: Env): Promise<{ shorts: any[]; vids: any[] }> {
   // KO'P PLATFORMALI AQILLI HOVUZ (foydalanuvchi: "juda ko'p joylardan olish, faqat youtube emas"):
-  // ① YouTube kanallar (round-robin) ② YouTube qidiruv ③ Dailymotion (6 tasodifiy mavzu)
-  // ④ Mixkit (to'g'ridan-to'g'ri mp4 — ENG TEZ, iframe yo'q, 5 tasodifiy mavzu)
+  // ① FOYDALANUVCHI MANBALARI (mahfiy: o'z YT shorts + IG reels/rasmlari — ALGORITM bilan kuchli ko'rinadi)
+  // ② YouTube kanallar (round-robin) ③ YouTube qidiruv ④ Dailymotion (6 tasodifiy mavzu)
+  // Mixkit OLIB TASHLANDI: stock videolar OVOZSIZ — foydalanuvchi "mushuk ovozi yo'q reels juda ko'p" dedi.
   // Har qadamda BOSHQA platformadan 1 ta — platforma round-robin, hech biri hukmronlik qilmaydi.
-  const [chan0, uz0, dm0, mk0] = await Promise.all([uzChannelShorts(), uzSearch(), dmTrending(), mixkitPool()])
+  const [chan0, uz0, dm0, mine] = await Promise.all([uzChannelShorts(), uzSearch(), dmTrending(), minePool(env)])
   // MINECRAFT QATIY FILTR (foydalanuvchi: "tagi bilan o'chirib yo'q qilib tashla"): Minecraft/
   // Maynkraft/Майнкрафт videolari hovuzga UMUMAN kirmasin — Anilan-dublaj kanallari yangi
   // videolari asosan Minecraft bo'lgani uchun sarlavha bo'yicha qat'iy kesiladi (latin+kirill).
   const BAD_RE = /minecraft|minekraf|maynkraft|минекрафт|майнкрафт/i
   const noBad = (arr: any[]) => (arr || []).filter((v: any) => v && !BAD_RE.test(String(v.title || "")))
-  const chan = noBad(chan0), uz = noBad(uz0), dm = noBad(dm0), mk = noBad(mk0)
+  const chan = noBad(chan0), uz = noBad(uz0), dm = noBad(dm0)
+  // Foydalanuvchi manbalari: yaroqli vidyo (yt/mp4) va rasmlar (img) — dedupe, BOMBA-reklama yo'q
+  const mm: any[] = []
+  const mseen = new Set<string>()
+  for (const v of mine || []) { const k = String(v?.id || ""); if (k && (v.yt || v.mp4 || v.img) && !mseen.has(k)) { mseen.add(k); mm.push(v) } }
   const seen = new Set<string>()
   const chRaw = chan.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt))
   // KANALLAR ROUND-ROBIN + kanal bo'yicha cheklov (3): bir kanal (masalan Minecraft-dublaj
@@ -1595,28 +1730,28 @@ async function buildVideoPool(): Promise<{ shorts: any[]; vids: any[] }> {
   }
   const se = uz.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt)).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
   const dd = dm.filter((v: any) => v && v.embed && !seen.has(v.embed) && seen.add(v.embed))
-  const kk = mk.filter((v: any) => v && v.mp4 && !seen.has(v.mp4) && seen.add(v.mp4))
   const shorts: any[] = []
-  let ci = 0, si = 0, di = 0, ki = 0
-  // PLATFORM ROUND-ROBIN: har aylanishda kanal + qidiruv + DM + Mixkit×2 (mp4 tez — ko'proq)
-  while ((ci < ch.length || si < se.length || di < dd.length || ki < kk.length) && shorts.length < 72) {
+  let mi = 0, ci = 0, si = 0, di = 0
+  // PLATFORM ROUND-ROBIN: har aylanishda FOYDALANUVCHI kontenti ×2 + kanal + qidiruv + DM
+  // (foydalanuvchi akkauntlari yetib borguncha har 5 tadan 2 tasi uning kontenti — keyin qolganlar)
+  while ((mi < mm.length || ci < ch.length || si < se.length || di < dd.length) && shorts.length < 72) {
+    if (mi < mm.length) shorts.push(mm[mi++]) // FOYDALANUVCHI (mahfiy manba)
+    if (mi < mm.length) shorts.push(mm[mi++]) // FOYDALANUVCHI ×2 — algoritm kuchli ko'rsin
     if (ci < ch.length) shorts.push(ch[ci++]) // YouTube kanal (round-robin — boshqa kanal)
     if (si < se.length) shorts.push(se[si++]) // YouTube qidiruv
     if (di < dd.length) shorts.push(dd[di++]) // Dailymotion
-    if (ki < kk.length) shorts.push(kk[ki++]) // Mixkit (mp4 — tez ijro)
-    if (ki < kk.length) shorts.push(kk[ki++]) // Mixkit ×2
   }
   return { shorts: shorts.slice(0, 72), vids: [] }
 }
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  const ck = "https://trend.50gram.internal/poolv13"
+  const ck = "https://trend.50gram.internal/poolv14"
   const meta = await cacheGetJSON<{ shorts: any[]; vids: any[] }>(ck)
   if (meta && meta.data && meta.data.shorts?.length) {
     if (now() - meta.t < POOL_FRESH_MS) return meta.data
-    c.wait(buildVideoPool().then((d) => { if (d.shorts.length) return cachePutJSON(ck, { t: now(), data: d }) }).catch(() => {}))
+    c.wait(buildVideoPool(c.env).then((d) => { if (d.shorts.length) return cachePutJSON(ck, { t: now(), data: d }) }).catch(() => {}))
     return meta.data
   }
-  const d = await buildVideoPool()
+  const d = await buildVideoPool(c.env)
   if (d.shorts.length) await cachePutJSON(ck, { t: now(), data: d })
   return d
 }
@@ -1802,7 +1937,7 @@ async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  const cacheKey = "https://trend.50gram.internal/t12?p=" + page + "&cat=" + onlyCat
+  const cacheKey = "https://trend.50gram.internal/t13?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
@@ -1861,15 +1996,15 @@ async function trend(c: C) {
     const results = await Promise.all(trList.map(async (it) => ({ it, t: await trToUzCached(c, it.title) })))
     for (const { it, t } of results) if (t && t !== it.title) it.title = t
   }
-  items = items.filter((x) => x && x.title)
+  items = items.filter((x) => x && (x.title || x.img)) // img-slidelar sarlavhasiz ham keladi
   // ID: manba-native id'dan (yt id/dm id/mk id — yuqorida berilgan) — URL EMAS!
   // AVVAL id=sha256(url) edi: Mixkit bir kategoriyadagi 4-10 video BIR XIL URL'ga ega —
   // hamma BIR XIL id chiqarardi → klient dedupe ularni tushirardi → hovuz 5-6 tagacha
   // qisqarardi → lenta "5-6 tadan keyin qotib qolmoqda" (asosiy ildiz sabab shu edi!)
   for (const x of items) x.id = (await sha256(x.id || x.url || x.title || String(x.time))).slice(0, 12)
-  // MANBA SIRI (foydalanuvchi talabi): yangilik itemlarida URL/manba klientga CHIQMAYDI —
-  // to'liq matn faqat /trend/article?id= orqali serverda olinadi
-  for (const x of items) if (x.kind === "news") { delete x.url; delete x.src }
+  // MANBA SIRI (foydalanuvchi talabi): QATIY — HAMMA itemdan URL/manba/chid O'CHIRILADI.
+  // Klient hech qachon qaysi platformadan (YT/IG/DM) olinganini bilmasligi kerak.
+  for (const x of items) { delete x.url; delete x.src; delete x.chid; delete x.audio }
   const out = { ok: true, page, items }
   const resp = json(out)
   // Video sahifasida YouTube yo'q bo'lsa 60s kesh (hovuz tuzatilgach tez yangilanadi); qolganlari 600s
