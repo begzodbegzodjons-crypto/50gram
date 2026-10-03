@@ -511,7 +511,7 @@ function reelsHint(box) {
 function postHTML(p) {
   const who = p.chat ? `${avHTML(p.chat, 40, { chat: true })}<div><b>${p.chat.type === 'channel' ? '📢 ' : ''}${esc(p.chat.title)}</b><small>${fmtAgo(p.created_at)}</small></div>` : `${avHTML(p.author, 40)}<div><b>${esc(uname(p.author))}</b><small>${fmtAgo(p.created_at)}</small></div>`
   const media = p.media_id ? (p.media_kind === 'video' ? `<video class="pm" data-media="${p.media_id}" controls playsinline preload="metadata"></video>` : `<img class="pm" data-media="${p.media_id}" data-pv alt="">`) : ''
-  return `<div class="post" data-post="${p.id}"><div class="ph" data-who="${p.chat ? 'c' + p.chat.id : 'u' + (p.author?.id || 0)}">${who}${p.can_delete ? '<button class="ic" data-pdel>🗑</button>' : ''}</div>${p.text_body ? `<div class="pt">${linkify(p.text_body)}</div>` : ''}${media}<div class="pa"><button data-like class="${p.liked ? 'on' : ''}">${p.liked ? '❤️' : '🤍'} ${p.like_count || 0}</button><button data-cmt>💬 ${p.comment_count || 0}</button><button data-psh>↗️ Ulashish</button></div></div>`
+  return `<div class="post" data-post="${p.id}"><div class="ph" data-who="${p.chat ? 'c' + p.chat.id : 'u' + (p.author?.id || 0)}">${who}${p.can_delete ? '<button class="ic" data-pdel>🗑</button>' : ''}</div>${p.text_body ? `<div class="pt">${linkify(p.text_body)}</div>` : ''}${media}<div class="pa"><button data-like class="${p.liked ? 'on' : ''}">${p.liked ? '❤️' : '🤍'} ${p.like_count || 0}</button><button data-cmt>💬 <i data-scc="${p.id}">${p.comment_count || 0}</i></button><button data-psh>↗️ Ulashish</button></div></div>`
 }
 function renderFeed() {
   const box = $('feedlist')

@@ -1767,6 +1767,7 @@ async function reels(c: C) {
 // Task 39: izohlar — ildiz + javoblar (chuqurlik 1, Telegram uslubi), reaksiyalar, stiker izohlar
 const REACT_EMOJIS = ["❤️", "👍", "🔥", "😮", "😂", "🥰", "👏", "😢"]
 async function listComments(c: C) {
+  await ensureSchema(c.db) // yangi ustunlar (parent_id/sticker) mavjudligini kafolatlash
   const rows = await c.db.q("SELECT id,parent_id,user_id,text_body,sticker,created_at FROM post_comments WHERE post_id=? ORDER BY id LIMIT 300", [+c.p.id])
   const um = await usersByIds(c, [...new Set(rows.map((r) => r.user_id))])
   const agg = new Map<number, any[]>(), mine = new Set<string>()
@@ -1786,6 +1787,7 @@ async function listComments(c: C) {
   return json({ roots, total: rows.length, emojis: REACT_EMOJIS })
 }
 async function addComment(c: C) {
+  await ensureSchema(c.db)
   const text = str(c.b.text_body, 1000)
   const sticker = str(c.b.sticker, 64)
   if (!text && !sticker) fail("Izoh bo‘sh")
@@ -1809,6 +1811,7 @@ async function addComment(c: C) {
 }
 // Izohga emoji-reaksiya qo‘yish/olib tashlash (toggle)
 async function reactComment(c: C) {
+  await ensureSchema(c.db)
   const id = +c.p.id
   const emoji = str(c.b.emoji, 8)
   if (!REACT_EMOJIS.includes(emoji)) fail("Emoji qo‘llanmaydi")
@@ -1822,6 +1825,7 @@ async function reactComment(c: C) {
 }
 // Izohni o'chirish: muallif, post egasi yoki kanal admini (javoblari bilan birga)
 async function deleteComment(c: C) {
+  await ensureSchema(c.db)
   const row = await c.db.one("SELECT id,user_id,post_id FROM post_comments WHERE id=?", [+c.p.id])
   if (!row) fail("Izoh topilmadi", 404)
   const p = await c.db.one("SELECT author_id,chat_id FROM posts WHERE id=?", [+row.post_id])
