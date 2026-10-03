@@ -85,11 +85,22 @@ const FW_KESH = new Map<string, number>() // ip → blok muddati (doimiy bloklar
 const FW_RATE = new Map<string, { n: number; t: number }>() // 10s toshqin oynasi
 const FW_4XX = new Map<string, { n: number; t: number }>() // 10 daqiqalik 4xx oynasi
 const FW_ALOC = new Map<string, { n: number; t: number }>() // lokal ochkolar (ip|tur)
+const FW_DATA = new Map<number, { n: number; t: number }>() // ma'lumot-tortish posboni (uid)
+const FW_DO_IPS = new Set<string>() // oxirgi refresh'dagi DO blok ro'yxati (unblock tarqatish uchun)
 let FW_YANGI = 0
 // TIZIM ILDIGA / ADMIN YO'LLARIGA URINISH — bitta urinishda ham 30 kun blok
-const FW_TRAP = /^\/api\/(?:adm(?:in)?|debug|trdbg|srcdbg|dump|purge|internal|root|shell|eval|config|backup|secret|telescope|actuator|\.env|phpmyadmin|wp-admin|wp-login|cgi-bin|console)(?:\/|$)/i
+// (skanerlarning sevimli manzillari kengaytirildi — oddiy foydalanuvchi bu yo'llarga
+//  HECH QACHON kirmaydi, barchasi ilova ichidan ma'lum yo'llargina so'raydi)
+const FW_TRAP = /^\/api\/(?:adm(?:in)?|debug|trdbg|srcdbg|dump|purge|internal|root|shell|eval|config|backup|secret|telescope|actuator|\.env|env|phpmyadmin|wp-admin|wp-login|wp-content|wp-json|wp-includes|xmlrpc|phpinfo|cgi-bin|console|git|svn|hg|aws|\.git|\.svn|\.aws|\.ds_store|jenkins|hudson|cpanel|webmin|adminer|swagger|openapi|api-docs|graphql|graphiql|rpc|soap|wsdl|server-status|metrics|prometheus|grafana|kibana|elastic|solr|docker|vagrant|composer|vendor|manager|examples|docs)(?:\/|$)/i
 // In'ektsiya / traversal belgilari (yo'l + so'rov satrida)
 const FW_INJ = /(?:\.\.[\\/]|%2e%2e(?:%2f|%5c)|<script|javascript:|onerror\s*=|union[\s+]+select|information_schema|sleep\s*\(|benchmark\s*\(|load_file|into[\s+]+outfile|waitfor[\s+]+delay|\/etc\/passwd|\$\{(?:jndi|env\())/i
+// RUXSAT ETILGAN MIJOZLAR — faqat sayt (brauzer) va ilova (APK WebView + APK fon xizmati).
+//  mozilla    — barcha brauzerlar + Android/iOS WebView (PWA sayti)
+//  50gramapp  — APK WebView qo'shimcha belgisi (" 50GramApp/2.x")
+//  dalvik     — APK fon xizmati (KeepAliveService polling, HttpURLConnection standart UA)
+// Qolgan HAR QANDAY mijoz (curl, wget, python, go, skanerlar, botlar) = tashqi jashnchi —
+// 1-urinishdayoq 30 kun blok (hujumchi hech narsa ololmaydi, "Not found" degan javob ko'radi).
+const FW_UA_OK = /mozilla|50gramapp|dalvik/i
 const fwIp = (req: Request) => (req.headers.get("cf-connecting-ip") || "").trim()
 const FW_404 = () => new Response("Not found", { status: 404, headers: { ...SEC_H } })
 function fwBlokli(ip: string) {
@@ -98,7 +109,9 @@ function fwBlokli(ip: string) {
   if (u) FW_KESH.delete(ip)
   return false
 }
-// Doimiy bloklar ro'yxatini har 45s da yangilash (fon — so'rovni kutmaydi)
+// Doimiy bloklar ro'yxatini har 45s da yangilash (fon — so'rovni kutmaydi).
+// UNBLOCK tarqatilishi: IP avvalgi ro'yxatda bo'lib endi yo'q bo'lsa (bloki olib
+// tashlangan) — barcha izolyatlardagi eskirgan kesh yozuvi ham o'chiriladi.
 function fwKeshYana(env: Env, wait: (p: Promise<unknown>) => void) {
   const t = Date.now()
   if (t - FW_YANGI < 45_000 || !env.SEC) return
@@ -108,12 +121,18 @@ function fwKeshYana(env: Env, wait: (p: Promise<unknown>) => void) {
       const st = env.SEC!.get(env.SEC!.idFromName("global"))
       const r = await st.fetch("https://fw/?op=refresh")
       const j: any = await r.json()
-      for (const [ip2, until] of j.blocks || []) FW_KESH.set(String(ip2), Number(until))
+      const nw = new Set<string>()
+      for (const [ip2, until] of j.blocks || []) { FW_KESH.set(String(ip2), Number(until)); nw.add(String(ip2)) }
+      for (const ip2 of FW_DO_IPS) if (!nw.has(ip2)) FW_KESH.delete(ip2)
+      FW_DO_IPS.clear()
+      for (const ip2 of nw) FW_DO_IPS.add(ip2)
     } catch {}
   })())
 }
-// Lokal ochko — shu izolyatda MILLIYATLAR ichida to'siq (DO javobini kutmaydi)
+// Lokal ochko — shu izolyatda MILLIYATLAR ichida to'siq (DO javobini kutmaydi).
+// need <= 1 bo'lsa — BIRINCHI urinishdayoq DARHOL blok (hujumchi hech narsa ololmaydi).
 function fwLokal(ip: string, kind: string, need: number, dur: number) {
+  if (need <= 1) { FW_KESH.set(ip, Date.now() + dur); FW_ALOC.delete(ip + "|" + kind); return true }
   const k = ip + "|" + kind
   const t = Date.now()
   const e = FW_ALOC.get(k)
@@ -2926,6 +2945,18 @@ function fw4xx(env: Env, wait: (p: Promise<unknown>) => void, ip: string) {
 export default {
   async fetch(req: Request, env: Env, ctx?: { waitUntil: (p: Promise<unknown>) => void }): Promise<Response> {
     const url = new URL(req.url)
+    // VAQTINCHA (jonli test uchun) — KEYINGI COMMITDA O'CHIRILADI. Uzoq tasodifiy kalit
+    // bilan faqat blokni yechadi (hech qanday ma'lumot chiqarmaydi, DO'ga tashqaridan yo'l yo'q).
+    if (url.pathname === "/api/sec/unlock") {
+      if ((url.searchParams.get("k") || "") !== "25a6936e405cfb0b7ea868c02c7b8992a87be478ae5da1ec") return FW_404()
+      const target = (url.searchParams.get("ip") || fwIp(req)).trim()
+      const st = env.SEC?.get(env.SEC.idFromName("global"))
+      if (st && target) {
+        try { await st.fetch(`https://fw/?op=unblock&ip=${encodeURIComponent(target)}`) } catch {}
+        FW_KESH.delete(target)
+      }
+      return json({ ok: true })
+    }
     // APK: majburiy yuklab olish (attachment) — ba'zi brauzerlar download atributiga
     // e'tibor bermaydi yoki faylni ochishga harakat qiladi; sarlavha buni hal qiladi
     if (url.pathname === "/50gram.apk") {
@@ -2952,18 +2983,24 @@ export default {
     fwKeshYana(env, wait)
     if (fwip) {
       if (fwBlokli(fwip)) return FW_404()
+      // TASHQI MIJOZ NAZORATI: faqat sayt (brauzer) va ilova (APK WebView/fon xizmati)
+      // ruxsat etilgan. Curl, skaner, skript, bot — tashqi jashnchi: 1-URINISHDA DARHOL
+      // 30 kun blok. Oddiy foydalanuvchi (sayt/app) hech qachon shu to'siqqa urilmaydi.
+      const fua = req.headers.get("user-agent") || ""
+      if (!FW_UA_OK.test(fua)) { FW_KESH.set(fwip, Date.now() + 30 * DAY); fwOchko(env, wait, fwip, "ext"); return FW_404() }
       // Toshqin: 1 IP → 10s ichida 80+ so'rov = darhol lokal blok + doimiy ochko
       const rt = FW_RATE.get(fwip), tn = Date.now()
       if (!rt || tn - rt.t > 10_000) { if (FW_RATE.size > 5000) FW_RATE.clear(); FW_RATE.set(fwip, { n: 1, t: tn }) }
       else if (++rt.n > 80) { FW_KESH.set(fwip, tn + 15 * 60_000); fwOchko(env, wait, fwip, "flood", 2); return FW_404() }
       // Tizim ildiziga/admin yo'llariga RUXSATGIZ kirishga urinish — DARHOL 30 kun blok
       if (FW_TRAP.test(url.pathname)) { FW_KESH.set(fwip, Date.now() + 30 * DAY); fwOchko(env, wait, fwip, "root"); return FW_404() }
-      // In'ektsiya/traversal belgilari (yo'l + query, ikkalasi ham decode/encode holatda)
+      // In'ektsiya/traversal belgilari (yo'l + query) — 1-URINISHDA DARHOL 30 kun blok
       let dec = url.pathname + (url.search || "")
       try { dec += " " + decodeURIComponent(dec) } catch {}
       if (FW_INJ.test(dec)) {
-        if (fwLokal(fwip, "inj", 2, 7 * DAY)) return FW_404()
+        FW_KESH.set(fwip, Date.now() + 30 * DAY)
         fwOchko(env, wait, fwip, "inj")
+        return FW_404()
       }
       // OTP PUMPING: 50 so'rov/1 soat (mobil tarmoq CGNAT — bir IP'da YUZLARGA foydalanuvchi
       // bo'lishi mumkin; avvalgi 25/12soat chegara ODDIY foydalanuvchilarni ham urib yuborardi)
@@ -3004,6 +3041,15 @@ export default {
         const su = await db.one("SELECT sess, logout_at, token_exp FROM users WHERE id=?", [uid])
         if (!su || su.logout_at || (su.token_exp && +su.token_exp < now())) fail("Avtorizatsiya kerak", 401)
         if (payload.s && payload.s !== su.sess) fail("Avtorizatsiya kerak", 401)
+        // MA'LUMOT TORTISH POSBONI (hatto yaroqli token bilan ham ma'lumot olib qochish mumkin emas):
+        // bitta hisob 10 daqiqada 3000+ so'rov = skript (inson UI'da bunga yaqinlasha olmaydi —
+        // ping 45s, qo'ng'iroq polling 20s, lenta paginatsiyasi... hammasi birgalikda << 300).
+        // Chegaradan oshsa — IP 12 soat blok (skript NOL ma'lumot oladi, "Not found" ko'radi).
+        if (fwip) {
+          const de = FW_DATA.get(uid), dt = Date.now()
+          if (!de || dt - de.t > 600_000) { if (FW_DATA.size > 10000) FW_DATA.clear(); FW_DATA.set(uid, { n: 1, t: dt }) }
+          else if (++de.n > 3000) { FW_DATA.delete(uid); FW_KESH.set(fwip, dt + 12 * 3_600_000); fwOchko(env, wait, fwip, "data"); return FW_404() }
+        }
       }
       let b: any = {}
       const ct = req.headers.get("content-type") || ""

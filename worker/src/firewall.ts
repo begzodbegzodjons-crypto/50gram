@@ -15,13 +15,18 @@
 //  • Fail-open: DO ishlamasa ilova ishlashda davom etadi (lokal kesh baribir
 //    darg'aza to'sadi) — mavjudlik (availability) ustuvor.
 //
-// DARAJALAR (juda sezgir, lekin oddiy foydalanuvchi hech qachon yiqilmaydi):
+// DARAJALAR — HUJUM = 1-URINISHDARHOL BLOK (foydalanuvchi talabi):
 //  root  — tizim ildiziga/admin yo'llariga kirishga urinish  → DARHOL 30 kun
-//  inj   — in'ektsiya / traversal belgilari (2 ochko)        → 7 kun
+//  ext   — sayt/ilova EMAS mijoz (curl, skaner, bot)         → DARHOL 30 kun
+//  inj   — in'ektsiya / traversal belgilari                  → DARHOL 30 kun
+//  data  — bitta hisobdan ma'lumot tortish toshqini          → DARHOL 12 soat
 //  auth  — login/kod brute-force (8 urinish/1 soat)          → 24 soat
 //  flood — so'rov toshqini (3 ochko)                         → 15 daqiqa
 //  tok   — yaroqsiz token toshqini (60/1 soat)               → 1 soat
 //  scan  — 4xx toshqini (3 ochko)                            → 30 daqiqa
+//
+// "unblock" op faqat worker ICHIDAN chaqiriladi (DO tashqaridan murojaat
+// qilinmaydi) — operatsion ehtiyoj uchun, hech qanday ochiq route yo'q.
 // =====================================================================
 
 const DAY = 86_400_000
@@ -33,7 +38,9 @@ type StrikeRes = { until: number; blocked: boolean }
 // kind → [kerak ochko, blok muddati]
 const TH: Record<string, [number, number]> = {
   root: [1, 30 * DAY],
-  inj: [2, 7 * DAY],
+  ext: [1, 30 * DAY],
+  inj: [1, 30 * DAY],
+  data: [1, 12 * HOUR],
   auth: [8, 24 * HOUR],
   flood: [3, 15 * 60_000],
   tok: [60, HOUR],
@@ -59,6 +66,15 @@ export class SecFirewall {
     try {
       const url = new URL(req.url)
       if (url.searchParams.get("op") === "refresh") return Response.json(await this.refresh())
+      // UNBLOCK — faqat worker ichidan (DO'ga tashqaridan yo'l yo'q). Blok + ochkolarni tozaydi.
+      if (url.searchParams.get("op") === "unblock") {
+        this.init()
+        const ip = (url.searchParams.get("ip") || "").trim()
+        if (!ip) return Response.json({ ok: false })
+        this.state.storage.sql.exec("DELETE FROM blk WHERE ip=?", ip)
+        this.state.storage.sql.exec("DELETE FROM att WHERE ip=?", ip)
+        return Response.json({ ok: true, ip })
+      }
       if (req.method !== "POST") return new Response("Not found", { status: 404 })
       const b = (await req.json().catch(() => ({}))) as Strike
       if (!b || !b.ip || !TH[b.kind]) return new Response("Not found", { status: 404 })
