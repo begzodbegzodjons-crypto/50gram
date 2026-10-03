@@ -565,7 +565,7 @@ function pgLanguage() {
 }
 function pgAbout() {
   openPage('50 Gram haqida', `
-    <div class="prof"><img src="logo.png" style="width:132px" alt="50 Gram"><h2>50 Gram</h2><div class="mut">Versiya 2.0 «Zamonaviy» · O‘zbekiston</div></div>
+    <div class="prof"><img src="logo.png" style="width:200px" alt="50 Gram"><h2>50 Gram</h2><div class="mut">Versiya 2.0 «Zamonaviy» · O‘zbekiston</div></div>
     <div class="hint">O‘zbekiston uchun yaratilgan tezkor, xavfsiz messenjer: chatlar, kanallar, istoriyalar, jonli efir (sovg‘a va martaba tizimi bilan), Reels va Shorts lenta, HD qo‘ng‘iroqlar.</div>
     ${rowsHTML([
       `<div>${tile('🔒', '#a5d8ff', '#4dabf7')}<div class="rt">Xavfsizlik<small>Ma’lumotlaringiz himoya ostida</small></div></div>`,
