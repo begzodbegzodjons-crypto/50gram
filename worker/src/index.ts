@@ -1311,7 +1311,7 @@ async function youtubeTrending(): Promise<any[]> {
 }
 // --- O'ZBEK SHORTS: Piped/Invidious QIDIRUV — faqat o'zbekcha (1..90s VA sarlavha UZ) ---
 // Chet-el kontenti QATIY filtrlanadi: UZ_RE mos kelmasa — umuman qo'shilmaydi.
-const UZ_QUERIES = ["o‘zbekiston shorts", "o‘zbekcha shorts", "o‘zbek komik shorts", "toshkent shorts", "o‘zbekcha hazil", "qiziqarli o‘zbekcha video", "o‘zbek prank", "o‘zbekcha dubljaz"]
+const UZ_QUERIES = ["o‘zbekiston shorts", "o‘zbekcha shorts", "o‘zbek komik shorts", "toshkent shorts", "o‘zbekcha hazil", "qiziqarli o‘zbekcha video", "o‘zbek prank", "o‘zbekcha dubljaz", "o‘zbekcha qo‘shiq", "o‘zbekcha to‘y", "o‘zbek futbol"]
 async function uzSearch(): Promise<any[]> {
   const one = async (base: string, q: string): Promise<any[]> => {
     const r = await fT(base + "/search?q=" + encodeURIComponent(q) + "&filter=videos", 9000)
@@ -1336,8 +1336,11 @@ async function uzSearch(): Promise<any[]> {
   }
   const out: any[] = []
   const seen = new Set<string>()
+  // HAR BUILD'DA TASODIFIY 7 ta so'rov: hovuz har yangilanishida boshqa mavzular chiqadi
+  // (bir xillik yo'q) + subrequest limiti (50) doim xavfsiz qoladi
+  const qs = UZ_QUERIES.slice().sort(() => Math.random() - 0.5).slice(0, 7)
   const res = await Promise.allSettled([
-    ...PIPED_APIS.flatMap((b) => UZ_QUERIES.map((q) => one(b, q))),
+    ...PIPED_APIS.flatMap((b) => qs.map((q) => one(b, q))),
     ...INVID_APIS.map((b) => oneInvid(b)),
   ])
   for (const r of res) {
@@ -1385,8 +1388,40 @@ async function cachePutJSON(ck: string, obj: unknown): Promise<void> {
 }
 // Dailymotion — yana bir platforma (foydalanuvchi: "insta va boshqa platformalardan ham").
 // API'siz ochiq (key yo'q), sort=trending, embed player'ilova tomonda allaqachon qo'llanadi.
+// HAR XIL MAVZULAR: umumiy trending (ko'pincha bir xil o'yin kontenti chiqaradi) bilan birga
+// har safar TASODIFIY 4 ta mavzu bo'yicha qidiruv — hovuz har yangilanishida boshqa mavzular
+// (musiqa, oshpazlik, futbol, tabiat...) — "faqat bir turdagi videolar" muammosining yechimi.
+const DM_TOPICS = ["music", "dance", "cooking", "football", "animals", "nature", "travel", "cars", "comedy", "science", "art", "fitness", "magic", "fishing", "camping", "cats", "dogs", "satisfying", "adventure", "food"]
+function dmPick(): Promise<any[]> {
+  const topics = DM_TOPICS.slice().sort(() => Math.random() - 0.5).slice(0, 4)
+  return Promise.all(topics.map(async (t) => {
+    const r = await fT("https://api.dailymotion.com/videos?fields=id,title,duration,views_total,thumbnail_360_url,created_time&search=" + encodeURIComponent(t) + "&sort=trending&limit=14&shorter_than=5", 7000, 900)
+    if (!r) return []
+    try {
+      const j: any = await r.json()
+      return ((j.list || []) as any[]).map((v: any) => {
+        const dur = +v.duration || 0
+        if (!v.id || !v.title || dur < 3 || dur > 180) return null
+        return {
+          kind: "short", vid: "dm", embed: String(v.id), uz: 0, src: "dm:" + t,
+          title: String(v.title), image: String(v.thumbnail_360_url || ""),
+          views: +v.views_total || 0, duration: dur,
+          time: +v.created_time > 0 ? +v.created_time * 1000 : now(),
+          url: "https://www.dailymotion.com/video/" + v.id, cat: "video",
+        }
+      }).filter(Boolean)
+    } catch { return [] }
+  })).then((a) => a.flat())
+}
 async function dmTrending(): Promise<any[]> {
-  const r = await fT("https://api.dailymotion.com/videos?fields=id,title,duration,views_total,thumbnail_360_url,created_time&sort=trending&limit=40&shorter_than=5", 7000, 900)
+  const [gen, topics] = await Promise.all([dmTrendingGeneral(), dmPick()])
+  const seen = new Set<string>()
+  const out: any[] = []
+  for (const v of [...topics, ...gen]) { if (v && v.embed && !seen.has(v.embed)) { seen.add(v.embed); out.push(v) } } // mavzular birinchi — xilma-xillik kafolatlangan
+  return out
+}
+async function dmTrendingGeneral(): Promise<any[]> {
+  const r = await fT("https://api.dailymotion.com/videos?fields=id,title,duration,views_total,thumbnail_360_url,created_time&sort=trending&limit=24&shorter_than=5", 7000, 900)
   if (!r) return []
   try {
     const j: any = await r.json()
@@ -1420,7 +1455,7 @@ async function buildVideoPool(): Promise<{ shorts: any[]; vids: any[] }> {
   return { shorts: shorts.slice(0, 60), vids: [] }
 }
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  const ck = "https://trend.50gram.internal/poolv9"
+  const ck = "https://trend.50gram.internal/poolv10"
   const meta = await cacheGetJSON<{ shorts: any[]; vids: any[] }>(ck)
   if (meta && meta.data && meta.data.shorts?.length) {
     if (now() - meta.t < POOL_FRESH_MS) return meta.data
@@ -2350,6 +2385,30 @@ async function storageStats(c: C) {
 
 // ------------------------- Router -------------------------
 type H = (c: C) => Promise<Response>
+// --- VAQTINCHA: test reel topish/o'chirish vositasi (kuchli kalit bilan; keyingi commitda O'CHIRILADI) ---
+const ADM_KEY = "g50x-adm-Tq7Wm3Zp9Rk2Vn5Xb8C"
+function admOk(c: C) { if ((c.url.searchParams.get("k") || "") !== ADM_KEY) fail("Ruxsat yo'q", 403) }
+async function admDump(c: C) {
+  admOk(c)
+  const posts = await c.db.q("SELECT p.id,p.author_id,p.chat_id,p.media_id,p.media_kind,p.text_body,p.views,p.created_at,u.first_name,u.last_name,u.phone FROM posts p LEFT JOIN users u ON u.id=p.author_id WHERE p.media_kind='video' ORDER BY p.id DESC LIMIT 50")
+  return json({ ok: true, posts })
+}
+async function admPurgeReel(c: C) {
+  admOk(c)
+  const id = +(c.url.searchParams.get("post") || 0)
+  if (!id) fail("post kerak")
+  const p = await c.db.one("SELECT id,author_id,media_id FROM posts WHERE id=? AND media_kind='video'", [id])
+  if (!p) fail("Post topilmadi", 404)
+  const cids = (await c.db.q("SELECT id FROM post_comments WHERE post_id=?", [id])).map((r) => r.id)
+  if (cids.length) {
+    await c.db.run(`DELETE FROM comment_reacts WHERE comment_id IN (${ph(cids)})`, cids).catch(() => {})
+    await c.db.run("DELETE FROM post_comments WHERE post_id=?", [id])
+  }
+  await c.db.run("DELETE FROM post_likes WHERE post_id=?", [id])
+  if (p.media_id) await dropMedia(c.db, "id=?", [String(p.media_id)])
+  await c.db.run("DELETE FROM posts WHERE id=?", [id])
+  return json({ ok: true, deleted: id, media: p.media_id || null, comments: cids.length })
+}
 const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/auth/otp", authOtp, true],
   ["POST", "/auth/verify", authVerify, true],
@@ -2449,6 +2508,9 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/messages/:id/comments", listMsgComments],
   ["POST", "/messages/:id/comments", addMsgComment],
   ["DELETE", "/messages/:id/comments/:cid", delMsgComment],
+  // VAQTINCHA (test reel tozalash — keyingi commitda olib tashlanadi):
+  ["GET", "/adm/dump", admDump, true],
+  ["POST", "/adm/purreel", admPurgeReel, true],
 ]
 function match(method: string, path: string) {
   const parts = path.split("/").filter(Boolean)

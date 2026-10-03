@@ -188,7 +188,7 @@ function renderTrendChips() {
   box.innerHTML = Object.entries(TCATS).map(([k, [e, l]]) => `<span class="tchip ${trendCat === k ? 'on' : ''}" data-tc="${k}">${e} ${l}</span>`).join('')
 }
 function trendCard(x) {
-  if (x.kind === 'short') return `<div class="tcard short vid" data-tv="${x.id}" style="${x.image ? `background-image:url('${esc(x.image)}')` : ''}"><span class="tch">⚡ Shorts</span><div class="pplay">▶</div><div class="tcb"><b>${esc(x.title)}</b><small>${x.views ? '👁 ' + fmtN(x.views) : ''}${x.duration ? ' · ' + fmtDur(x.duration) : ''}</small></div></div>`
+  if (x.kind === 'short') return `<div class="tcard short vid" data-tv="${x.id}" style="${x.image ? `background-image:url('${esc(x.image)}')` : ''}"><span class="tch">🎬 Shorts</span><div class="pplay">▶</div><div class="tcb"><b>${esc(x.title)}</b><small>${x.views ? '👁 ' + fmtN(x.views) : ''}${x.duration ? ' · ' + fmtDur(x.duration) : ''}</small></div></div>`
   if (x.kind === 'video') return `<div class="tcard vid" data-tv="${x.id}" style="${x.image ? `background-image:url('${esc(x.image)}')` : ''}"><span class="tch">🎥 Video</span><div class="tcb"><b>${esc(x.title)}</b><small>${fmtAgo(x.time)}${x.views ? ' · 👁 ' + fmtN(x.views) : ''} · ${fmtDur(x.duration || 0)}</small></div></div>`
   const em = TCATS[x.cat] ? TCATS[x.cat][0] : '📰'
   const img = x.image ? `<img loading="lazy" src="${esc(x.image)}" alt="" referrerpolicy="no-referrer">` : `<div class="tnoimg">${em}</div>`
@@ -244,17 +244,26 @@ function obsTrend() {
 function trendSkeleton() {
   return `<div class="tgrid">${Array(6).fill('<div class="tcard sk"><div class="skimg"></div><div class="tcb"><b>‎</b><small>‎</small></div></div>').join('')}</div>`
 }
-// ZUDLIK keshi: oxirgi 1-sahifa localStorage'da (7 kun) — lenta HAR QAYTA OCHILGANDA, hatto ilova
+// ZUDLIK keshi: oxirgi 1-sahifa localStorage'da (3 kun) — lenta HAR QAYTA OCHILGANDA, hatto ilova
 // qayta ishga tushganda/oflaynda ham darhol chiziladi (fon yangilanadi). Bu "lenta sekin" muammosi yechimi.
 function trendCacheSave(items) {
   try { localStorage.setItem('g50_trend_c', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
 }
+function trendCacheAge() {
+  try { const d = JSON.parse(localStorage.getItem('g50_trend_c') || ''); return d && d.t ? Date.now() - d.t : Infinity } catch { return Infinity }
+}
 function trendCacheGet() {
   try {
     const d = JSON.parse(localStorage.getItem('g50_trend_c') || '')
-    if (d && d.items && d.items.length && Date.now() - d.t < 7 * 864e5) return d.items
+    // 3 kun — mavzular tezroq yangilanadi (random algoritm bilan har safar xilma-xil ko'rinish uchun)
+    if (d && d.items && d.items.length && Date.now() - d.t < 3 * 864e5) return d.items
   } catch {}
   return null
+}
+// FISHER-YATES: ro'yxatni joyida aralashtirish — har ochilishda boshqa tartib (bir xillik yo'q)
+function shShuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]] }
+  return a
 }
 async function loadTrend(reset) {
   if (trendBusy) return
@@ -415,7 +424,8 @@ function reelHTML(p) {
 }
 // Reels holati (alohida bo'lim): reelPosts + kesh (oflaynda ham ochiladi)
 let reelPosts = [], reelsEnd = false, reelsBusy = false
-const RKEY = 'g50_reels_c'
+let reelsTrend = [], reelsTrendBusy = false // ro'yxatdagi ommabop Shorts kartalari
+const RKEY = 'g50_reels_c2' // v2: eski keshda qolgan o'chirilgan test reel'lar bekor qilinadi
 function reelsCacheSave() {
   try { localStorage.setItem(RKEY, JSON.stringify({ t: Date.now(), posts: reelPosts.slice(0, 30).map((p) => ({ ...p, meta: p.meta || null })) })) } catch {}
 }
@@ -456,9 +466,56 @@ async function loadReels(reset) {
     // qayta qurish barcha videolarni qayta yuklaydi = sakrash + qotish (shikoyat sababi)
     renderReels(!fromCache)
     reelsCacheSave()
+    fillReelsTrend() // platform Reels kam bo'lsa — ommabop Shorts kartalari to'ldiriladi
   } catch (e) {
     if (!reelPosts.length) $('reelslist').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`
   } finally { reelsBusy = false }
+}
+// Platform Reels kam (10 tadan kam) bo'lsa — ro'yxat OMMABOP Shorts videolari bilan to'ldiriladi.
+// Reels bo'limiga kirganda hech qachon bo'sh/qo'shiq-o'xshash bir xil ko'rinish bo'lmaydi.
+async function fillReelsTrend() {
+  if (reelsTrendBusy || reelPosts.length >= 10 || reelsTrend.length) return
+  reelsTrendBusy = true
+  try {
+    let t = shNormTrend((trendItems.length ? trendItems : (trendCacheGet() || [])).filter((x) => x.kind === 'short'))
+    if (!t.length || t.length < 8) {
+      // Keshda kam shorts bor — tarmoqdan yangi sahifa tortiladi (ko'proq ommabop video)
+      try {
+        const r = await api('/trend?cat=video&page=1')
+        const list = (r && r.items) || r || []
+        if (Array.isArray(list) && list.length) { if (!trendItems.length) trendItems = list.slice(); const more = shNormTrend(list.filter((x) => x.kind === 'short')); if (more.length > t.length) t = more }
+      } catch {}
+    }
+    if (!t.length) return
+    reelsTrend = shShuffle(t.slice()).map((x) => x.x).slice(0, 24) // har ochilishda boshqa tartib
+    appendReelsTrend()
+  } finally { reelsTrendBusy = false }
+}
+function trendReelHTML(v) {
+  return `<div class="reel rtr" data-trend="${esc(v.id || '')}">
+    <img src="${esc(v.image || '')}" alt="" loading="lazy" referrerpolicy="no-referrer">
+    <div class="rshade"></div>
+    <div class="rbot"><div class="rw"><b>${esc(v.title || 'Shorts')}</b></div>${v.views ? `<small class="rviews">👁 ${fmtN(v.views)}</small>` : ''}</div>
+    <div class="rtap"></div>
+  </div>`
+}
+function appendReelsTrend() {
+  const box = $('reelslist')
+  if (!box || !reelsTrend.length) return
+  const rd = qs('.reels', box)
+  if (!rd) { renderReels(); return } // ro'yxat bo'sh edi — to'liq chizamiz
+  const have = new Set(qsa('.reel[data-trend]', box).map((el) => el.dataset.trend))
+  const add = reelsTrend.filter((v) => !have.has(String(v.id)))
+  if (!add.length) return
+  rd.insertAdjacentHTML('beforeend', add.map(trendReelHTML).join(''))
+  const h = $('reelshint')
+  if (h) h.textContent = reelPosts.length ? h.textContent : 'Pastga suring — yana videolar 🎬'
+  syncReelsHeader()
+}
+// MIX ro'yxat (platform Reels + ommabop Shorts) bo'lsa header (➕) KO'RINADI — yashirilmaydi
+function syncReelsHeader() {
+  const t = $('t-reels')
+  if (t) t.classList.toggle('mixlist', !!reelsTrend.length && reelPosts.length < 10)
 }
 function renderReels(inc) {
   const box = $('reelslist')
@@ -481,9 +538,10 @@ function renderReels(inc) {
       return
     }
   }
-  box.innerHTML = reelPosts.length
-    ? `<div class="reels">${reelPosts.map(reelHTML).join('')}</div><div class="hint" id="reelshint" style="text-align:center;padding:12px"></div>`
-    : `<div class="empty"><span class="big">🎬</span>Hali Reels yo‘q — <b>➕</b> tugmasi bilan birinchi videoni joylang!<br><small style="color:var(--xira)">⚡ Shorts esa internetdan videolar keltiradi</small></div>`
+  const trendHTML = reelPosts.length < 10 && reelsTrend.length ? reelsTrend.map(trendReelHTML).join('') : ''
+  box.innerHTML = (reelPosts.length || trendHTML)
+    ? `<div class="reels">${reelPosts.map(reelHTML).join('')}${trendHTML}</div><div class="hint" id="reelshint" style="text-align:center;padding:12px"></div>`
+    : `<div class="empty"><span class="big">🎬</span>Hali Reels yo‘q — <b>➕</b> tugmasi bilan birinchi videoni joylang!<br><small style="color:var(--xira)">Ommabop videolar esa o‘z-o‘zidan ko‘rinadi</small></div>`
   hydrate(box)
   if (reelsObserver) reelsObserver.disconnect()
   const rd2 = qs('.reels', box)
@@ -503,10 +561,11 @@ function renderReels(inc) {
     qsa('.reel video', box).forEach((v) => reelsObserver.observe(v))
   }
   reelsHint(box)
+  syncReelsHeader()
 }
 function reelsHint(box) {
   const h = qs('#reelshint', box)
-  if (h && reelPosts.length) h.textContent = reelsEnd ? 'Hammasi ko‘rildi ✨' : 'Pastga suring — yana videolar 🎬'
+  if (h && (reelPosts.length || reelsTrend.length)) h.textContent = reelsEnd ? 'Hammasi ko‘rildi ✨' : 'Pastga suring — yana videolar 🎬'
 }
 function postHTML(p) {
   const who = p.chat ? `${avHTML(p.chat, 40, { chat: true })}<div><b>${p.chat.type === 'channel' ? '📢 ' : ''}${esc(p.chat.title)}</b><small>${fmtAgo(p.created_at)}</small></div>` : `${avHTML(p.author, 40)}<div><b>${esc(uname(p.author))}</b><small>${fmtAgo(p.created_at)}</small></div>`
@@ -522,6 +581,9 @@ function renderFeed() {
 $('feedseg').onclick = (e) => { const d = e.target.closest('[data-m]'); if (!d) return; feedMode = d.dataset.m; qsa('#feedseg div').forEach((x) => x.classList.toggle('on', x === d)); $('b-post').classList.toggle('hide', feedMode === 'trend'); $('trendchips').classList.toggle('hide', feedMode !== 'trend'); feedMode === 'trend' ? loadTrend(true) : loadFeed(true) }
 // --- Reels bo'limi: kliklar (like/izoh/ulashish/o'chirish/shorts) ---
 $('reelslist').addEventListener('click', async (e) => {
+  // Ommabop Shorts kartasi — tomosha shu videodan boshlanadi
+  const tvc = e.target.closest('[data-trend]')
+  if (tvc) { const x = trendItems.find((v) => v.id === tvc.dataset.trend); if (x) shortsStart({ trend: x }); return }
   const reel = e.target.closest('[data-reel]')
   if (!reel) return
   const p = reelPosts.find((x) => x.id === +reel.dataset.reel); if (!p) return
@@ -809,7 +871,6 @@ function reelSheet() {
   }
 }
 $('b-rupload').onclick = () => reelSheet()
-$('b-rshorts').onclick = () => shortsStart({})
 
 // ---------------- Kontaktlar ----------------
 async function loadContactsQuiet() {
@@ -875,7 +936,7 @@ $('b-cimport').onclick = async () => {
   } catch {}
 }
 
-// ============ ⚡ SHORTS: TikTok-uslubida to'liq ekran vertikal rejim ============
+// ============ SHORTS: TikTok-uslubida to'liq ekran vertikal rejim ============
 // Platform Reels va trend Shorts vertikal ko'rish rejimida.
 let shMuted = localStorage.getItem('g50_shmute') !== '0'
 let shMode = 'trend' // 'reels' — faqat platform Reels · 'trend' — internet Shorts
@@ -1004,16 +1065,17 @@ async function trendShortsFast() {
   }
   return tr
 }
-// Ilova ochilishida trend videolari fonda tayyorlanadi — Reels/Shorts DARHOL qiziq kontent bilan ochiladi
+// Ilova ochilishida trend videolari fonda tayyorlanadi — Reels/Shorts DARHOL qiziq kontent bilan ochiladi.
+// Kesh eski bo'lsa (30 daqiqadan) FONDA yangilanadi — mavzular yangi bo'lib turadi, ochilish sekinlashmaydi.
 window.warmTrend = () => {
   try {
-    if (trendItems.length) return
-    const c = trendCacheGet()
-    if (c) { trendItems = c.slice(); return }
-    api('/trend?cat=video&page=1').then((r) => {
-      const list = (r && r.items) || r || []
-      if (Array.isArray(list) && list.length && !trendItems.length) { trendItems = list; trendCacheSave(list) }
-    }).catch(() => {})
+    if (!trendItems.length) { const c = trendCacheGet(); if (c) trendItems = c.slice() }
+    if (trendCacheAge() > 30 * 60e3) {
+      api('/trend?cat=video&page=1').then((r) => {
+        const list = (r && r.items) || r || []
+        if (Array.isArray(list) && list.length >= 6) { trendItems = list.slice(); trendCacheSave(list) }
+      }).catch(() => {})
+    }
   } catch {}
 }
 async function shLike(p, slide, burst) {
@@ -1223,13 +1285,28 @@ function shClose() {
 async function shortsStart(opt = {}) {
   try {
     if (opt.reelsOnly) {
-      // REELS rejim: foydalanuvchilar videolari + trend Shorts davomi — bo'sh viewer hech qachon ochilmaydi
+      // REELS rejim — HAR SAFAR RANDOM: platform Reels ommabop Shorts ICHIDA tasodifiy
+      // joyda ko'rinadi. Bir xillik umuman yo'q: har ochilishda boshqa tartib, boshqa slayd
+      // birinchi bo'ladi, mavzular ham server tomonda doimiy yangilanib turadi.
       let posts = shNormPosts(reelPosts)
       if (opt.post && !posts.some((x) => x.p.id === opt.post.id)) posts.unshift({ t: 'post', p: opt.post })
       if (!posts.length) { try { posts = shNormPosts(await api('/reels')) } catch {} }
+      // Trendni KESHDAN olamiz (xotira → qurilma) — tarmoq kutmaymiz, viewer zudlik bilan ochiladi
+      let tr = shNormTrend((trendItems.length ? trendItems : (trendCacheGet() || [])).filter((x) => x.kind === 'short'))
+      shShuffle(tr) // har ochilishda boshqa tartib — qayta-qayta bir xil reel ko'rinmaydi
+      if (posts.length && tr.length) {
+        // MIX: postlar Shorts orasiga TASODIFIY joyga qo'yiladi (birinchi ~6 slayd ichida)
+        shMode = 'mix'
+        shTrPage = 1
+        const merged = tr.slice()
+        for (const p of posts) merged.splice(Math.floor(Math.random() * Math.min(6, merged.length)), 0, p)
+        const at = opt.post ? merged.findIndex((x) => x.t === 'post' && x.p.id === opt.post.id) : -1
+        openShorts(merged, at >= 0 ? at : 0)
+        return true
+      }
       if (!posts.length) {
-        // Platformada hali reel yo'q — internet Shorts DARHOL ochiladi (qiziq kontent kutmasdan ko'rinadi)
-        const tr = await trendShortsFast()
+        // Platformada hali reel yo'q — ommabop Shorts DARHOL ochiladi (kutish yo'q)
+        if (!tr.length) { try { tr = await trendShortsFast(); shShuffle(tr) } catch {} }
         if (!tr.length) return false
         shMode = 'trend'
         shTrPage = 1
@@ -1237,17 +1314,18 @@ async function shortsStart(opt = {}) {
         if (tr.length < 4) { api('/trend?cat=video&page=2').then((r) => { const more = shNormTrend((r && r.items) || r || []); if (more.length && shWrap && shMode === 'trend') shAppend(more) }).catch(() => {}) }
         return true
       }
+      // Trend hali keshlanmagan (birinchi ochilish): postlar DARHOL, Shorts fonda qo'shiladi
       shMode = 'mix'
+      shTrPage = 1
       const idx = opt.post ? posts.findIndex((x) => x.p.id === opt.post.id) : 0
       openShorts(posts, Math.max(0, idx))
-      // Trend videolar fonda biriktiriladi — Reels tugagach tomosha uzilmaydi
-      trendShortsFast().then((tr) => { if (tr.length && shWrap && shMode === 'mix') shAppend(tr) }).catch(() => {})
+      trendShortsFast().then((t2) => { if (t2.length && shWrap && shMode === 'mix') shAppend(shShuffle(t2)) }).catch(() => {})
       return true
     }
     // SHORTS rejim: internetdan trend videolar
     const tr = await trendShortsFast()
     if (opt.trend && !tr.some((x) => x.x.id === opt.trend.id)) tr.unshift({ t: 'trend', x: opt.trend })
-    if (!tr.length) return toast('⚡ Shorts hali tayyor emas — birozdan so‘ng urinib ko‘ring')
+    if (!tr.length) return toast('🎬 Shorts hali tayyor emas — birozdan so‘ng urinib ko‘ring')
     shMode = 'trend'
     const idx = opt.trend ? tr.findIndex((x) => x.x.id === opt.trend.id) : 0
     openShorts(tr, Math.max(0, idx))
@@ -1263,7 +1341,7 @@ function openShorts(list, startIdx = 0) {
   const isReels = shMode !== 'trend'
   const w = document.createElement('div')
   w.id = 'shorts'
-  w.innerHTML = `<div class="sh-top"><button class="sh-x" id="sh-x">✕</button><b>${isReels ? '🎬 Reels' : '⚡ Shorts'}</b><div class="sh-sp"></div>${isReels ? '<button class="sh-mute" id="sh-add" title="Reels joylash">➕</button><button class="sh-mute" id="sh-yt" title="Internet Shorts">⚡</button>' : ''}<button class="sh-mute" id="sh-m">${shMuted ? '🔇' : '🔊'}</button></div>
+  w.innerHTML = `<div class="sh-top"><button class="sh-x" id="sh-x">✕</button><b>${isReels ? '🎬 Reels' : '🎬 Shorts'}</b><div class="sh-sp"></div><button class="sh-mute" id="sh-add" title="Reels joylash">➕</button><button class="sh-mute" id="sh-m">${shMuted ? '🔇' : '🔊'}</button></div>
   <div class="sh-scroll">${list.map(shSlideHTML).join('')}</div>`
   document.body.appendChild(w)
   document.body.classList.add('sh-lock')
@@ -1279,7 +1357,6 @@ function openShorts(list, startIdx = 0) {
       if (e.target.closest('#sh-x')) return shClose()
       if (e.target.closest('#sh-m')) return shSetMuted(!shMuted)
       if (e.target.closest('#sh-add')) return reelSheet()
-      if (e.target.closest('#sh-yt')) { shClose(); return shortsStart({}) }
       const slide = e.target.closest('.sh-slide')
       if (!slide) return
       const it = shList[+slide.dataset.shi]
@@ -1325,4 +1402,3 @@ function openShorts(list, startIdx = 0) {
     settle()
   })
 }
-$('b-shorts').onclick = () => shortsStart({})

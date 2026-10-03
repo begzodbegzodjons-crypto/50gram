@@ -457,7 +457,7 @@ function pgAppearance() {
   const acc = +(localStorage.getItem('g50_acc') || 0)
   openPage('Ko‘rinish va ovoz', `
     <div class="sec">Mavzu</div>
-    ${rowsHTML([`<div data-sw2="dark">${tile('🌙', '#7C5CFF', '#4C6EF5')}<div class="rt">Tungi rejim<small>Qorong‘i muhit uchun qulay</small></div>${swHTML(document.documentElement.classList.contains('dark'))}</div>`])}
+    ${rowsHTML([`<div data-sw2="dark">${tile('🌙', '#7C5CFF', '#4C6EF5')}<div class="rt">Tungi rejim<small>Qorong‘i muhit uchun qulay</small></div>${swHTML(document.body.classList.contains('dark'))}</div>`])}
     <div class="sec">Aksent rang</div>
     <div class="accgrid">${ACCTS.map((a, i) => `<button data-acc="${i}" class="${i === acc ? 'on' : ''}" style="background:linear-gradient(135deg,${a[1]},${a[2]})" title="${a[0]}"><i>${i === acc ? '✓' : ''}</i></button>`).join('')}</div>
     <div class="sec">Chat</div>
@@ -468,7 +468,7 @@ function pgAppearance() {
   (p) => {
     p.onclick = async (e) => {
       const dk = e.target.closest('[data-sw2="dark"]')
-      if (dk) { const on = !document.documentElement.classList.contains('dark'); document.documentElement.classList.toggle('dark', on); localStorage.setItem('g50_dark', on ? '1' : '0'); qs('.sw', dk).classList.toggle('on', on); return }
+      if (dk) { const on = !document.body.classList.contains('dark'); document.body.classList.toggle('dark', on); localStorage.setItem('g50_dark', on ? '1' : '0'); qs('.sw', dk).classList.toggle('on', on); return }
       const na = e.target.closest('[data-psw="noanim"]')
       if (na) { savePrefs({ noanim: S.prefs.noanim ? 0 : 1 }); document.body.classList.toggle('noanim', !!S.prefs.noanim); qs('.sw', na).classList.toggle('on', !S.prefs.noanim); return }
       const it = e.target.closest('[data-a],[data-pg]')

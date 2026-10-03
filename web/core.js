@@ -17,6 +17,18 @@ const S = {
 // Tungi ovozsizlik (23:00–07:00): bildirishnoma ovozi/tebranishi o'chadi — o'qilmagan belgisi qoladi
 const quietNow = () => { if (!S.prefs.nightmute) return false; const h = new Date().getHours(); return h >= 23 || h < 7 }
 // ---------------- Barqaror viewport balandligi (--vph) ----------------
+// TUNGI REJIM: DASTUR O'ZI OCHIQ (asosiy) dizaynda ishlaydi — tizim qora rejimi
+// dizaynni o'zgartirmaydi. Faqat Sozlamalar > "Tungi rejim" yoniq bo'lsa qorayadi.
+// BIR MARTALIK MIGRATSIYA: eski versiyada tugma noto'g'ri elementni almashtirar edi
+// (html.dark, CSS esa body.dark) — natijada ilova o'zi qorayib qolardi va o'chmasdi.
+// Shu sababli barcha foydalanuvchilar BIR MAROTA asosiy ochiq dizaynga qaytariladi.
+try {
+  if (!localStorage.getItem('g50_dark_mig')) {
+    localStorage.setItem('g50_dark', '0')
+    localStorage.setItem('g50_dark_mig', '1')
+  }
+} catch {}
+if (localStorage.getItem('g50_dark') === '1') document.body.classList.add('dark')
 // 100dvh scroll davomida o'zgaradi (manzil paneli yashirinadi/ko'rinadi) — to'liq ekran
 // Reels slaydlarining snap nuqtalari siljiydi = "tepa-pastga sakrash". Shuning uchun
 // balandlikni bir marta o'lchab CSS o'zgaruvchiga qo'yamiz; faqat ekran burilishi yoki
@@ -800,7 +812,6 @@ qsa('.dock button').forEach((b) => (b.onclick = () => tabGo(b.dataset.t)))
 // ---------------- ISHGA TUSHIRISH ----------------
 async function startApp() {
   $('auth').classList.add('hide'); $('main').classList.remove('hide'); $('dialog').classList.remove('hide')
-  if (localStorage.getItem('g50_dark') === '1') document.body.classList.add('dark')
   renderChats()
   try { setMe(await api('/me')) } catch (e) { if (!S.token) return }
   if (!S.me.first_name) { $('auth').classList.remove('hide'); $('main').classList.add('hide'); step('a-prof'); return }
