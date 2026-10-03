@@ -1555,11 +1555,15 @@ async function newsPool(c: C): Promise<any[]> {
 }
 // Maqola o'qish uchun: id bo'yicha item (joriy pool → arxiv pool). URL FAQAT serverda qoladi —
 // klient hech qachon manba saytni ko'rmaydi/bilmaydi (foydalanuvchi talabi: manba SIR saqlansin).
+// id trend() bilan BIR XIL formuladan hisoblanadi: sha256(native_id || url || title).slice(0,12)
 async function newsItemById(c: C, id: string): Promise<any | null> {
   for (const key of ["https://trend.50gram.internal/poolN4", "https://trend.50gram.internal/poolN4old"]) {
     const meta = await cacheGetJSON<any[]>(key)
-    const hit = (meta?.data || []).find((x) => x && (x.id === id || "n" + hId(x.url || "") === id))
-    if (hit && hit.url) return hit
+    for (const x of meta?.data || []) {
+      if (!x || x.kind !== "news" || !x.url) continue
+      const iid = (await sha256(x.id || x.url || x.title || String(x.time))).slice(0, 12)
+      if (iid === id) return x
+    }
   }
   return null
 }
