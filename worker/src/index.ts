@@ -2979,6 +2979,10 @@ export default {
     // bilan faqat blokni yechadi (hech qanday ma'lumot chiqarmaydi, DO'ga tashqaridan yo'l yo'q).
     if (url.pathname === "/api/sec/unlock") {
       if ((url.searchParams.get("k") || "") !== "25a6936e405cfb0b7ea868c02c7b8992a87be478ae5da1ec") return FW_404()
+      const st0 = env.SEC?.get(env.SEC.idFromName("global"))
+      if (url.searchParams.get("dbg")) {
+        try { const r0 = await st0!.fetch("https://fw/?op=refresh"); return json({ dbg: await r0.json() }) } catch (e) { return json({ dbg: String(e) }) }
+      }
       const target = (url.searchParams.get("ip") || fwIp(req)).trim()
       const st = env.SEC?.get(env.SEC.idFromName("global"))
       if (st && target) {
