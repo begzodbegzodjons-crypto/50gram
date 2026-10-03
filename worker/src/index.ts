@@ -2350,68 +2350,9 @@ async function storageStats(c: C) {
 
 // ------------------------- Router -------------------------
 type H = (c: C) => Promise<Response>
-// ============ VAQTINCHALIK admin vositasi (test tozalash) — keyingi commitda O'CHIRILADI ============
-const ADMIN_KEY = "g50-x-9f4c2a7e1b8d4f60a3c5e7d9b1f2468a"
-function adminOK(c: C) { if ((c.url.searchParams.get("key") || "") !== ADMIN_KEY) fail("Ruxsat yo'q", 403) }
-async function adminDump(c: C) {
-  adminOK(c)
-  const users = await c.db.q("SELECT id,phone,first_name,last_name,created_at FROM users ORDER BY created_at ASC LIMIT 500")
-  const posts = await c.db.q("SELECT id,author_id,media_kind,created_at FROM posts ORDER BY id DESC LIMIT 100")
-  return json({ users, posts })
-}
-async function adminPurge(c: C) {
-  adminOK(c)
-  // CF Workers free plan 50-subrequest limit — har chaqiruvda BITTA foydalanuvchi
-  const ids: number[] = Array.isArray(c.b.users) ? c.b.users.map(Number).filter(Boolean) : []
-  const id = ids[0]
-  if (!id) return json({ done: [], left: [] })
-  const rest = ids.slice(1)
-  const u = await c.db.one("SELECT id,phone FROM users WHERE id=?", [id])
-  if (!u) return json({ done: [`${id}:yo'q`], left: rest })
-  await c.db.run("DELETE FROM comment_reacts WHERE comment_id IN (SELECT id FROM post_comments WHERE post_id IN (SELECT id FROM posts WHERE author_id=?))", [id])
-  await c.db.run("DELETE FROM post_likes WHERE post_id IN (SELECT id FROM posts WHERE author_id=?)", [id])
-  await c.db.run("DELETE FROM post_comments WHERE post_id IN (SELECT id FROM posts WHERE author_id=?)", [id])
-  await c.db.run("DELETE FROM posts WHERE author_id=?", [id])
-  await c.db.run("DELETE FROM media_chunks WHERE media_id IN (SELECT id FROM media WHERE owner_id=?)", [id])
-  await c.db.run("DELETE FROM peer_have WHERE media_id IN (SELECT id FROM media WHERE owner_id=?)", [id])
-  await c.db.run("DELETE FROM pin_jobs WHERE media_id IN (SELECT id FROM media WHERE owner_id=?)", [id])
-  await c.db.run("DELETE FROM media WHERE owner_id=?", [id])
-  await c.db.run("DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE sender_id=?)", [id])
-  await c.db.run("DELETE FROM poll_votes WHERE message_id IN (SELECT id FROM messages WHERE sender_id=?)", [id])
-  await c.db.run("DELETE FROM msg_comments WHERE message_id IN (SELECT id FROM messages WHERE sender_id=?)", [id])
-  await c.db.run("DELETE FROM messages WHERE sender_id=?", [id])
-  const mem = await c.db.q("SELECT DISTINCT chat_id FROM chat_members WHERE user_id=?", [id])
-  const chatIds = mem.map((x) => x.chat_id)
-  if (chatIds.length) {
-    await c.db.run(`DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE chat_id IN (${ph(chatIds)}))`, chatIds)
-    await c.db.run(`DELETE FROM poll_votes WHERE message_id IN (SELECT id FROM messages WHERE chat_id IN (${ph(chatIds)}))`, chatIds)
-    await c.db.run(`DELETE FROM msg_comments WHERE message_id IN (SELECT id FROM messages WHERE chat_id IN (${ph(chatIds)}))`, chatIds)
-    await c.db.run(`DELETE FROM messages WHERE chat_id IN (${ph(chatIds)})`, chatIds)
-    await c.db.run(`DELETE FROM msg_comments WHERE chat_id IN (${ph(chatIds)})`, chatIds)
-    await c.db.run(`DELETE FROM chat_members WHERE chat_id IN (${ph(chatIds)})`, chatIds)
-    await c.db.run(`DELETE FROM join_requests WHERE chat_id IN (${ph(chatIds)})`, chatIds)
-    await c.db.run(`DELETE FROM chats WHERE id IN (${ph(chatIds)})`, chatIds)
-  }
-  await c.db.run("DELETE FROM story_views WHERE viewer_id=? OR story_id IN (SELECT id FROM stories WHERE user_id=?)", [id, id])
-  await c.db.run("DELETE FROM stories WHERE user_id=?", [id])
-  await c.db.run("DELETE FROM calls WHERE caller_id=? OR callee_id=?", [id, id])
-  await c.db.run("DELETE FROM live_viewers WHERE user_id=? OR live_id IN (SELECT id FROM lives WHERE user_id=?)", [id, id])
-  await c.db.run("DELETE FROM lives WHERE user_id=?", [id])
-  await c.db.run("DELETE FROM contacts WHERE owner_id=? OR phone=?", [id, u.phone])
-  await c.db.run("DELETE FROM blocks WHERE user_id=? OR blocked_id=?", [id, id])
-  await c.db.run("DELETE FROM push_subs WHERE user_id=?", [id])
-  await c.db.run("DELETE FROM wallets WHERE user_id=?", [id])
-  await c.db.run("DELETE FROM pin_jobs WHERE user_id=?", [id])
-  await c.db.run("DELETE FROM otp WHERE phone=?", [u.phone])
-  await c.db.run("DELETE FROM users WHERE id=?", [id])
-  return json({ done: [`${id}:ok`], left: rest })
-}
-// ================== /VAQTINCHALIK admin vositasi ==================
 const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/auth/otp", authOtp, true],
   ["POST", "/auth/verify", authVerify, true],
-  ["GET", "/admin/dump", adminDump, true],
-  ["POST", "/admin/purge", adminPurge, true],
   ["GET", "/avatar/u/:id", (c) => avatar(c, "users"), true],
   ["GET", "/avatar/c/:id", (c) => avatar(c, "chats"), true],
   ["GET", "/health", async () => json({ ok: true, app: "50 Gram" }), true],
