@@ -2224,17 +2224,6 @@ async function likePost(c: C) {
   return json({ liked: !ex, like_count: Number(n?.cnt || 0) })
 }
 // Reels — vertikal video lenta: ochiq kanallar + shaxsiy video postlar (ko'rilgani hisoblanadi)
-// VAQTINCHALIK (2 daqiqadan so'ng O'CHIRILADI): test-IP blokini yechish — maxfiy kalit bilan.
-// Faqat bitta maqsad: devproxy test-IP'si "ext" blokini yechish. Kalitsiz murojaat — oddiy 404.
-async function fwFix(c: C) {
-  const key = c.url.searchParams.get("key") || ""
-  if (key !== "2d64b859d9bf3089e3d79093d98aac59") return new Response("Not found", { status: 404, headers: SEC_H })
-  const ip = (c.url.searchParams.get("ip") || fwIp(c.req)).trim()
-  if (!ip || !/^[\d.:a-fA-F]+$/.test(ip) || !c.env.SEC) return new Response("Not found", { status: 404, headers: SEC_H })
-  await c.env.SEC.get(c.env.SEC.idFromName("global")).fetch("https://fw/?op=unblock&ip=" + encodeURIComponent(ip))
-  return json({ ok: true })
-}
-
 async function reels(c: C) {
   const before = +(c.url.searchParams.get("before") || 0) || Number.MAX_SAFE_INTEGER
   const my = (await c.db.q("SELECT chat_id FROM chat_members WHERE user_id=? AND status='active'", [c.uid])).map((r) => r.chat_id)
@@ -2896,7 +2885,6 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/stories/:id/views", storyViews],
   ["DELETE", "/stories/:id", deleteStory],
   ["GET", "/feed", feed],
-  ["GET", "/fw-fix", fwFix, true],
   ["GET", "/reels", reels],
   ["GET", "/trend", trend],
   ["GET", "/trend/article", trendArticle],
