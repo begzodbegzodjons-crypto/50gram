@@ -116,29 +116,36 @@ function fwBlokli(ip: string) {
   if (e) FW_KESH.delete(ip)
   return false
 }
-// Doimiy bloklar ro'yxatini har 45s da yangilash (fon — so'rovni kutmaydi).
-// DO — yagona ishonchli manba: ro'yxatda YO'Q bo'lgan bloklar keshdan ham o'chadi
-// (v=1 — darhol; v=0 — 90s dan eskirganlari). Shuning uchun blokni yechish barcha
-// izolyatlarga ≤2 daqiqada yetib boradi, hech qanday qoldiq qolmaydi.
-function fwKeshYana(env: Env, wait: (p: Promise<unknown>) => void) {
-  const t = Date.now()
-  if (t - FW_YANGI < 45_000 || !env.SEC) return
-  FW_YANGI = t
-  wait((async () => {
+// Doimiy bloklar ro'yxatini yangilash. DO — yagona ishonchli manba: ro'yxatda YO'Q
+// bo'lgan bloklar keshdan ham o'chadi (v=1 — darhol; v=0 — 90s dan eskirganlari).
+// Shuning uchun blokni yechish (unblock) butun tarmoq bo'ylab tez tarqaladi,
+// hech qanday qoldiq qolmaydi.
+let FW_KET = null as Promise<unknown> | null // ayni bor refresh (dublikatlarni birlashtirish)
+async function fwYangola(env: Env) {
+  if (Date.now() - FW_YANGI < 5_000 || !env.SEC) return
+  FW_YANGI = Date.now()
+  if (FW_KET) return FW_KET
+  FW_KET = (async () => {
     try {
       const st = env.SEC!.get(env.SEC!.idFromName("global"))
       const r = await st.fetch("https://fw/?op=refresh")
       const j: any = await r.json()
       const nw = new Set<string>()
-      for (const [ip2, until] of j.blocks || []) nw.add(String(ip2))
+      for (const [ip2] of (j.blocks || []) as Array<[string, number]>) nw.add(String(ip2))
       const t2 = Date.now()
       for (const [ip2, e] of FW_KESH) {
         if (nw.has(ip2)) continue
         if (e.v === 1 || t2 - e.t > 90_000) FW_KESH.delete(ip2)
       }
-      for (const [ip2, until] of j.blocks as Array<[string, number]>) FW_KESH.set(String(ip2), { u: Number(until), t: t2, v: 1 })
-    } catch {}
-  })())
+      for (const [ip2, until] of (j.blocks || []) as Array<[string, number]>) FW_KESH.set(String(ip2), { u: Number(until), t: t2, v: 1 })
+    } catch {} finally { FW_KET = null }
+  })()
+  return FW_KET
+}
+// Oddiy so'rovlar: fon rejimida (hech qachon kutmaydi — NOL kechikish)
+function fwKeshYana(env: Env, wait: (p: Promise<unknown>) => void) {
+  if (Date.now() - FW_YANGI < 45_000 || !env.SEC) return
+  wait(fwYangola(env))
 }
 // Lokal ochko — shu izolyatda MILLIYATLAR ichida to'siq (DO javobini kutmaydi).
 // need <= 1 bo'lsa — BIRINCHI urinishdayoq DARHOL blok (hujumchi hech narsa ololmaydi).
@@ -2993,7 +3000,13 @@ export default {
     const fwip = fwIp(req)
     fwKeshYana(env, wait)
     if (fwip) {
-      if (fwBlokli(fwip)) return FW_404()
+      if (fwBlokli(fwip)) {
+        // Blok lokal keshdan chiqdi — DO hali ham tasdiqlayaptimi? (≤50ms, faqat
+        // bloklanganlar to'laydi; halol foydalanuvchi bu yo'lga umuman kirmaydi).
+        // Shu tufayli blok yechilgandan ~5s keyin HECH QANDAY qoldiq 404 qolmaydi.
+        try { await fwYangola(env) } catch {}
+        if (fwBlokli(fwip)) return FW_404()
+      }
       // TASHQI MIJOZ NAZORATI: faqat sayt (brauzer) va ilova (APK WebView/fon xizmati)
       // ruxsat etilgan. Curl, skaner, skript, bot — tashqi jashnchi: 1-URINISHDA DARHOL
       // 30 kun blok. Oddiy foydalanuvchi (sayt/app) hech qachon shu to'siqqa urilmaydi.
