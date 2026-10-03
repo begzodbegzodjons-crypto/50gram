@@ -1027,6 +1027,7 @@ function shSlideHTML(it, i) {
   if (x.mp4) pl = `<video src="${esc(x.mp4)}" loop playsinline preload="metadata" data-shaudio="${esc(x.audio || '')}" poster="${esc(x.image || '')}"></video>`
   else if (x.yt) pl = `<iframe data-shyt="1" src="about:blank" data-shsrc="${esc(shYTURL(x.yt))}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>`
   else if (x.ig) pl = `<iframe src="about:blank" data-shsrc="https://www.instagram.com/reel/${esc(x.ig)}/embed/captioned/" allow="autoplay; encrypted-media" allowfullscreen frameborder="0"></iframe>`
+  else if (x.fb) pl = `<iframe src="about:blank" data-shsrc="https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(x.fb)}&autoplay=1&show_text=false&mute=${shMuted ? 1 : 0}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>`
   else pl = `<iframe src="about:blank" data-shsrc="https://geo.dailymotion.com/player.html?video=${esc(x.embed)}&autoplay=1&mute=${shMuted ? 1 : 0}" allow="autoplay; fullscreen; encrypted-media" allowfullscreen frameborder="0"></iframe>`
   const ttl = x.live ? '🔴 Jonli efir — ' + (x.title || '') : x.title
   return `<div class="sh-slide" data-shi="${i}" data-ttrend="1"${bg}>

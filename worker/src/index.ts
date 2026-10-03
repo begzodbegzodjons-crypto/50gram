@@ -1389,11 +1389,11 @@ async function cachePutJSON(ck: string, obj: unknown): Promise<void> {
 // Dailymotion — yana bir platforma (foydalanuvchi: "insta va boshqa platformalardan ham").
 // API'siz ochiq (key yo'q), sort=trending, embed player'ilova tomonda allaqachon qo'llanadi.
 // HAR XIL MAVZULAR: umumiy trending (ko'pincha bir xil o'yin kontenti chiqaradi) bilan birga
-// har safar TASODIFIY 4 ta mavzu bo'yicha qidiruv — hovuz har yangilanishida boshqa mavzular
+// har safar TASODIFIY 6 ta mavzu bo'yicha qidiruv — hovuz har yangilanishida boshqa mavzular
 // (musiqa, oshpazlik, futbol, tabiat...) — "faqat bir turdagi videolar" muammosining yechimi.
-const DM_TOPICS = ["music", "dance", "cooking", "football", "animals", "nature", "travel", "cars", "comedy", "science", "art", "fitness", "magic", "fishing", "camping", "cats", "dogs", "satisfying", "adventure", "food"]
+const DM_TOPICS = ["music", "dance", "cooking", "football", "animals", "nature", "travel", "cars", "comedy", "science", "art", "fitness", "magic", "fishing", "camping", "cats", "dogs", "satisfying", "adventure", "food", "basketball", "surfing", "parkour", "drone", "timelapse", "wildlife", "space", "ocean"]
 function dmPick(): Promise<any[]> {
-  const topics = DM_TOPICS.slice().sort(() => Math.random() - 0.5).slice(0, 4)
+  const topics = DM_TOPICS.slice().sort(() => Math.random() - 0.5).slice(0, 6)
   return Promise.all(topics.map(async (t) => {
     const r = await fT("https://api.dailymotion.com/videos?fields=id,title,duration,views_total,thumbnail_360_url,created_time&search=" + encodeURIComponent(t) + "&sort=trending&limit=14&shorter_than=5", 7000, 900)
     if (!r) return []
@@ -1438,9 +1438,45 @@ async function dmTrendingGeneral(): Promise<any[]> {
     }).filter(Boolean)
   } catch { return [] }
 }
+// Mixkit — OCHIQ stock-video manbasi (API/kalit yo'q, bloklanmaydi). Videolar TO'G'RIDAN-TO'G'RI
+// mp4 CDN'dan o'ynaydi — iframe yo'q = YouTube/Dailymotion embed'dan bir necha baravar TEZ ijro.
+// Kategoriyalar har build'da TASODIFIY 5 ta: hayvonot, shahar, oziq-ovqat, sayohat, sport, tabiat...
+// Sarlavhalar tarjima tizimida o'zbekchaga o'giriladi. Poster rasm ham mavjud (darhal ko'rinadi).
+const MIXKIT_CATS = ["animal", "bird", "cat", "dog", "city", "food", "funny", "love", "party", "sport", "street", "sunset", "space", "rain", "snow", "wildlife", "dance", "music", "sea", "beach", "water", "flower", "night", "people", "nature", "sky", "trains", "motorcycle", "airplane", "fish"]
+async function mixkitPool(): Promise<any[]> {
+  const cats = MIXKIT_CATS.slice().sort(() => Math.random() - 0.5).slice(0, 5)
+  const lists = await Promise.all(cats.map(async (cat) => {
+    const r = await fT("https://mixkit.co/free-stock-video/" + cat + "/", 7000, 800)
+    if (!r) return []
+    try {
+      const html = await r.text()
+      const out: any[] = []
+      const chunks = html.split('data-item-grid--video-player-item-id-value="')
+      for (let i = 1; i < chunks.length && out.length < 10; i++) {
+        const q = chunks[i].indexOf('"')
+        const id = chunks[i].slice(0, q)
+        if (!/^\d+$/.test(id)) continue
+        const altM = chunks[i].match(/alt="([^"]{5,150})"/)
+        if (!altM) continue
+        const title = altM[1].replace(/\s+/g, " ").trim().replace(/\.+$/, "")
+        out.push({
+          kind: "short", vid: "mk", mp4: "https://assets.mixkit.co/videos/" + id + "/" + id + "-720.mp4", uz: 0, src: "mk:" + cat,
+          title, image: "https://assets.mixkit.co/videos/" + id + "/" + id + "-thumb-360-0.jpg",
+          views: 0, duration: 0,
+          time: now(), url: "https://mixkit.co/free-stock-video/" + cat + "/", cat: "video",
+        })
+      }
+      return out
+    } catch { return [] }
+  }))
+  return lists.flat()
+}
 async function buildVideoPool(): Promise<{ shorts: any[]; vids: any[] }> {
-  // Kanal yangiliklari (vaqt bo'yicha) + qidiruv topganlari (ko'rish soni bo'yicha) + Dailymotion trending — aralashtiriladi
-  const [chan, uz, dm] = await Promise.all([uzChannelShorts(), uzSearch(), dmTrending()])
+  // KO'P PLATFORMALI AQILLI HOVUZ (foydalanuvchi: "juda ko'p joylardan olish, faqat youtube emas"):
+  // ① YouTube kanallar (round-robin) ② YouTube qidiruv ③ Dailymotion (6 tasodifiy mavzu)
+  // ④ Mixkit (to'g'ridan-to'g'ri mp4 — ENG TEZ, iframe yo'q, 5 tasodifiy mavzu)
+  // Har qadamda BOSHQA platformadan 1 ta — platforma round-robin, hech biri hukmronlik qilmaydi.
+  const [chan, uz, dm, mk] = await Promise.all([uzChannelShorts(), uzSearch(), dmTrending(), mixkitPool()])
   const seen = new Set<string>()
   const chRaw = chan.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt))
   // KANALLAR ROUND-ROBIN + kanal bo'yicha cheklov (3): bir kanal (masalan Minecraft-dublaj
@@ -1462,19 +1498,22 @@ async function buildVideoPool(): Promise<{ shorts: any[]; vids: any[] }> {
     if (!added) break
   }
   const se = uz.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt)).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
-  const dd = dm.filter((v: any) => v && v.embed)
+  const dd = dm.filter((v: any) => v && v.embed && !seen.has(v.embed) && seen.add(v.embed))
+  const kk = mk.filter((v: any) => v && v.mp4 && !seen.has(v.mp4) && seen.add(v.mp4))
   const shorts: any[] = []
-  let ci = 0, si = 0, di = 0
-  while ((ci < ch.length || si < se.length || di < dd.length) && shorts.length < 60) {
-    if (ci < ch.length) shorts.push(ch[ci++]) // har safar boshqa kanaldan (round-robin)
-    if (si < se.length) shorts.push(se[si++])
-    if (di < dd.length) shorts.push(dd[di++]) // Dailymotion — platforma/mavzu xilma-xilligi
-    if (si >= se.length && di < dd.length) shorts.push(dd[di++]) // qidiruv bo'sh — DM bilan to'ldiriladi (navbat kengayadi)
+  let ci = 0, si = 0, di = 0, ki = 0
+  // PLATFORM ROUND-ROBIN: har aylanishda kanal + qidiruv + DM + Mixkit×2 (mp4 tez — ko'proq)
+  while ((ci < ch.length || si < se.length || di < dd.length || ki < kk.length) && shorts.length < 72) {
+    if (ci < ch.length) shorts.push(ch[ci++]) // YouTube kanal (round-robin — boshqa kanal)
+    if (si < se.length) shorts.push(se[si++]) // YouTube qidiruv
+    if (di < dd.length) shorts.push(dd[di++]) // Dailymotion
+    if (ki < kk.length) shorts.push(kk[ki++]) // Mixkit (mp4 — tez ijro)
+    if (ki < kk.length) shorts.push(kk[ki++]) // Mixkit ×2
   }
-  return { shorts: shorts.slice(0, 60), vids: [] }
+  return { shorts: shorts.slice(0, 72), vids: [] }
 }
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  const ck = "https://trend.50gram.internal/poolv11"
+  const ck = "https://trend.50gram.internal/poolv12"
   const meta = await cacheGetJSON<{ shorts: any[]; vids: any[] }>(ck)
   if (meta && meta.data && meta.data.shorts?.length) {
     if (now() - meta.t < POOL_FRESH_MS) return meta.data
