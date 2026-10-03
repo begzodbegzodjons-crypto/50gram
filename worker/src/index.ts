@@ -1456,7 +1456,7 @@ async function buildVideoPool(): Promise<{ shorts: any[]; vids: any[] }> {
     let added = false
     for (const k of byCh.keys()) {
       const arr = byCh.get(k)!, i = curs.get(k)!
-      if (i >= arr.length || perCh.get(k)! >= 3) continue
+      if (i >= arr.length || perCh.get(k)! >= 2) continue // 2: bir kanal ko'p joy olmasin (Minecraft-dublaj kanallari)
       ch.push(arr[i]); curs.set(k, i + 1); perCh.set(k, perCh.get(k)! + 1); added = true
     }
     if (!added) break
@@ -1468,7 +1468,8 @@ async function buildVideoPool(): Promise<{ shorts: any[]; vids: any[] }> {
   while ((ci < ch.length || si < se.length || di < dd.length) && shorts.length < 60) {
     if (ci < ch.length) shorts.push(ch[ci++]) // har safar boshqa kanaldan (round-robin)
     if (si < se.length) shorts.push(se[si++])
-    if (di < dd.length) shorts.push(dd[di++]) // har youtube'dan 1 Dailymotion — platforma xilma-xilligi
+    if (di < dd.length) shorts.push(dd[di++]) // Dailymotion — platforma/mavzu xilma-xilligi
+    if (si >= se.length && di < dd.length) shorts.push(dd[di++]) // qidiruv bo'sh — DM bilan to'ldiriladi (navbat kengayadi)
   }
   return { shorts: shorts.slice(0, 60), vids: [] }
 }
