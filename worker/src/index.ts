@@ -80,13 +80,18 @@ const now = () => Date.now()
 // Hujumchi: milliyatlar ichida to'siladi (lokal) + doimiy blok (DO, barcha
 // shaharlarda amal qiladi). Bloklanganga javob — ODDIY "Not found" 404:
 // blok bor-yo'qligi, sababi, muddati HECH QANDAY shaklda oshkor qilinmaydi.
+//
+// KESH MODEL: lokal bloklar VAQTINCHALIK (max 2 daqiqa, v=0) — DO markaziy
+// ombor ularni ≤45s ichida tasdiqlasa to'liq muddatga uzaytiriladi (v=1).
+// Shunda blokni yechish (unblock) barcha izolyatlarda o'zi-o'zidan tarqaladi
+// (eskirgan kesh — hujumchiga emas, foydalanuvchiga qaytishi mumkin bo'lgan
+// yagona xavf — ≤2 daqiqada butunlay tozalanadi).
 // =====================================================================
-const FW_KESH = new Map<string, number>() // ip → blok muddati (doimiy bloklar keshi)
+const FW_KESH = new Map<string, { u: number; t: number; v: 0 | 1 }>() // ip → {muddat, qo'yilgan vaqt, tasdiqlanganmi}
 const FW_RATE = new Map<string, { n: number; t: number }>() // 10s toshqin oynasi
 const FW_4XX = new Map<string, { n: number; t: number }>() // 10 daqiqalik 4xx oynasi
 const FW_ALOC = new Map<string, { n: number; t: number }>() // lokal ochkolar (ip|tur)
 const FW_DATA = new Map<number, { n: number; t: number }>() // ma'lumot-tortish posboni (uid)
-const FW_DO_IPS = new Set<string>() // oxirgi refresh'dagi DO blok ro'yxati (unblock tarqatish uchun)
 let FW_YANGI = 0
 // TIZIM ILDIGA / ADMIN YO'LLARIGA URINISH — bitta urinishda ham 30 kun blok
 // (skanerlarning sevimli manzillari kengaytirildi — oddiy foydalanuvchi bu yo'llarga
@@ -103,15 +108,18 @@ const FW_INJ = /(?:\.\.[\\/]|%2e%2e(?:%2f|%5c)|<script|javascript:|onerror\s*=|u
 const FW_UA_OK = /mozilla|50gramapp|dalvik/i
 const fwIp = (req: Request) => (req.headers.get("cf-connecting-ip") || "").trim()
 const FW_404 = () => new Response("Not found", { status: 404, headers: { ...SEC_H } })
+// Lokal (izolyat) blok — VAQTINCHA 2 daqiqa: DO tasdiqlasa uzayadi, yechilsa o'zi tozalanadi
+const fwLBlok = (ip: string, dur: number) => { const t = Date.now(); FW_KESH.set(ip, { u: t + Math.min(dur, 120_000), t, v: 0 }) }
 function fwBlokli(ip: string) {
-  const u = FW_KESH.get(ip)
-  if (u && u > Date.now()) return true
-  if (u) FW_KESH.delete(ip)
+  const e = FW_KESH.get(ip)
+  if (e && e.u > Date.now()) return true
+  if (e) FW_KESH.delete(ip)
   return false
 }
 // Doimiy bloklar ro'yxatini har 45s da yangilash (fon — so'rovni kutmaydi).
-// UNBLOCK tarqatilishi: IP avvalgi ro'yxatda bo'lib endi yo'q bo'lsa (bloki olib
-// tashlangan) — barcha izolyatlardagi eskirgan kesh yozuvi ham o'chiriladi.
+// DO — yagona ishonchli manba: ro'yxatda YO'Q bo'lgan bloklar keshdan ham o'chadi
+// (v=1 — darhol; v=0 — 90s dan eskirganlari). Shuning uchun blokni yechish barcha
+// izolyatlarga ≤2 daqiqada yetib boradi, hech qanday qoldiq qolmaydi.
 function fwKeshYana(env: Env, wait: (p: Promise<unknown>) => void) {
   const t = Date.now()
   if (t - FW_YANGI < 45_000 || !env.SEC) return
@@ -122,23 +130,26 @@ function fwKeshYana(env: Env, wait: (p: Promise<unknown>) => void) {
       const r = await st.fetch("https://fw/?op=refresh")
       const j: any = await r.json()
       const nw = new Set<string>()
-      for (const [ip2, until] of j.blocks || []) { FW_KESH.set(String(ip2), Number(until)); nw.add(String(ip2)) }
-      for (const ip2 of FW_DO_IPS) if (!nw.has(ip2)) FW_KESH.delete(ip2)
-      FW_DO_IPS.clear()
-      for (const ip2 of nw) FW_DO_IPS.add(ip2)
+      for (const [ip2, until] of j.blocks || []) nw.add(String(ip2))
+      const t2 = Date.now()
+      for (const [ip2, e] of FW_KESH) {
+        if (nw.has(ip2)) continue
+        if (e.v === 1 || t2 - e.t > 90_000) FW_KESH.delete(ip2)
+      }
+      for (const [ip2, until] of j.blocks as Array<[string, number]>) FW_KESH.set(String(ip2), { u: Number(until), t: t2, v: 1 })
     } catch {}
   })())
 }
 // Lokal ochko — shu izolyatda MILLIYATLAR ichida to'siq (DO javobini kutmaydi).
 // need <= 1 bo'lsa — BIRINCHI urinishdayoq DARHOL blok (hujumchi hech narsa ololmaydi).
 function fwLokal(ip: string, kind: string, need: number, dur: number) {
-  if (need <= 1) { FW_KESH.set(ip, Date.now() + dur); FW_ALOC.delete(ip + "|" + kind); return true }
+  if (need <= 1) { fwLBlok(ip, dur); FW_ALOC.delete(ip + "|" + kind); return true }
   const k = ip + "|" + kind
   const t = Date.now()
   const e = FW_ALOC.get(k)
   if (!e || t - e.t > 3_600_000) { if (FW_ALOC.size > 5000) FW_ALOC.clear(); FW_ALOC.set(k, { n: 1, t }); return false }
   e.n++
-  if (e.n >= need) { FW_KESH.set(ip, t + dur); FW_ALOC.delete(k); return true }
+  if (e.n >= need) { fwLBlok(ip, dur); FW_ALOC.delete(k); return true }
   return false
 }
 // DO'ga doimiy ochko (fon rejimida — asosiy so'rov sekinlamaydi)
@@ -149,7 +160,7 @@ function fwOchko(env: Env, wait: (p: Promise<unknown>) => void, ip: string, kind
       const st = env.SEC!.get(env.SEC!.idFromName("global"))
       const r = await st.fetch("https://fw/?op=strike", { method: "POST", body: JSON.stringify({ ip, kind, weight }) })
       const j: any = await r.json()
-      if (j && j.until > Date.now()) FW_KESH.set(ip, j.until)
+      if (j && j.until > Date.now()) FW_KESH.set(ip, { u: j.until, t: Date.now(), v: 1 })
     } catch {}
   })())
 }
@@ -2938,7 +2949,7 @@ function fw4xx(env: Env, wait: (p: Promise<unknown>) => void, ip: string) {
   if (!e || t - e.t > 600_000) { if (FW_4XX.size > 5000) FW_4XX.clear(); FW_4XX.set(ip, { n: 1, t }); return false }
   if (++e.n <= 100) return false
   FW_4XX.delete(ip)
-  FW_KESH.set(ip, t + 30 * 60_000)
+  fwLBlok(ip, 30 * 60_000)
   fwOchko(env, wait, ip, "scan", 3)
   return true
 }
@@ -2987,18 +2998,18 @@ export default {
       // ruxsat etilgan. Curl, skaner, skript, bot — tashqi jashnchi: 1-URINISHDA DARHOL
       // 30 kun blok. Oddiy foydalanuvchi (sayt/app) hech qachon shu to'siqqa urilmaydi.
       const fua = req.headers.get("user-agent") || ""
-      if (!FW_UA_OK.test(fua)) { FW_KESH.set(fwip, Date.now() + 30 * DAY); fwOchko(env, wait, fwip, "ext"); return FW_404() }
+      if (!FW_UA_OK.test(fua)) { fwLBlok(fwip, 30 * DAY); fwOchko(env, wait, fwip, "ext"); return FW_404() }
       // Toshqin: 1 IP → 10s ichida 80+ so'rov = darhol lokal blok + doimiy ochko
       const rt = FW_RATE.get(fwip), tn = Date.now()
       if (!rt || tn - rt.t > 10_000) { if (FW_RATE.size > 5000) FW_RATE.clear(); FW_RATE.set(fwip, { n: 1, t: tn }) }
-      else if (++rt.n > 80) { FW_KESH.set(fwip, tn + 15 * 60_000); fwOchko(env, wait, fwip, "flood", 2); return FW_404() }
+      else if (++rt.n > 80) { fwLBlok(fwip, 15 * 60_000); fwOchko(env, wait, fwip, "flood", 2); return FW_404() }
       // Tizim ildiziga/admin yo'llariga RUXSATGIZ kirishga urinish — DARHOL 30 kun blok
-      if (FW_TRAP.test(url.pathname)) { FW_KESH.set(fwip, Date.now() + 30 * DAY); fwOchko(env, wait, fwip, "root"); return FW_404() }
+      if (FW_TRAP.test(url.pathname)) { fwLBlok(fwip, 30 * DAY); fwOchko(env, wait, fwip, "root"); return FW_404() }
       // In'ektsiya/traversal belgilari (yo'l + query) — 1-URINISHDA DARHOL 30 kun blok
       let dec = url.pathname + (url.search || "")
       try { dec += " " + decodeURIComponent(dec) } catch {}
       if (FW_INJ.test(dec)) {
-        FW_KESH.set(fwip, Date.now() + 30 * DAY)
+        fwLBlok(fwip, 30 * DAY)
         fwOchko(env, wait, fwip, "inj")
         return FW_404()
       }
@@ -3048,7 +3059,7 @@ export default {
         if (fwip) {
           const de = FW_DATA.get(uid), dt = Date.now()
           if (!de || dt - de.t > 600_000) { if (FW_DATA.size > 10000) FW_DATA.clear(); FW_DATA.set(uid, { n: 1, t: dt }) }
-          else if (++de.n > 3000) { FW_DATA.delete(uid); FW_KESH.set(fwip, dt + 12 * 3_600_000); fwOchko(env, wait, fwip, "data"); return FW_404() }
+          else if (++de.n > 3000) { FW_DATA.delete(uid); fwLBlok(fwip, 12 * 3_600_000); fwOchko(env, wait, fwip, "data"); return FW_404() }
         }
       }
       let b: any = {}
