@@ -121,7 +121,9 @@ function fwBlokli(ip: string) {
 // Shuning uchun blokni yechish (unblock) butun tarmoq bo'ylab tez tarqaladi,
 // hech qanday qoldiq qolmaydi.
 let FW_KET = null as Promise<unknown> | null // ayni bor refresh (dublikatlarni birlashtirish)
-async function fwYangola(env: Env) {
+// forceIp: shu IP uchun DO'dan YANGI ro'yxat kelganda blok yo'q bo'lsa — lokal yozuvni
+// qattiq o'chir (yangi v=0 himoyasini chetlab). Faqat kutib tekshirilgan yo'lda ishlatiladi.
+async function fwYangola(env: Env, forceIp?: string) {
   if (Date.now() - FW_YANGI < 1_000 || !env.SEC) return
   FW_YANGI = Date.now()
   if (FW_KET) return FW_KET
@@ -138,6 +140,7 @@ async function fwYangola(env: Env) {
         if (e.v === 1 || t2 - e.t > 90_000) FW_KESH.delete(ip2)
       }
       for (const [ip2, until] of (j.blocks || []) as Array<[string, number]>) FW_KESH.set(String(ip2), { u: Number(until), t: t2, v: 1 })
+      if (forceIp && !nw.has(forceIp)) FW_KESH.delete(forceIp)
     } catch {} finally { FW_KET = null }
   })()
   return FW_KET
@@ -3003,8 +3006,9 @@ export default {
       if (fwBlokli(fwip)) {
         // Blok lokal keshdan chiqdi — DO hali ham tasdiqlayaptimi? (≤50ms, faqat
         // bloklanganlar to'laydi; halol foydalanuvchi bu yo'lga umuman kirmaydi).
-        // Shu tufayli blok yechilgandan ~5s keyin HECH QANDAY qoldiq 404 qolmaydi.
-        try { await fwYangola(env) } catch {}
+        // DO yangi ro'yxatida IP yo'q bo'lsa — lokal yozuv DARHOL o'chadi (quyidagi
+        // fwBlokli false bo'ladi): blok yechilishi butun tarmoqda ≤1 so'rovda ko'rinadi.
+        try { await fwYangola(env, fwip) } catch {}
         if (fwBlokli(fwip)) return FW_404()
       }
       // TASHQI MIJOZ NAZORATI: faqat sayt (brauzer) va ilova (APK WebView/fon xizmati)
