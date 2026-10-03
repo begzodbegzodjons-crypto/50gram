@@ -334,7 +334,6 @@ function openTrendNews(x) {
       <h1>${esc(x.title)}</h1>
       <div class="tr-meta"><span>${fmtAgo(x.time)}</span><span id="tr-min">${cached ? '· ' + cached.mins + ' daqiqa o‘qish' : ''}</span></div>
       <div class="tr-text">${cached ? '' : '<div class="tr-skel"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>'}</div>
-      <div class="tr-act"><button class="btn gh" data-trsh>↗️ Ulashish</button></div>
     </div>
   </div>`
   document.body.appendChild(o)
@@ -360,7 +359,6 @@ function openTrendNews(x) {
   load()
   const close = () => { flushTev(); o.classList.remove('on'); setTimeout(() => o.remove(), 200) }
   qs('.xb', o).onclick = close
-  qs('[data-trsh]', o).onclick = () => share((x.title || '50 Gram Yangilik').slice(0, 90), location.origin + location.pathname)
   o.onclick = (e) => { if (e.target === o) close() }
 }
 function openTrendVideo(x) {
