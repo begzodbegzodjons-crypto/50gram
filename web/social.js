@@ -247,15 +247,15 @@ function trendSkeleton() {
 // ZUDLIK keshi: oxirgi 1-sahifa localStorage'da (3 kun) — lenta HAR QAYTA OCHILGANDA, hatto ilova
 // qayta ishga tushganda/oflaynda ham darhol chiziladi (fon yangilanadi). Bu "lenta sekin" muammosi yechimi.
 function trendCacheSave(items) {
-  try { localStorage.setItem('g50_trend_c3', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
+  try { localStorage.setItem('g50_trend_c4', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
 }
 function trendCacheAge() {
-  try { const d = JSON.parse(localStorage.getItem('g50_trend_c3') || ''); return d && d.t ? Date.now() - d.t : Infinity } catch { return Infinity }
+  try { const d = JSON.parse(localStorage.getItem('g50_trend_c4') || ''); return d && d.t ? Date.now() - d.t : Infinity } catch { return Infinity }
 }
 function trendCacheGet() {
   try {
     // c3: eski c2 keshdagi Anilan-Minecraft videolari BATAMOM unutiladi (foydalanuvchi: "eski shunday" — keshda qolib ketgandi)
-    const d = JSON.parse(localStorage.getItem('g50_trend_c3') || '')
+    const d = JSON.parse(localStorage.getItem('g50_trend_c4') || '')
     // 3 kun — mavzular tezroq yangilanadi (random algoritm bilan har safar xilma-xil ko'rinish uchun)
     if (d && d.items && d.items.length && Date.now() - d.t < 3 * 864e5) return d.items
   } catch {}
@@ -481,7 +481,7 @@ function reelHTML(p) {
 }
 // Reels holati (alohida bo'lim): reelPosts + kesh (oflaynda ham ochiladi)
 let reelPosts = [], reelsEnd = false, reelsBusy = false
-const RKEY = 'g50_reels_c4' // v4: eski keshdagi o'chirilgan test/Minecraft reel'lar QATIY bekor (shikoyat: "boshidagi 2 ta minecraft hech yo'qolmadi")
+const RKEY = 'g50_reels_c5' // v5: eski kesh tozalandi (mine-belgili yangi pool + qora ekran qopqog'i)
 function reelsCacheSave() {
   try { localStorage.setItem(RKEY, JSON.stringify({ t: Date.now(), posts: reelPosts.slice(0, 30).map((p) => ({ ...p, meta: p.meta || null })) })) } catch {}
 }
@@ -1009,6 +1009,9 @@ function shBindFrame(f) {
   f.addEventListener('load', () => {
     slide.dataset.ok = '1'
     const l = qs('.sh-load', slide); if (l) l.style.display = 'none'
+    // IG/DM/FB embedlari playing-habari yubormaydi — yuklanganda poster-qopqoq ketadi.
+    // YT qopqog'i REAL o'ynashgacha TURADI (shYTMsgBind'da ketadi) — qora ekran umuman ko'rinmaydi.
+    if (!f.dataset.shyt) { const cv = qs('.sh-cover', slide); if (cv) cv.classList.add('off') }
     // YT PLAYER HANDSHAKE: enablejsapi'li player ota-oynadan "listening" so'rovisiz HECH QANDAY
     // postMessage yubormaydi. Handshake yuborilmasa quyidagi kuzatuv O'YNAYOTGAN videoni ham
     // "o'ynamayapti" deb XATO topardi — har ~9 sekundda keyingi slaydga avto-sakrash (shikoyat).
@@ -1061,7 +1064,7 @@ function shYTMsgBind(w) {
         || (d.event === 'onVideoProgress' && +inf?.currentTime > 0.5)
       if (!isPlay) return
       const fr = qsa('iframe[data-shyt]', w)
-      for (const f of fr) { try { if (f.contentWindow === e.source) { f.closest('.sh-slide').dataset.playing = '1'; return } } catch {} }
+      for (const f of fr) { try { if (f.contentWindow === e.source) { const sl = f.closest('.sh-slide'); if (sl) { sl.dataset.playing = '1'; const cv = qs('.sh-cover', sl); if (cv) cv.classList.add('off') } return } } catch {} }
     } catch {}
   }
   window.addEventListener('message', w._shMsg)
@@ -1099,9 +1102,14 @@ function shSlideHTML(it, i) {
   else if (x.ig) pl = `<iframe src="about:blank" data-shsrc="https://www.instagram.com/reel/${esc(x.ig)}/embed/captioned/" allow="autoplay; encrypted-media" allowfullscreen frameborder="0"></iframe>`
   else if (x.fb) pl = `<iframe src="about:blank" data-shsrc="https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(x.fb)}&autoplay=1&show_text=false&mute=${shMuted ? 1 : 0}" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>`
   else pl = `<iframe src="about:blank" data-shsrc="https://geo.dailymotion.com/player.html?video=${esc(x.embed)}&autoplay=1&mute=${shMuted ? 1 : 0}" allow="autoplay; fullscreen; encrypted-media" allowfullscreen frameborder="0"></iframe>`
+  // QORA EKRAN HIMOYASI (sh-cover): iframe slaydlarda thumbnail QOPQOGI — player REAL o'ynashgacha
+  // ekranda HECH QACHON qora fon ko'rinmaydi (thumbnail + yuklanmoqda spinnner ko'rinadi).
+  // O'ynash boshlanganda qopqoq fade bo'lib ketadi; o'ynamasa watchdog slaydni o'chiradi —
+  // foydalanuvchi qora ekranda turib qolmaydi (shikoyat: "qora ekran yana chiqyapti").
+  const cov = !x.mp4 && !x.img && x.image ? `<img class="sh-cover" src="${esc(x.image)}" alt="" loading="lazy">` : ''
   const ttl = x.live ? '🔴 Jonli efir — ' + (x.title || '') : x.title
   return `<div class="${x.mp4 ? 'sh-slide paused' : 'sh-slide'}" data-shi="${i}" data-ttrend="1"${bg}>
-    ${pl}
+    ${pl}${cov}
     <div class="sh-load"><i></i><i></i><i></i></div>
     <div class="sh-failbox">⏳ Yuklanmadi — internet sekin bo'lishi mumkin<br>Pastga suring — keyingi ko'rinadi</div>
     <div class="sh-shade"></div>
@@ -1294,12 +1302,15 @@ function shActivate(w, slide) {
       else {
         ifr.dataset.loaded = '1'
         slide.dataset.ok = '' // qayta yuklanmoqda — eskirgan ok-belgi SOXTA pass bermasin (qora ekran himoyasi)
+        slide.dataset.playing = '' // shPrune'dan qayta yuklashda eski playing-belgi QOLMASIN — watchdog soxta pass bermasin
+        const cv = qs('.sh-cover', slide); if (cv) cv.classList.remove('off') // qayta yuklanmoqda — poster qaytadi (qora ko'rinmaydi)
         ifr.src = ifr.dataset.shsrc || ''
         shBindFrame(ifr)
       }
     } else if (ifr.dataset.loaded !== '1' && ifr.dataset.shsrc) {
       ifr.dataset.loaded = '1'
       slide.dataset.ok = ''
+      const cv = qs('.sh-cover', slide); if (cv) cv.classList.remove('off')
       ifr.src = ifr.dataset.shsrc
       shBindFrame(ifr)
     }
@@ -1343,7 +1354,10 @@ function shActivate(w, slide) {
         slide._shrt = 1 // faqat 1 marta joyida qayta yuklash
         slide.dataset.ok = ''; slide.dataset.playing = ''
         ifr.dataset.loaded = ''
-        ifr.src = ifr.dataset.shsrc || ''
+        const cv = qs('.sh-cover', slide); if (cv) cv.classList.remove('off') // qayta yuklashda poster qaytadi
+        // FALLBACK: qayta yuklashda www.youtube.com (youtube-nocookie ba'zi tarmoq/WebView'da
+        // bot-devoriga tushadi — asosiy domenda player ochiladi)
+        ifr.src = (ifr.dataset.shsrc || '').replace('www.youtube-nocookie.com', 'www.youtube.com') || ifr.dataset.shsrc || ''
         shBindFrame(ifr)
         if (!shMuted) setTimeout(() => { try { if (slide.isConnected) { shYTpost(ifr, 'unMute'); shYTpost(ifr, 'playVideo') } } catch {} }, 1500) // yangi player mute=1 bilan ochiladi — ovozni tiklaymiz
         clearTimeout(slide._shytw)
@@ -1526,7 +1540,12 @@ async function shortsStart(opt = {}) {
       const ft = tr.filter((x) => !shSeen.has(shKey(x)))
       tr = ft.length ? ft : tr
       shShuffle(posts) // HAR SAFAR RANDOM tartib — boshidagi bir xil slaydlar yo'q
-      shShuffle(tr) // har ochilishda boshqa tartib — qayta-qayta bir xil reel ko'rinmaydi
+      // MINE BIRINCHI: foydalanuvchining o'z kanali shortslari lentaSning ENG BOSHIDA chiqadi
+      // (hamma foydalanuvchi ko'radi — server 'mine' belgisini beradi, manba nomi baribir SIR).
+      // Guruhlar ichida random — bir xillik yo'q.
+      const m1 = shShuffle(tr.filter((x) => x.x && x.x.mine))
+      const o1 = shShuffle(tr.filter((x) => !(x.x && x.x.mine)))
+      tr = m1.concat(o1)
       if (posts.length && tr.length) {
         // MIX: postlar Shorts orasiga TASODIFIY joyga qo'yiladi (birinchi ~6 slayd ichida)
         shMode = 'mix'

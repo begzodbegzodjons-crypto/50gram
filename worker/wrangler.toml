@@ -51,8 +51,11 @@ TEST_PHONES = ""
 # MY_YT: YouTube kanal ID (UC...) yoki @handle, vergul bilan ajratilgan. Shorts tabi olinadi.
 # MY_IG: Instagram profil nomi (ochiq/public akkaunt bo'lishi shart), vergul bilan.
 # reels + rasmlar avtomatik olinib, algoritm bo'yicha Reels lentaSiga aralashtiriladi.
-# VAQTINCHALIK YANGI TV turibdi (sinov) — foydalanuvchi o'z kanalini/akkauntini yuborganda almashadi:
-MY_YT = "UCd5_-70CbGPmmz2YusxX1zQ"
+# FOYDALANUVCHINING O'Z KANALI: "Begzod1985 Begzodjon" (@begzodbegzodjon).
+# PAROL KERAK EMAS — kanal ochiq (public), shorts tabi server tomonidan o'qiladi (RSS-uslub).
+# Kanal hozircha BO'SH: birinchi shorts yuklanishi bilan ular AVTOMATIK (30 daqiqaga qadar)
+# Reels/Shorts lentaSiga chiqadi — HAMMA foydalanuvchi ko'radi, lentaSning boshida.
+MY_YT = "UCAUIQJqBsu4SCNLjHHMHV7g"
 MY_IG = ""
 # IG serveri Cloudflare IP'larini bloklasa — foydalanuvchi brauzeridan olingan 'sessionid'
 # cookie qiymatini secret qilib qo'shish kerak: npx wrangler secret put MY_IG_COOKIE

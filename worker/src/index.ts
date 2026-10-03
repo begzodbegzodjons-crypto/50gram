@@ -1538,8 +1538,10 @@ async function ytShortsOfChannel(ch: string): Promise<any[]> {
       const tM = chunk.match(/"primaryText":\{"content":"(.*?)"/)
       const title = (tM ? tM[1] : "").replace(/\\u([\dA-Fa-f]{4})/g, (_, x) => { try { return String.fromCharCode(parseInt(x, 16)) } catch { return "" } }).replace(/\\u0026/g, "&").replace(/&amp;/g, "&").replace(/\\"/g, '"').replace(/\\\//g, "/").replace(/\\n/g, " ").trim()
       const vid = idM[1]
+      // mine:1 — FOYDALANUVCHI kanali belgisi: klient lentaSning BOSHIGA chiqaradi
+      // (manba nomi baribir SIR — sanitizer src/chid/url'ni o'chiradi, mine bayrog'i qoladi)
       out.push({
-        id: "yt" + vid, kind: "short", vid: "yt", yt: vid, uz: 1, src: "", chid: ch,
+        id: "yt" + vid, kind: "short", vid: "yt", yt: vid, uz: 1, src: "", chid: ch, mine: 1,
         title: title.slice(0, 140), image: "https://i.ytimg.com/vi/" + vid + "/hqdefault.jpg",
         views: 0, duration: 0, time: now(), url: "", cat: "video",
       })
@@ -1585,7 +1587,7 @@ async function igWebProfile(env: Env, user: string): Promise<any[]> {
         if (!media) continue
         out.push({
           id: "ig" + code, kind: "short", vid: vurl ? "mp4" : "img", mp4: vurl || undefined, img: vurl ? undefined : iurl,
-          uz: 1, src: "", title: cap.slice(0, 140),
+          uz: 1, src: "", mine: 1, title: cap.slice(0, 140),
           image: iurl, views: 0, duration: 0,
           time: +n.taken_at_timestamp > 0 ? +n.taken_at_timestamp * 1000 : now(),
           url: "", cat: "video",
@@ -1615,7 +1617,7 @@ async function igRsshub(user: string): Promise<any[]> {
         const isVid = /medium="video"|\.(mp4|mov)/i.test(mm[0])
         out.push({
           id: "ig" + code, kind: "short", vid: isVid ? "mp4" : "img", mp4: isVid ? mm[1] : undefined, img: isVid ? undefined : mm[1],
-          uz: 1, src: "", title,
+          uz: 1, src: "", mine: 1, title,
           image: isVid ? "" : mm[1], views: 0, duration: 0, time: now(), url: "", cat: "video",
         })
         if (out.length >= 12) break
@@ -1638,7 +1640,8 @@ async function igMine(env: Env): Promise<any[]> {
 // FOYDALANUVCHI HOVUZI: YT + IG — 30 daqiqa edge-kesh (IG CDN havolalari yangi qoladi)
 async function minePool(env: Env): Promise<any[]> {
   if (!listVar(env.MY_YT).length && !listVar(env.MY_IG).length) return []
-  const ck = "https://trend.50gram.internal/minev1"
+  // minev2: foydalanuvchining o'z kanali ulandi (YANGI TV olib tashlandi) — eski kesh bekor
+  const ck = "https://trend.50gram.internal/minev2"
   const meta = await cacheGetJSON<any[]>(ck)
   if (meta && meta.data?.length) return meta.data
   const [yt, ig] = await Promise.all([ytMine(env).catch(() => [] as any[]), igMine(env).catch(() => [] as any[])])
@@ -1679,6 +1682,9 @@ async function uzSearch(): Promise<any[]> {
         const dur = +v.duration || 0
         if (!id || dur < 1 || dur > 90) return null // FAQAT haqiqiy Shorts uzunligi — uzun video va jonli efir yo'q
         const title = String(v.title || "")
+        // UPLOADER-FILTR: sarlavhasida "minecraft" yozilmagan Minecraft/o'yin kanallari ham
+        // kanal nomi bo'yicha kesiladi (Anilan uslubi — foydalanuvchi "batamom o'chir" dedi)
+        if (/minecraft|minekraf|maynkraft|anilan|минекрафт|майнкрафт/i.test(String((v as any).uploaderName || ""))) return null
         if (!UZ_RE.test(title)) return null // QATIY: faqat o'zbekcha sarlavhali videolar
         return {
           id: "yt" + id.split("&")[0], kind: "short", vid: "yt", yt: id.split("&")[0], uz: 1, src: "s",
@@ -1715,6 +1721,8 @@ async function oneInvid(base: string): Promise<any[]> {
     return (Array.isArray(j) ? j : []).map((v: any) => {
       const dur = +v.lengthSeconds || 0
       const title = String(v.title || "")
+      // UPLOADER-FILTR (Piped bilan bir xil): Minecraft-kanallar nomi bo'yicha ham kesiladi
+      if (/minecraft|minekraf|maynkraft|anilan|минекрафт|майнкрафт/i.test(String(v.author || ""))) return null
       if (!v.videoId || dur < 1 || dur > 90 || !UZ_RE.test(title)) return null
       return {
         id: "yt" + String(v.videoId), kind: "short", vid: "yt", yt: String(v.videoId), uz: 1, src: "s",
@@ -1853,8 +1861,8 @@ async function buildVideoPool(env: Env): Promise<{ shorts: any[]; vids: any[] }>
   return { shorts: shorts.slice(0, 72), vids: [] }
 }
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  // v15: Anilan-Minecraft videolari bosilgan eski hovuz BATAMOM bekor (v14'da qolganlari ko'rinmasin)
-  const ck = "https://trend.50gram.internal/poolv15"
+  // v16: foydalanuvchi kanali ulandi (minev2) + uploader-filtr — eski hovuz BATAMOM bekor
+  const ck = "https://trend.50gram.internal/poolv16"
   const meta = await cacheGetJSON<{ shorts: any[]; vids: any[] }>(ck)
   if (meta && meta.data && meta.data.shorts?.length) {
     if (now() - meta.t < POOL_FRESH_MS) return meta.data
@@ -2047,8 +2055,8 @@ async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  // t14: eski CDN-keshlarda qolgan Minecraft/junk sahifalar darhol yo'qolsin
-  const cacheKey = "https://trend.50gram.internal/t14?p=" + page + "&cat=" + onlyCat
+  // t15: mine-belgisi + uploader-filtr bilan yangi hovuz — eski CDN-keshlar darhol yo'qolsin
+  const cacheKey = "https://trend.50gram.internal/t15?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
