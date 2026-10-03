@@ -1127,7 +1127,7 @@ function classify(text: string, src: string): string {
   if (src === "bbc") return "world"
   return "uz"
 }
-const decodeEnt = (s: string) => s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;|&rsquo;/g, "'").replace(/&nbsp;/g, " ").replace(/&hellip;/g, "…").replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(+n) } catch { return "" } })
+const decodeEnt = (s: string) => s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;|&rsquo;/g, "'").replace(/&nbsp;/g, " ").replace(/&hellip;/g, "…").replace(/&copy;|&#169;/gi, "©").replace(/&laquo;/gi, "«").replace(/&raquo;/gi, "»").replace(/&mdash;/g, "—").replace(/&ndash;/g, "–").replace(/&ldquo;|&#8220;/g, "“").replace(/&rdquo;|&#8221;/g, "”").replace(/&#x([0-9a-fA-F]+);/g, (_, n) => { try { return String.fromCodePoint(parseInt(n, 16)) } catch { return "" } }).replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(+n) } catch { return "" } })
 const stripHtml = (s: string) => decodeEnt(s.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ")).trim()
 function tagGet(block: string, tag: string): string {
   const m = block.match(new RegExp("<" + tag + ">(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</" + tag + ">"))
@@ -1581,6 +1581,8 @@ function extractArticle(html: string): { paras: string[]; image: string; title: 
     .replace(/<(script|style|noscript|iframe|svg|form|link|meta)[^>]*\/?>/gi, " ")
   const art = h.match(/<article[\s\S]*?<\/article>/i) || h.match(/<main[\s\S]*?<\/main>/i)
   if (art) h = art[0]
+  // Sayt qoldiqlari (mualliflik, obuna, texnik yordam) — HECH QACHON o'qilmaydi (manba nomi shu yerda yashiringan)
+  const JUNK_RE = /(barcha huquqlar|huquqlar himoyalangan|yozma roz|saytdagi xabarlar|rozlilik|roziligi|xato topdingizmi|xatingizni oldik|to['’‘ʼ]g['’‘ʼ]irlaymiz|ro['’‘ʼ]yxatdan o['’‘ʼ]t(ing|ish)|ctrl\+enter|copyright|©|ijro etuvchi|tizimli xabar|shu sayt|bizning sayt)/i
   const raw: string[] = []
   const pm = h.matchAll(/<p[\s>][\s\S]*?<\/p\s*>/gi)
   for (const m of pm) {
@@ -1589,6 +1591,7 @@ function extractArticle(html: string): { paras: string[]; image: string; title: 
     if (t.length < 35) continue
     if (/(obuna bo|telegram|instagram|facebook|youtube|@[\w_]{4,}|https?:\/\/|www\.|manba:|izohlan|ko'rishlar soni|reklama|\d{1,2}:\d{2}$)/i.test(t)) continue
     if (/^[\s\d.,:;!?%()'"«»\-—+]+$/.test(t)) continue
+    if (JUNK_RE.test(t)) continue
     // MANBA SIRI: matn ichida manba sayt nomi uchrasa ham tozalanadi (kun.uz, daryo.uz, BBC...)
     t = t.replace(/\b(kun\s?\.?\s?uz|daryo\s?\.?\s?uz|gazeta\s?\.?\s?uz|spot\s?\.?\s?uz|nuz\s?\.?\s?uz|bbc|ббс)\b/gi, "").replace(/\(\s*\)/g, "").replace(/\s{2,}/g, " ").trim()
     if (t.length < 30) continue
@@ -1736,7 +1739,7 @@ async function trendSrcDbg(c: C) {
 async function trendArticle(c: C) {
   const id = str(c.url.searchParams.get("id") || "", 48)
   if (!id) fail("id kerak")
-  const ck = "https://art.50gram.internal/a/" + id
+  const ck = "https://art.50gram.internal/a2/" + id
   const hit = await cacheGetJSON<any>(ck)
   if (hit && hit.data?.paras?.length) return json({ ...hit.data, cached: true })
   const item = await newsItemById(c, id)
