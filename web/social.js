@@ -1009,9 +1009,10 @@ function shBindFrame(f) {
   f.addEventListener('load', () => {
     slide.dataset.ok = '1'
     const l = qs('.sh-load', slide); if (l) l.style.display = 'none'
-    // IG/DM/FB embedlari playing-habari yubormaydi — yuklanganda poster-qopqoq ketadi.
+    // IG/DM/FB embedlari playing-habari yubormaydi — yuklanganidan 1.2s keyin poster-qopqoq
+    // ketadi (player birinchi kadr chizishiga VAQT beriladi — qora miltillash bo'lmaydi).
     // YT qopqog'i REAL o'ynashgacha TURADI (shYTMsgBind'da ketadi) — qora ekran umuman ko'rinmaydi.
-    if (!f.dataset.shyt) { const cv = qs('.sh-cover', slide); if (cv) cv.classList.add('off') }
+    if (!f.dataset.shyt) setTimeout(() => { const cv = qs('.sh-cover', slide); if (cv && slide.isConnected) cv.classList.add('off') }, 1200)
     // YT PLAYER HANDSHAKE: enablejsapi'li player ota-oynadan "listening" so'rovisiz HECH QANDAY
     // postMessage yubormaydi. Handshake yuborilmasa quyidagi kuzatuv O'YNAYOTGAN videoni ham
     // "o'ynamayapti" deb XATO topardi — har ~9 sekundda keyingi slaydga avto-sakrash (shikoyat).
