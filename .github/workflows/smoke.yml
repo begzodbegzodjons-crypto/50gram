@@ -13,7 +13,6 @@ jobs:
           sleep 45  # deploy tugashini kutish
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
           BASE="https://50gram.begzodbegzodjons.workers.dev"
-          P=$(python3 -c "import sys,json;print(json.load(sys.stdin)$1)")
           H=$(curl -s -A "$UA" "$BASE/api/health"); echo "health: $H"
           echo "$H" | grep -q '"ok":true' || { echo "FAIL health"; exit 1; }
           # 1) KIRISH (test raqami — dev kod ilova-ichki rejim)
