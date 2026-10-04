@@ -1670,7 +1670,7 @@ async function youtubeTrending(): Promise<any[]> {
 }
 // --- O'ZBEK SHORTS: Piped/Invidious QIDIRUV — faqat o'zbekcha (1..90s VA sarlavha UZ) ---
 // Chet-el kontenti QATIY filtrlanadi: UZ_RE mos kelmasa — umuman qo'shilmaydi.
-const UZ_QUERIES = ["o‘zbekiston shorts", "o‘zbekcha shorts", "o‘zbek komik shorts", "toshkent shorts", "o‘zbekcha hazil", "qiziqarli o‘zbekcha video", "o‘zbek prank", "o‘zbekcha dubljaz", "o‘zbekcha qo‘shiq", "o‘zbekcha to‘y", "o‘zbek futbol"]
+const UZ_QUERIES = ["o‘zbekiston shorts", "o‘zbekcha shorts", "o‘zbek komik shorts", "toshkent shorts", "o‘zbekcha hazil", "qiziqarli o‘zbekcha video", "o‘zbek prank", "o‘zbekcha dubljaz", "o‘zbekcha qo‘shiq", "o‘zbekcha to‘y", "o‘zbek futbol", "o‘zbek raqs", "o‘zbekcha multfilm", "o‘zbek kino", "samarqand", "buxoro", "o‘zbek taom", "o‘zbekcha clip"]
 async function uzSearch(): Promise<any[]> {
   const one = async (base: string, q: string): Promise<any[]> => {
     const r = await fT(base + "/search?q=" + encodeURIComponent(q) + "&filter=videos", 9000)
@@ -1755,26 +1755,29 @@ function ytCount(s: string): number {
   else if (sfx === "ming" || sfx === "k") n *= 1e3
   return Math.round(n)
 }
-function ytTrendItem(id: string, title: string, views: number, img: string): any {
+function ytTrendItem(id: string, title: string, views: number, img: string, uz = 0): any {
   const vid = String(id).slice(0, 11)
   return {
-    id: "yt" + vid, kind: "short", vid: "yt", yt: vid, uz: 0, src: "tr",
+    id: "yt" + vid, kind: "short", vid: "yt", yt: vid, uz, src: "tr",
     title: String(title).slice(0, 140), image: img || "https://i.ytimg.com/vi/" + vid + "/hqdefault.jpg",
     views, duration: 0, time: now(),
     url: "https://www.youtube.com/watch?v=" + vid, cat: "video",
   }
 }
 // ① ASOSIY: YouTube QIDIRUV + SHORTS FILTR (innertube, params=EgIYAQ==) — "trenddagi
-// millionlab shortslar" manbasi: qidiruv natijalari MILLIONLAB ko'rishli viral shortslar
-// (81M/26M/17M views tekshirildi). Akkaunt/parol/API-kalit KERAK EMAS (ochiq jamoaviy manba).
-// Har hovuz qurilishida tasodifiy 5 mavzu — har sahifa xilma-xil (bir xillik yo'q).
+// millionlab shortslar" manbasi: qidiruv natijalari MILLIONLAB ko'rishli viral shortslar.
+// O'ZBEKISTON BIRINCHI (foydalanuvchi talabi: "ko'proq o'zbekistondagi trendlar, o'zbeklarning
+// shortslarini ko'rsatadigan qil"): har hovuz qurilishida tasodifiy 5 ta O'ZBEK mavzu
+// (gl=UZ, hl=uz — YouTube o'zbekistonlik yaratuvchilarni ko'rsatadi) + 1 ta global mavzu
+// (kichik ulush — xilma-xillik uchun). Akkaunt/parol/API-kalit KERAK EMAS (ochiq jamoaviy manba).
 const YT_PUBKEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8" // youtube.com sahifasidagi OCHIQ kalit (maxfiy emas)
-const TREND_QUERIES = [
-  "funny shorts", "comedy shorts", "viral shorts", "satisfying shorts", "prank shorts",
-  "music shorts", "dance shorts", "animals shorts", "food shorts", "football skills",
-  "asmr shorts", "travel shorts", "try not to laugh", "tiktok compilation", "reaction shorts",
-  "sports shorts", "cartoon shorts", "diy shorts", "nature shorts", "city shorts",
+const UZ_TREND_QUERIES = [
+  "o‘zbekcha shorts", "o‘zbek shorts", "o‘zbekiston shorts", "toshkent shorts", "o‘zbek komediya shorts",
+  "o‘zbek qo‘shiq shorts", "o‘zbek raqs shorts", "o‘zbekcha hazil", "o‘zbek to‘y", "o‘zbek futbol shorts",
+  "o‘zbekcha dubljaz", "samarqand shorts", "buxoro shorts", "o‘zbek taomlari shorts", "o‘zbekcha multfilm",
+  "o‘zbek milliy", "navoiy", "o‘zbek kino shorts", "andijon shorts", "farg‘ona shorts",
 ]
+const GLOBAL_QUERIES = ["funny shorts", "viral shorts", "satisfying shorts", "music shorts", "animals shorts", "food shorts"]
 // Daraxt bo'ylab barcha shortsLockupViewModel yig'uvchi (layout o'zgarsa ham ishlaydi)
 function collectShorts(o: any, out: any[]) {
   if (!o || typeof o !== "object") return
@@ -1790,8 +1793,10 @@ function collectShorts(o: any, out: any[]) {
   for (const k of Object.keys(o)) collectShorts(o[k], out)
 }
 async function ytSearchShorts(): Promise<any[]> {
-  const qs = TREND_QUERIES.slice().sort(() => Math.random() - 0.5).slice(0, 5)
-  const res = await Promise.allSettled(qs.map(async (q) => {
+  const uzQ = UZ_TREND_QUERIES.slice().sort(() => Math.random() - 0.5).slice(0, 5)
+  const gq = GLOBAL_QUERIES[Math.floor(Math.random() * GLOBAL_QUERIES.length)]
+  const jobs = [...uzQ.map((q) => ({ q, uz: 1 })), { q: gq, uz: 0 }]
+  const res = await Promise.allSettled(jobs.map(async (job) => {
     const r = await fetch("https://www.youtube.com/youtubei/v1/search?key=" + YT_PUBKEY + "&prettyPrint=false", {
       method: "POST",
       headers: {
@@ -1800,9 +1805,9 @@ async function ytSearchShorts(): Promise<any[]> {
         "x-origin": "https://www.youtube.com",
         "x-youtube-client-name": "1",
         "x-youtube-client-version": "2.20241126.01.00",
-        "accept-language": "en",
+        "accept-language": job.uz ? "uz,ru" : "en",
       },
-      body: JSON.stringify({ context: { client: { clientName: "WEB", clientVersion: "2.20241126.01.00", hl: "en", gl: "US" } }, query: q, params: "EgIYAQ==" }),
+      body: JSON.stringify({ context: { client: { clientName: "WEB", clientVersion: "2.20241126.01.00", hl: job.uz ? "uz" : "en", gl: job.uz ? "UZ" : "US" } }, query: job.q, params: "EgIYAQ==" }),
       signal: AbortSignal.timeout(9000),
       cf: { cacheTtl: 1800, cacheEverything: true },
     } as any)
@@ -1810,6 +1815,7 @@ async function ytSearchShorts(): Promise<any[]> {
     const j: any = await r.json()
     const out: any[] = []
     collectShorts(j, out)
+    for (const v of out) v.uz = job.uz // o'zbek mavzudan kelgan itemlar O'ZBEK deb belgilanadi (hovuz uz-birinchi)
     return out
   }))
   const out: any[] = []
@@ -1958,6 +1964,10 @@ async function buildVideoPool(env: Env): Promise<{ shorts: any[]; vids: any[] }>
   }
   // QOLGAN trend itemlar kanal/qidiruv dedupesidan KEYIN (hovuzni to'ldiradi)
   const tr2 = tr.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt))
+  // O'ZBEKISTON BIRINCHI (foydalanuvchi talabi: "ko'proq o'zbekistondagi trendlar, o'zbeklarning
+  // shortslarini ko'rsatadigan qil"): o'zbekcha-belgili itemlar hovuzning BOSHIGA — klientning
+  // 1-3-sahifalari deyarli to'liq o'zbek kontenti. Global qoldiq orqa sahifalarda xilma-xillik uchun.
+  tr2.sort((a: any, b: any) => (b.uz || 0) - (a.uz || 0))
   const se = uz.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt)).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
   const dd = dm.filter((v: any) => v && v.embed && !seen.has(v.embed) && seen.add(v.embed))
   // Mine itemlar umumiy hovuz bilan ham kesishadi (foydalanuvchi kanali RSS'da ham bo'lsa — takror slot yo'q)
@@ -1982,7 +1992,8 @@ async function buildVideoPool(env: Env): Promise<{ shorts: any[]; vids: any[] }>
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
   // v18: trend manba = qidiruv-shorts filtr (haqiqiy viral shortslar) — eski hovuz bekor —
   // eski hovuz (v16, trendsiz) BATAMOM bekor, yangi kesh kaliti
-  const ck = "https://trend.50gram.internal/poolv18"
+  // v19: O'ZBEKISTON-BIRINCHI hovuz (o'zbek qidiruv gl=UZ + uz-first sort) — eski (inglizcha-og'ir) hovuz bekor
+  const ck = "https://trend.50gram.internal/poolv19"
   const meta = await cacheGetJSON<{ shorts: any[]; vids: any[] }>(ck)
   if (meta && meta.data && meta.data.shorts?.length) {
     if (now() - meta.t < POOL_FRESH_MS) return meta.data
@@ -2171,6 +2182,25 @@ async function trendInsights(c: C) {
     cats: scores, top: scores[0]?.cat || "",
   })
 }
+// QORA EKRAN ILDIZ-FILTRI (foydalanuvchi: "inglizcha sarlavhali shortslar qora ekran bo'lib
+// ishlamaydi"): embed-qilib bo'lmaydigan YT videolari (UMG musiqalari, maxfiy/o'chirilgan,
+// mintaqa-blokgan) iframe'da HECH QACHON o'ynamaydi — qora ekran. YouTube oEmbed video
+// embedga yaroqsiz bo'lsa 401/404 qaytaradi — shu xususiyatdan foydalaniladi.
+// Natija 24 SOAT keshlanadi — bir xil video har so'rovda qayta tekshirilmaydi (tezlik).
+async function ytEmbedOk(id: string): Promise<boolean> {
+  const ck = "https://trend.50gram.internal/emd1/" + id
+  try {
+    const hit = await caches.default.match(ck)
+    if (hit) return (await hit.text()) === "1"
+  } catch {}
+  let ok = true
+  try {
+    const r = await fetch("https://www.youtube.com/oembed?url=" + encodeURIComponent("https://www.youtube.com/watch?v=" + id) + "&format=json", { signal: AbortSignal.timeout(3500) })
+    ok = r.ok // 200=yaroqli, 401/403/404=embed taqiqlangan/o'chirilgan — QORA EKRAN bo'ladi
+  } catch {} // tarmoq xatosida video ayblamasin (klient watchdog + onError baribir himoyalaydi)
+  try { await caches.default.put(ck, new Response(ok ? "1" : "0", { headers: { "cache-control": "public, max-age=86400" } })) } catch {}
+  return ok
+}
 async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
@@ -2196,6 +2226,26 @@ async function trend(c: C) {
     items = all.slice(s0, s0 + 12)
     if (items.length < 12 && all.length) items.push(...all.slice(0, 12 - items.length))
     for (let i = items.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[items[i], items[j]] = [items[j], items[i]] }
+    // QORA EKRAN ILDIZ-FILTRI (foydalanuvchi: "inglizcha videolar qora ekran bo'lib ko'rsatmayapti"):
+    // embed-yaroqsiz YT videolar olib tashlanadi — o'rniga hovuzdan TEKSHIRILGAN yaroqli video
+    // qo'yiladi. Ko'pi 6 ta almashtirish-tekshiruvi (subrequest limiti xavfsizligi uchun).
+    // Keshlanganida 0 ta so'rov — tezlik umuman ta'sir qilmaydi.
+    const badSet = new Set<string>()
+    const yids = [...new Set(items.filter((x: any) => x.vid === "yt" && x.yt).map((x: any) => String(x.yt)))]
+    if (yids.length) {
+      await Promise.all(yids.map(async (id) => { if (!(await ytEmbedOk(id))) badSet.add(id) }))
+      if (badSet.size) {
+        const repl: any[] = []
+        for (let i = 0; i < all.length && repl.length < Math.min(6, badSet.size); i++) {
+          const cand: any = all[(s0 + 12 + i) % all.length]
+          if (!cand || cand.vid !== "yt" || !cand.yt || badSet.has(String(cand.yt)) || items.some((x: any) => x.yt === cand.yt) || repl.some((x: any) => x.yt === cand.yt)) continue
+          if (await ytEmbedOk(cand.yt)) repl.push(cand)
+        }
+        let ri = 0
+        items = items.map((x: any) => (x.vid === "yt" && badSet.has(String(x.yt)) && ri < repl.length) ? repl[ri++] : x)
+        items = items.filter((x: any) => x && !(x.vid === "yt" && badSet.has(String(x.yt))))
+      }
+    }
   } else {
     const pool = await newsPool(c)
     if (onlyCat && CAT_KEYS.includes(onlyCat)) {

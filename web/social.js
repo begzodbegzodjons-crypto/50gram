@@ -1405,7 +1405,7 @@ function shActivate(w, slide) {
       slide.classList.add('sh-fail')
       toast('⚠️ Bir nechta video yuklanmadi — internetni tekshiring', 3000)
     }
-  }, 8000) // 12→10→8s: qora ekran qisqa turadi; soxta-fail readyState nazorati bilan himoyalangan
+  }, 6000) // 12→8→6s: qora ekran qisqa turadi; soxta-fail readyState nazorati bilan himoyalangan
   // YT IJRO KUZATUVI: iframe yuklandi lekin player 7s ichida O'YNAMASA — avval joyida 1 marta
   // yangi player qayta yuklanadi (sekin tarmoqda ko'p yordam beradi), yana o'ynamasa — o'chiriiladi.
   // AVVAL 15s edi + soxta 'playing' belgisi bilan deyarli ishlamasdi (qora ekran shikoyati).
