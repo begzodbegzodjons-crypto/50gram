@@ -1687,8 +1687,8 @@ async function uzSearch(): Promise<any[]> {
         if (/minecraft|minekraf|maynkraft|anilan|минекрафт|майнкрафт/i.test(String((v as any).uploaderName || ""))) return null
         if (!UZ_RE.test(title)) return null // QATIY: faqat o'zbekcha sarlavhali videolar
         return {
-          id: "yt" + id.split("&")[0], kind: "short", vid: "yt", yt: id.split("&")[0], uz: 1, src: "s",
-          title, image: String(v.thumbnail || ""),
+          id: "yt" + id.split("&")[0], kind: "short", vid: "yt", yt: id.split("&")[0], uz: 2, src: "s", // 2: UZ_RE qATIY filtr'dan o'tgan — to'liq o'zbekcha
+          title, image: String(v.thumbnail || "https://i.ytimg.com/vi/" + id.split("&")[0] + "/hqdefault.jpg"), // bo'sh thumbnail — hqdefault zaxira (qora qopqoq bo'lmasin)
           views: +v.views || 0, duration: dur,
           time: +v.uploaded > 0 ? +v.uploaded : now(),
           url: "https://www.youtube.com/watch?v=" + id.split("&")[0], cat: "video",
@@ -1725,8 +1725,8 @@ async function oneInvid(base: string): Promise<any[]> {
       if (/minecraft|minekraf|maynkraft|anilan|минекрафт|майнкрафт/i.test(String(v.author || ""))) return null
       if (!v.videoId || dur < 1 || dur > 90 || !UZ_RE.test(title)) return null
       return {
-        id: "yt" + String(v.videoId), kind: "short", vid: "yt", yt: String(v.videoId), uz: 1, src: "s",
-        title, image: String(v.videoThumbnails?.[0]?.url || ""),
+        id: "yt" + String(v.videoId), kind: "short", vid: "yt", yt: String(v.videoId), uz: 2, src: "s", // 2: UZ_RE qATIY filtr'dan o'tgan
+        title, image: String(v.videoThumbnails?.[0]?.url || "https://i.ytimg.com/vi/" + String(v.videoId) + "/hqdefault.jpg"),
         views: +v.viewCount || 0, duration: dur,
         time: +v.published > 0 ? +v.published * 1000 : now(),
         url: "https://www.youtube.com/watch?v=" + v.videoId, cat: "video",
@@ -1737,6 +1737,11 @@ async function oneInvid(base: string): Promise<any[]> {
 // Reddit (403: serverdan bloklangan) va TikTok (O'zbekistonda VPN'siz ishlamaydi) manbalari olib tashlandi.
 
 // ================= YOUTUBE GLOBAL TREND SHORTS (foydalanuvchi talabi) =================
+// DAILYMOTION OLIB TASHLANDI (2026-10-04): DM videolar O'zbekistonda ochilmaydi/geo-bloklangan
+// — klientda DM/IG/FB embedlarning ijro-kuzatuvi YO'Q (postMessage handshake yo'q), qopqoq 1.2s'da
+// ketardi va video o'ynamasa slayd BITTAQ QORA turib qolardi (skrinshot: "How to Make Perfect
+// Toffee Apples, 24 · 0:38" — DM topic-qidiruvidan inglizcha video). DM = qora ekran + ingliz
+// kontent — hovuzdan BATAMOM chiqarildi.
 // "youtubeda millionlab shorts videolar bor — trenddagi millionlab shortslarni 50gram
 // dasturga reels bo'limiga olib ko'rsatadigan qilib ishla" — YouTube TREND (FEshorts)
 // lentasi OCHIQ jamoaviy kontent: akkaunt, parol yoki API-kalit KERAK EMAS.
@@ -1815,7 +1820,7 @@ async function ytSearchShorts(): Promise<any[]> {
     const j: any = await r.json()
     const out: any[] = []
     collectShorts(j, out)
-    for (const v of out) v.uz = job.uz // o'zbek mavzudan kelgan itemlar O'ZBEK deb belgilanadi (hovuz uz-birinchi)
+    for (const v of out) v.uz = job.uz ? (UZ_RE.test(String(v.title || "")) ? 2 : 1) : 0 // 2=QATIY o'zbekcha sarlavha (hovuz interleave 1-daraja)
     return out
   }))
   const out: any[] = []
@@ -1929,7 +1934,7 @@ async function buildVideoPool(env: Env): Promise<{ shorts: any[]; vids: any[] }>
   // ③ YouTube kanallar (round-robin) ④ YouTube qidiruv ⑤ Dailymotion (tasodifiy mavzular)
   // Mixkit OLIB TASHLANDI: stock videolar OVOZSIZ — foydalanuvchi "mushuk ovozi yo'q reels juda ko'p" dedi.
   // Har qadamda BOSHQA platformadan — platforma round-robin, hech biri hukmronlik qilmaydi.
-  const [tr0, chan0, uz0, dm0, mine] = await Promise.all([ytGlobalTrend(), uzChannelShorts(), uzSearch(), dmTrending(), minePool(env)])
+  const [tr0, chan0, uz0, mine] = await Promise.all([ytGlobalTrend(), uzChannelShorts(), uzSearch(), minePool(env)]) // DM olib tashlandi (qora ekran — yuqoridagi izohga qarang)
   // MINECRAFT QATIY FILTR (foydalanuvchi: "tagi bilan o'chirib yo'q qilib tashla"): Minecraft/
   // Maynkraft/Майнкрафт videolari hovuzga UMUMAN kirmasin — Anilan-dublaj kanallari yangi
   // videolari asosan Minecraft bo'lgani uchun sarlavha bo'yicha qat'iy kesiladi (latin+kirill).
@@ -1937,7 +1942,7 @@ async function buildVideoPool(env: Env): Promise<{ shorts: any[]; vids: any[] }>
   // Sarlavha-filtri + VIDEO-ID blok: sarlavhasida "minecraft" yozilmagan o'yin videolari ham
   // (Anilan dublaj uslubi) ID bo'yicha kesiladi — foydalanuvchi "batamom o'chir" dedi.
   const noBad = (arr: any[]) => (arr || []).filter((v: any) => v && !BAD_RE.test(String(v.title || "")) && !BLOCK_VIDS.has(String(v.yt || "")) && !GAME_RE.test(String(v.title || "")))
-  const tr = noBad(tr0), chan = noBad(chan0), uz = noBad(uz0), dm = noBad(dm0)
+  const tr = noBad(tr0), chan = noBad(chan0), uz = noBad(uz0)
   // Foydalanuvchi manbalari: yaroqli vidyo (yt/mp4) va rasmlar (img) — dedupe, BOMBA-reklama yo'q
   const mm: any[] = []
   const mseen = new Set<string>()
@@ -1964,36 +1969,39 @@ async function buildVideoPool(env: Env): Promise<{ shorts: any[]; vids: any[] }>
   }
   // QOLGAN trend itemlar kanal/qidiruv dedupesidan KEYIN (hovuzni to'ldiradi)
   const tr2 = tr.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt))
-  // O'ZBEKISTON BIRINCHI (foydalanuvchi talabi: "ko'proq o'zbekistondagi trendlar, o'zbeklarning
-  // shortslarini ko'rsatadigan qil"): o'zbekcha-belgili itemlar hovuzning BOSHIGA — klientning
-  // 1-3-sahifalari deyarli to'liq o'zbek kontenti. Global qoldiq orqa sahifalarda xilma-xillik uchun.
-  tr2.sort((a: any, b: any) => (b.uz || 0) - (a.uz || 0))
   const se = uz.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt)).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
-  const dd = dm.filter((v: any) => v && v.embed && !seen.has(v.embed) && seen.add(v.embed))
   // Mine itemlar umumiy hovuz bilan ham kesishadi (foydalanuvchi kanali RSS'da ham bo'lsa — takror slot yo'q)
   const mmo = mm.filter((v: any) => !v.yt || !seen.has(v.yt))
+  // O'ZBEKISTON-BIRINCHI INTERLEAVE (foydalanuvchi talabi: "ko'proq o'zbekistondagi trendlar,
+  // o'zbeklarning shortslarini ko'rsatadigan qil"): UZ kontenti FAQAT hovuz boshida emas — BUTUN
+  // hovuz bo'ylab ~3:1 nisbatda aralashtiriladi. NO-REPEAT rb-bucket hovuzning istalgan chuqur
+  // qismini olibdi (rb*37 offseti 1073 gacha) — AVVAL chuqur oynalar TO'LIQ inglizcha chiqardi
+  // ("2 ta video ko'rsatib 3-chisi inglizcha/qora" shikoyati shu tufayli edi). Endi istalgan
+  // 12-lik oynada ~75% o'zbek kontenti bor.
+  // uz=2 (QATIY o'zbekcha sarlavha) → uzA; uz=1 (UZ qidiruvidan, sarlavha chetkiy bo'lishi mumkin) → uzB; uz=0 → global.
+  const uzA: any[] = [], uzB: any[] = [], glT: any[] = []
+  for (const v of tr2) { const u = v.uz || 0; if (u === 2) uzA.push(v); else if (u === 1) uzB.push(v); else glT.push(v) }
+  const mkCur = (arr: any[]) => { let i = 0; return (): any => (i < arr.length ? arr[i++] : null) }
+  const cA = mkCur(uzA), cB = mkCur(uzB), cG = mkCur(glT), cM = mkCur(mmo), cC = mkCur(ch), cS = mkCur(se)
+  // UZ manbalar tugasa — global zaxira (lenta hech qachon to'xtamasin)
+  const uzNext = (): any => cA() || cB() || cG()
   const shorts: any[] = []
-  let ti = 0, mi = 0, ci = 0, si = 0, di = 0
-  // PLATFORM ROUND-ROBIN: har aylanishda TREND ×4 (ASOSIY) + FOYDALANUVCHI ×2 + kanal + qidiruv + DM
-  // — foydalanuvchi "trenddagi shortslarni ko'rsat" dedi: hovuzning yarmidan ko'pi global trend.
-  // Hovuz 240 ta — 20 sahifa xilma-xil kontent ("millionlab shortslar" doimiy oqim).
-  while ((ti < tr2.length || mi < mmo.length || ci < ch.length || si < se.length || di < dd.length) && shorts.length < 240) {
-    for (let k = 0; k < 4 && ti < tr2.length; k++) shorts.push(tr2[ti++]) // YOUTUBE TREND (asosiy)
-    if (mi < mmo.length) shorts.push(mmo[mi++]) // FOYDALANUVCHI (mahfiy manba)
-    if (mi < mmo.length) shorts.push(mmo[mi++]) // FOYDALANUVCHI ×2 — algoritm kuchli ko'rsin
-    if (ci < ch.length) shorts.push(ch[ci++]) // YouTube kanal (round-robin — boshqa kanal)
-    if (si < se.length) shorts.push(se[si++]) // YouTube qidiruv
-    if (di < dd.length) shorts.push(dd[di++]) // Dailymotion
+  while (shorts.length < 240) {
+    let added = 0
+    // 1 tsikl = 8 slayd: uzTrend + uzQidiruv + kanal + foydalanuvchi + uzTrend + foydalanuvchi + global + global
+    // → 4-6 o'zbek-mansabli + 2 global (foydalanuvchi manbalari ham o'zbek kanali — amalda ~75% UZ)
+    for (const src of [uzNext, cS, cC, cM, uzNext, cM, cG, cG]) { const v = src(); if (v) { shorts.push(v); added++ } }
+    if (!added) break
   }
-  // Trend to'liq ishlatilmagan bo'lsa — qolganlari ham hovuzga (240 gacha)
-  while (ti < tr2.length && shorts.length < 240) shorts.push(tr2[ti++])
   return { shorts: shorts.slice(0, 240), vids: [] }
 }
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
   // v18: trend manba = qidiruv-shorts filtr (haqiqiy viral shortslar) — eski hovuz bekor —
   // eski hovuz (v16, trendsiz) BATAMOM bekor, yangi kesh kaliti
   // v19: O'ZBEKISTON-BIRINCHI hovuz (o'zbek qidiruv gl=UZ + uz-first sort) — eski (inglizcha-og'ir) hovuz bekor
-  const ck = "https://trend.50gram.internal/poolv19"
+  // v20: DM OLIB TASHLANDI (O'zbekistonda qora ekran) + UZ-interleave BUTUN hovuz bo'ylab (~75% o'zbek kontenti
+  // istalgan oynada) + uz=2 qat'iy o'zbekcha-belgi — eski (DM'li/orqada-uz) hovuz BATAMOM bekor
+  const ck = "https://trend.50gram.internal/poolv20"
   const meta = await cacheGetJSON<{ shorts: any[]; vids: any[] }>(ck)
   if (meta && meta.data && meta.data.shorts?.length) {
     if (now() - meta.t < POOL_FRESH_MS) return meta.data
@@ -2209,7 +2217,8 @@ async function trend(c: C) {
   // ko'rsatsin — takror zerikarli"): klient tasodifiy rb-bucket (0..29) yuboradi, server hovuzning
   // HAR XIL qismidan qaytaradi. Eski t16 keshlari (bir xil pool[0..12] har kirishda) bekor.
   const rb = Math.max(0, Math.min(29, +(c.url.searchParams.get("rb") || 0) || 0))
-  const cacheKey = "https://trend.50gram.internal/t17?p=" + page + "&cat=" + onlyCat + (onlyCat === "video" ? "&rb=" + rb : "")
+  // t18: UZ-interleave + DM olib tashlangan hovuz — eski t17 javoblari (DM'li, chuqur sahifalari ingliz) darhal o'lsin
+  const cacheKey = "https://trend.50gram.internal/t18?p=" + page + "&cat=" + onlyCat + (onlyCat === "video" ? "&rb=" + rb : "")
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)

@@ -247,15 +247,15 @@ function trendSkeleton() {
 // ZUDLIK keshi: oxirgi 1-sahifa localStorage'da (3 kun) — lenta HAR QAYTA OCHILGANDA, hatto ilova
 // qayta ishga tushganda/oflaynda ham darhol chiziladi (fon yangilanadi). Bu "lenta sekin" muammosi yechimi.
 function trendCacheSave(items) {
-  try { localStorage.setItem('g50_trend_c5', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
+  try { localStorage.setItem('g50_trend_c6', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
 }
 function trendCacheAge() {
-  try { const d = JSON.parse(localStorage.getItem('g50_trend_c5') || ''); return d && d.t ? Date.now() - d.t : Infinity } catch { return Infinity }
+  try { const d = JSON.parse(localStorage.getItem('g50_trend_c6') || ''); return d && d.t ? Date.now() - d.t : Infinity } catch { return Infinity }
 }
 function trendCacheGet() {
   try {
     // c3: eski c2 keshdagi Anilan-Minecraft videolari BATAMOM unutiladi (foydalanuvchi: "eski shunday" — keshda qolib ketgandi)
-    const d = JSON.parse(localStorage.getItem('g50_trend_c5') || '')
+    const d = JSON.parse(localStorage.getItem('g50_trend_c6') || '')
     // 3 kun — mavzular tezroq yangilanadi (random algoritm bilan har safar xilma-xil ko'rinish uchun)
     if (d && d.items && d.items.length && Date.now() - d.t < 3 * 864e5) return d.items
   } catch {}
@@ -1045,7 +1045,11 @@ const shMarkSeen = (it) => { try { shSeen.set(shKey(it), Date.now()); shSeenSave
 const shNormPosts = (list) => (Array.isArray(list) ? list : []).filter((p) => p && p.media_kind === 'video' && !shBadT(p.text_body)).map((p) => ({ t: 'post', p }))
 // LIVE efirlar chiqariladi — ular qotib sekin ishlaydi (chet el jonli efirlari foydalanuvchi shikoyati)
 // MINECRAFT QATIY FILTR: foydalanuvchi "tagi bilan o'chirib yo'q qilib tashla" — hech qanday yo'l bilan kirmasin
-const shNormTrend = (list) => (Array.isArray(list) ? list : []).filter((x) => x && (x.kind === 'short' || x.kind === 'video') && !x.live && !shBadT(x.title) && !shBadV(x)).map((x) => { if (!x.id) x.id = shTrendId(x); return { t: 'trend', x } })
+// DM/FB-EMBED itemlar ham chiqariladi: Dailymotion O'zbekistonda ochilmaydi (geo-blok) va DM/IG/FB
+// embedlarda ijro-kuzatuvi YO'Q — qopqoq 1.2s'da ketib, video o'ynamasa slayd QORA qotib qolardi
+// (skrinshot-shikoyat: "How to Make Perfect Toffee Apples 24 · 0:38" — aynan DM item edi).
+// Server endi DM yubormaydi; eski klient-keshlari (g50_trend_c5) ham shu filtr bilan tozalanadi.
+const shNormTrend = (list) => (Array.isArray(list) ? list : []).filter((x) => x && (x.kind === 'short' || x.kind === 'video') && !x.live && !x.embed && !x.fb && !shBadT(x.title) && !shBadV(x)).map((x) => { if (!x.id) x.id = shTrendId(x); return { t: 'trend', x } })
 
 // YouTube player (nocookie — engilroq, O'zbekistonda ishonchli) + enablejsapi (postMessage boshqaruvi — reload'siz pauza/play)
 // MUHIM: iframe HAR DOIM mute=1 bilan yuklanadi (preload qilingan keyingi video FONDA OVOZLI
@@ -1070,9 +1074,15 @@ function shBindFrame(f) {
     // "o'ynamayapti" deb XATO topardi — har ~9 sekundda keyingi slaydga avto-sakrash (shikoyat).
     if (f.dataset.shyt) {
       const say = (m, ms) => setTimeout(() => { try { if (f.isConnected) f.contentWindow.postMessage(JSON.stringify(m), '*') } catch {} }, ms)
+      // SEKIN TARMOQ (3G/4G): player JS kech ulanadi — handshake BIR NECHA MARTA takrorlanadi.
+      // Handshake yetib bormasa player HECH QACHON xabar yubormasdi → onError (101/150)
+      // aniqlanmasdi va o'lik slayd qora turib qolardi.
       say({ event: 'listening' }, 300)
-      say({ event: 'listening' }, 2000) // sekin tarmoqda player kech tayyor bo'ladi — qayta yuboriladi
       say({ event: 'command', func: 'addEventListener', args: ['onStateChange'] }, 700)
+      say({ event: 'listening' }, 1400)
+      say({ event: 'command', func: 'addEventListener', args: ['onStateChange'] }, 2100)
+      say({ event: 'listening' }, 3000)
+      say({ event: 'command', func: 'addEventListener', args: ['onStateChange'] }, 3800)
       // AKTIV SLAYD OVOZI: player mute=1 bilan ochiladi (autoplay siyosati) — faqat FAOL slayd
       // tayyor bo'lgach ovoz oladi. AVVAL bu FAQAT preload'li slaydlarga yuborilardi — birinchi/
       // jump qilingan yangi slayd JIM qolardi ("mushuk ovozi yo'q" shikoyatining ildizi).
@@ -1145,7 +1155,11 @@ function shSlideHTML(it, i) {
   }
   const x = it.x
   let pl = ''
-  const bg = x.image ? ` style="background:#07070c url('${esc(x.image)}') center/cover no-repeat"` : ''
+  // QOPQOQ KAFOLATI: itemda rasm bo'lmasa ham YT/DM thumbnail manzili KLIENTDA quriladi
+  // (i.ytimg.com/vi/{id}/hqdefault.jpg har haqiqiy video uchun mavjud). Qopqoqsiz slayd
+  // yuklanish paytida TO'LIQ QORA ko'rinardi (skrinshot-shikoyat: "3-chisi qora ekran").
+  const th = x.image || (x.yt ? 'https://i.ytimg.com/vi/' + x.yt + '/hqdefault.jpg' : (x.embed ? 'https://www.dailymotion.com/thumbnail/video/' + x.embed + '/480.jpg' : ''))
+  const bg = th ? ` style="background:#07070c url('${esc(th)}') center/cover no-repeat"` : ' style="background:linear-gradient(160deg,#141a28,#07070c)"'
   // IFRAME'lar LAZY: src='about:blank', haqiqiy URL data-shsrc'da — faqat faol slayd yuklanadi.
   // Barchasi birdan yuklansa 40+ iframe tarmoqni bosib oladi = SEKINLIK (asosiy sabab shu edi).
   if (x.mp4) pl = `<video src="${esc(x.mp4)}" data-shsrc="${esc(x.mp4)}" loop playsinline preload="metadata" data-shaudio="${esc(x.audio || '')}" poster="${esc(x.image || '')}"></video>`
@@ -1158,7 +1172,7 @@ function shSlideHTML(it, i) {
   // ekranda HECH QACHON qora fon ko'rinmaydi (thumbnail + yuklanmoqda spinnner ko'rinadi).
   // O'ynash boshlanganda qopqoq fade bo'lib ketadi; o'ynamasa watchdog slaydni o'chiradi —
   // foydalanuvchi qora ekranda turib qolmaydi (shikoyat: "qora ekran yana chiqyapti").
-  const cov = !x.mp4 && !x.img && x.image ? `<img class="sh-cover" src="${esc(x.image)}" alt="" loading="lazy">` : ''
+  const cov = !x.mp4 && !x.img && th ? `<img class="sh-cover" src="${esc(th)}" alt="" loading="lazy">` : ''
   const ttl = x.live ? '🔴 Jonli efir — ' + (x.title || '') : x.title
   return `<div class="${x.mp4 ? 'sh-slide paused' : 'sh-slide'}" data-shi="${i}" data-ttrend="1"${bg}>
     ${pl}${cov}
@@ -1426,16 +1440,20 @@ function shActivate(w, slide) {
         shBindFrame(ifr)
         if (!shMuted) setTimeout(() => { try { if (slide.isConnected) { shYTpost(ifr, 'unMute'); shYTpost(ifr, 'playVideo') } } catch {} }, 1500) // yangi player mute=1 bilan ochiladi — ovozni tiklaymiz
         clearTimeout(slide._shytw)
-        // 5s: qayta yuklangan player ham o'ynamasa — soxta emas (qora ekran qisqa tursin)
-        slide._shytw = setTimeout(ytCheck, 5000)
+        // 3.5s: qayta yuklangan player ham o'ynamasa — o'chiriladi (qora ekran QISQA tursin)
+        slide._shytw = setTimeout(ytCheck, 3500)
         return
       }
+      // iframe YUKLANGAN (tarmoq ishlayapti) — lekin player o'ynamayapti: bu VIDEONING aybi
+      // (embed-taqiq/geo-blok/buzilgan video). Bunday slayd lentaDA QOLMASIN — AVVAL
+      // shFailStreak>4 bo'lsa slayd JOYIDA qolib, qopqoq ham bo'lmasa TO'LIQ QORA qotib
+      // turardi (skrinshot-shikoyat: "2 ta ko'rsatib 3-chisi qora ekran, tuzalmagan").
+      // Endi iframe yuklangan bo'lsa DOIM o'chiriladi — keyingisi darhol faollashadi.
       shFailStreak++
-      if (shFailStreak <= 4) shDropSlide(slide, 'play')
-      else toast('⚠️ Videolar ochilmayapti — internetni tekshiring', 3000)
+      shDropSlide(slide, 'play')
     }
-    // 4.5s: player yuklandi lekin o'ynamasa — tez aniqlansin (qora ekran shikoyati: "yana chiqyapti")
-    slide._shytw = setTimeout(ytCheck, 4500)
+    // 3.5s: player yuklandi lekin o'ynamasa — tez aniqlansin (qora ekran shikoyati: "yana chiqyapti")
+    slide._shytw = setTimeout(ytCheck, 3500)
   }
   // PRELOAD: keyingi slayd YT bo'lsa — 1.5s'dan keyin fonda (mute) yuklanadi → scroll qilsa DARHAL ijro
   // (Tejamkor rejim yoniq bo'lsa oldindan yuklanmaydi)
@@ -1506,6 +1524,18 @@ function shBindImg(s) {
   im.addEventListener('error', () => shDropSlide(s, 'img'))
   if (im.complete && im.naturalWidth > 0) ok() // keshdan darhol — watchdog soxta xato bermasin
 }
+// QOPQOQ MUVOFIQLIGI: thumbnail yuklanmasa (sekin tarmoq/bloklangan) — avval mqdefault sinab
+// ko'riladi, u ham o'chsa qopqoq olib tashlanadi (slayd gradient fonida — TOZA QORA EMAS).
+// Qopqoq hech qachon "o'chgan va ko'rinmaydigan" holatda qolmaydi — qora ekran himoyasi.
+function shBindCover(s) {
+  const im = qs('img.sh-cover', s)
+  if (!im || im._shCB) return
+  im._shCB = 1
+  im.addEventListener('error', () => {
+    if (im.dataset.fb !== '1') { im.dataset.fb = '1'; const m = String(im.src || '').replace('hqdefault', 'mqdefault'); if (m && m !== im.src) { im.src = m; return } }
+    im.remove()
+  })
+}
 function shAppend(items, force) {
   if (!items.length || !shWrap) return 0
   // DEDUPE + NO-REPEAT: sessiya ichida ham, avvalgi sessiyalarda ko'rilgan bilan ham
@@ -1521,7 +1551,7 @@ function shAppend(items, force) {
   shList.push(...use)
   sc.insertAdjacentHTML('beforeend', use.map((it, k) => shSlideHTML(it, base + k)).join(''))
   const fresh = qsa('.sh-slide', sc).slice(base)
-  fresh.forEach((s) => { qsa('video', s).forEach(shBindVideo); shBindImg(s) }) // iframe shBindFrame — faqat yuklanganda (about:blank load hodisasi aldamasligi uchun)
+  fresh.forEach((s) => { qsa('video', s).forEach(shBindVideo); shBindImg(s); shBindCover(s) }) // iframe shBindFrame — faqat yuklanganda (about:blank load hodisasi aldamasligi uchun)
   hydrate(sc)
   return use.length
 }
@@ -1691,7 +1721,7 @@ function openShorts(list, startIdx = 0) {
     w.classList.add('on')
     const sc = qs('.sh-scroll', w)
     hydrate(sc)
-    qsa('.sh-slide', sc).forEach((s, i) => { const v = qs('video', s); if (v) { if (i > 2) v.preload = 'none'; shBindVideo(v) } shBindImg(s) }) // iframe'lar lazy — faqat faol slayd yuklanadi; birinchi 3 tadan keyingi video play'da yuklanadi (tezlik)
+    qsa('.sh-slide', sc).forEach((s, i) => { const v = qs('video', s); if (v) { if (i > 2) v.preload = 'none'; shBindVideo(v) } shBindImg(s); shBindCover(s) }) // iframe'lar lazy — faqat faol slayd yuklanadi; birinchi 3 tadan keyingi video play'da yuklanadi (tezlik)
     // Boshqaruv
     w.addEventListener('click', async (e) => {
       if (e.target.closest('#sh-x')) return shClose()
