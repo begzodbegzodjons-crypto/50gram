@@ -1,8 +1,10 @@
 /* 50 Gram — audio/video qo'ng'iroqlar va jonli efir (WebRTC) */
 'use strict'
 let iceCache = null, iceAt = 0
-async function iceServers() {
-  if (iceCache && Date.now() - iceAt < 30 * 60000) return iceCache
+async function iceServers(force) {
+  // KESH 10 daqiqa (avval 30): TURN cred kvotasi/muddati tugasa ham tez tiklanadi —
+  // 'failed' holatida force bilan DARHOL yangi creds olinadi.
+  if (!force && iceCache && Date.now() - iceAt < 10 * 60000) return iceCache
   try { iceCache = (await api('/ice')).iceServers; iceAt = Date.now() } catch { iceCache = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }] }
   // Task 34: openrelay.metered.ca o‘lgan (sinovda 400 TURN allocate error) — soxta zaxira olib tashlandi.
   // Serverda Cloudflare TURN sozlangan (/ice → turn.cloudflare.com UDP/TCP/TLS-443, TTL 24h) — relay test o‘tdi.
@@ -77,10 +79,10 @@ let CALL = null
 // ISHONCHLI SIGNAL: avvalgi sig() xatoni JIM yutardi — 'accept'/'offer'/'answer' yo'qolsa
 // qo'ng'iroq ABADIY «Ulanmoqda…» da qolardi (aynan foydalanuvchi shikoyati). Endi 3 martagacha
 // qayta uriniladi; muhim signallarda natija tekshiriladi — yetmasa qo'ng'iroq aniq xato bilan yopiladi.
-async function sigTo(to, data, tries = 3) {
+async function sigTo(to, data, tries = 3, gap = 700) {
   for (let i = 0; i < tries; i++) {
     try { await post('/signal', { to, data }); return true }
-    catch (e) { if (i < tries - 1) await new Promise((r) => setTimeout(r, 700)) }
+    catch (e) { if (i < tries - 1) await new Promise((r) => setTimeout(r, gap)) }
   }
   return false
 }
@@ -91,7 +93,7 @@ function armConnectWatchdog(C) {
   clearTimeout(C.connWatch); clearTimeout(C.connWatch2)
   C.connWatch = setTimeout(() => {
     if (CALL !== C || C.started || !C.pc || C.pc.connectionState === 'connected' || C.pc.connectionState === 'closed') return
-    restartIce(C)
+    restartIce(C, true) // tarmoq yo'li ishlamayapti — YANGI TURN creds bilan qayta urinamiz
   }, 25000)
   C.connWatch2 = setTimeout(() => {
     if (CALL !== C || C.started) return
@@ -147,6 +149,7 @@ async function callUser(uid, video) {
   let peer = S.users.get(uid)
   if (!peer) try { peer = await api('/users/' + uid); S.users.set(uid, peer) } catch (e) { return toast('⚠️ ' + e.message) }
   CALL = { peer, video: !!video, outgoing: true, ice: [], el: callUI(peer, video, 'Ulanmoqda…') }
+  startSigPoll() // qo'ng'iroq davomida navbat-polling: WS zombi bo'lsa ham signallar yetadi
   callButtons('active')
   try {
     CALL.local = await getMedia(video)
@@ -210,6 +213,7 @@ function incomingCall(ev) {
   S.users.set(ev.from.id, { ...(S.users.get(ev.from.id) || {}), ...ev.from })
   const peer = S.users.get(ev.from.id)
   CALL = { id: ev.call_id, peer, video: !!ev.video, outgoing: false, ice: [], el: callUI(peer, ev.video, ev.video ? 'Video qo‘ng‘iroq…' : 'Qo‘ng‘iroq…') }
+  startSigPoll() // qo'ng'iroq davomida navbat-polling: WS zombi bo'lsa ham signallar yetadi
   CALL.el.classList.add('incoming')
   callButtons('incoming')
   ringTone(true)
@@ -221,14 +225,19 @@ function incomingCall(ev) {
 on('call', incomingCall)
 // WS qayta ulanganda: WS uzilgan paytda kelgan qo'ng'iroq bo'lsa — darhol qo'ng'iroq oynasi
 window.__50wsOpen = async () => {
-  if (CALL || pendingNativeCall) return
-  try {
-    const r = await api('/calls/pending')
-    if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, from: r.call.from })
-  } catch {}
+  // MUHIM: qo'ng'iroq davomida (CALL bor) HAM davom etish kerak — avvalgi `if (CALL) return`
+  // tufayli offer qayta yuborish O'LIK KOD edi (aynan kerak bo'lgan paytida ishlamardi).
+  if (!CALL && !pendingNativeCall) {
+    try {
+      const r = await api('/calls/pending')
+      if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, from: r.call.from })
+    } catch {}
+  }
   // QO'NG'IROQ davomida WS qayta ulandi va hali ulanmagan bo'lsa — offer qayta yuboriladi
   // (uzilish paytida yo'qolgan offer/answer tufayli «Ulanmoqda…» da osilib qolmaslik uchun)
   try { if (CALL && !CALL.started && CALL.pc && CALL.pc.localDescription) restartIce(CALL) } catch {}
+  // WS tiklanganda navbatdagi signallarni ham o'qib olamiz (uzilish paytida yig'ilganlari)
+  try { drainSigQueue() } catch {}
   // Task 34: WS uzilib-tiklanganda efir signalari (offer/ICE) YO‘QOLGAN bo‘lishi mumkin —
   // tomoshabin hali ulanmagan bo‘lsa darhol qayta ulanishni so‘raymiz.
   const L = LIVE
@@ -243,8 +252,8 @@ async function acceptCall() {
     C.local = await getMedia(C.video)
     qs('.local', C.el).srcObject = C.local
     await setupPC(C)
-    // 'accept' yo'qolsa chaqiruvchi hech qachon offer yaratmaydi — natijani tekshiramiz
-    const ok = await sigTo(C.peer.id, { k: 'accept', call_id: C.id })
+    // 'accept' yo'qolsa chaqiruvchi hech qachon offer yaratmaydi — 5 marta/1.2s (≈6s qamrov)
+    const ok = await sigTo(C.peer.id, { k: 'accept', call_id: C.id }, 5, 1200)
     if (!ok) return endCall('missed', true, 'Signal yetmadi — internetni tekshirib ko‘ring')
     armConnectWatchdog(C) // 45s ichida ulanmasa — aniq xato (abadiy «Ulanmoqda…» yo‘q)
     post(`/calls/${C.id}/status`, { status: 'active' }).catch(() => {})
@@ -273,19 +282,25 @@ async function setupPC(C) {
     }
     if (s === 'disconnected') setCallState('Aloqa uzildi, qayta ulanmoqda…')
     if (s === 'failed') {
-      // ULANMADI: ikkala tomonda ham qayta urinish — ICE restart (2 martagacha), bo‘lmasa aniq xato.
+      // ULANMADI: ikkala tomonda ham qayta urinish — avval YANGI ICE konfiguratsiyasi (TURN
+      // creds tiklanadi), keyin ICE restart (2 martagacha), bo'lmasa aniq xato.
       // Avval faqat chaqiruvchi 1 marta urinardi, qabul qiluvchi umuman jim qolardi.
       C.iceTries = (C.iceTries || 0) + 1
       if (C.iceTries <= 2 && !C.restaring) {
         C.restaring = true
         setCallState('Qayta ulanmoqda…')
-        Promise.resolve(restartIce(C)).catch(() => {}).finally(() => { C.restaring = false })
+        Promise.resolve(restartIce(C, true)).catch(() => {}).finally(() => { C.restaring = false })
       } else if (!C.started) endCall('missed', true, 'Aloqa yo‘q — internetni tekshirib, qayta urinib ko‘ring')
     }
   }
 }
-async function restartIce(C) {
-  try { const o = await C.pc.createOffer({ iceRestart: true }); await C.pc.setLocalDescription(o); sig(C.peer.id, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON() }) } catch {}
+async function restartIce(C, fresh) {
+  try {
+    // fresh: tarmoq yo'li ishlamayotgan bo'lsa — yangi TURN creds olib konfiguratsiyani
+    // yangilaymiz (Cloudflare TURN cred muddati/kvotasi tugagan bo'lishi mumkin).
+    if (fresh) { try { const srv = await iceServers(true); C.pc.setConfiguration?.({ iceServers: srv }) } catch {} }
+    const o = await C.pc.createOffer({ iceRestart: true }); await C.pc.setLocalDescription(o); sig(C.peer.id, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON() })
+  } catch {}
 }
 async function flipCam() {
   const C = CALL; if (!C?.local) return
@@ -304,6 +319,7 @@ async function flushIce(C) { for (const c of C.ice.splice(0)) try { await C.pc.a
 function endCall(status = 'ended', report = true, msg) {
   const C = CALL; if (!C) return
   CALL = null
+  stopSigPoll() // navbat-polling to'xtasin
   ringTone(false)
   nativeCallCancel() // APK: qo'ng'iroq bildirishnomasini yopish
   clearTimeout(C.timeout); clearInterval(C.tick)
@@ -321,12 +337,53 @@ function endCall(status = 'ended', report = true, msg) {
   setTimeout(() => C.el.remove(), msg ? 3200 : 1200)
 }
 
-// Signal: qo'ng'iroq va efir uchun
-on('signal', async (ev) => {
+// ---------------- SIGNAL NAVBAT-POLLING (hal qiluvchi zaxira yo'l) ----------------
+// Ildiz: signal FAQAT WebSocket orqali yurardi. WS o'lik/zombi bo'lsa (mobil tarmoqda
+// tez-tez), POST /signal serverga yetardi LEKIN qabul qiluvchiga yetmasdi — 0 ta soketga
+// push bo'lardi va qo'ng'iroq «Ulanmoqda…» da qolardi. Endi server har signalni 2 daqiqaga
+// navbatga yozadi, klient qo'ng'iroq davomida polling bilan ALBATTA oladi.
+let lastSid = 0, sigPollT = 0, sigPollBusy = false
+async function drainSigQueue() {
+  if (!CALL || sigPollBusy) return
+  sigPollBusy = true
+  try {
+    const r = await api('/signal/queue?since=' + lastSid)
+    for (const s of r.signals || []) {
+      if (s.sid > lastSid) lastSid = s.sid
+      try { handleSignalEv({ type: 'signal', sid: s.sid, from: s.from, data: s.data }) } catch {}
+    }
+  } catch {}
+  sigPollBusy = false
+}
+function startSigPoll() {
+  stopSigPoll()
+  sigPollT = setInterval(drainSigQueue, 1800)
+  drainSigQueue()
+}
+function stopSigPoll() { if (sigPollT) { clearInterval(sigPollT); sigPollT = 0 } }
+
+// SID DEDUP: bir signal WS va navbat orqali IKKI MARTA kelishi mumkin — ikkinchi ishlov
+// setRemoteDescription/addIceCandidate xatolariga olib kelardi. Endi sid bo'yicha o'tkazib yuboriladi.
+const sigSeen = new Set()
+function sigDedup(sid) {
+  if (!sid) return false
+  if (sigSeen.has(sid)) return true
+  if (sigSeen.size > 600) sigSeen.clear()
+  sigSeen.add(sid)
+  return false
+}
+async function handleSignalEv(ev) {
   const d = ev.data || {}, from = ev.from
+  if (sigDedup(ev.sid)) return // WS + navbat ikki marta yetkazishi mumkin (jonli efir ham)
   if (d.k && d.k[0] === 'l') return liveSignal(from, d)
   const C = CALL
-  if (!C || C.id !== d.call_id || C.peer.id !== from) return
+  if (!C || C.peer.id !== from) return
+  // POYG'A TUZATISH: sekin tarmoqda POST /calls javobi kechiksa, qarshi tomonning 'accept'i
+  // CALL.id hali tayinlanmasidan turib kelardi va JIM drop qilinardi — qabul qiluvchi abadiy
+  // «Ulanmoqda…» da qolardi. Endi: call_id hali bo'lmasa qabul qilinadi (adopt), bor bo'lsa
+  // va mos kelmasagina drop.
+  if (d.call_id && C.id && String(C.id) !== String(d.call_id)) return
+  if (d.call_id && !C.id && d.k === 'accept') C.id = d.call_id
   try {
     if (d.k === 'accept' && C.outgoing && !C.pc) {
       ringTone(false); clearTimeout(C.timeout)
@@ -340,6 +397,10 @@ on('signal', async (ev) => {
       armConnectWatchdog(C)
     }
     if (d.k === 'offer' && C.pc) {
+      // GLARE TUZATISH: ikkala tomon bir vaqtda offer yuborsa (WS qayta ulanishda ikkalasi ham
+      // restartIce qiladi), 'have-local-offer' holatida setRemoteDescription XATO berardi va
+      // ulanish buzilardi — endi rollback qilib javob beramiz (Perfect Negotiation qisqasi).
+      if (C.pc.signalingState === 'have-local-offer') { try { await C.pc.setLocalDescription({ type: 'rollback' }) } catch {} }
       await C.pc.setRemoteDescription(d.sdp)
       await flushIce(C)
       const a = await C.pc.createAnswer()
@@ -352,7 +413,8 @@ on('signal', async (ev) => {
     if (d.k === 'hangup') endCall('ended', false)
     if (d.k === 'busy') endCall('missed', true, 'Band')
   } catch (e) { console.warn('signal', e) }
-})
+}
+on('signal', handleSignalEv)
 
 // Qo'ng'iroq ohangi (fayl kerak emas — WebAudio)
 let ringCtx = null, ringTimer = 0

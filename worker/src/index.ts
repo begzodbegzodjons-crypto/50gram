@@ -251,6 +251,11 @@ async function ensureSchema(db: Db) {
     "ALTER TABLE users ADD COLUMN token_exp BIGINT NULL",
     // Eski foydalanuvchilar: sessiya muddati = ro'yxatdan o'tgan vaqt + 180 kun (taxmin, JWT muddati bilan mos)
     "UPDATE users SET token_exp = created_at + 15552000000 WHERE token_exp IS NULL",
+    // QO'NG'IROQ SIGNAL NAVBATI: WS o'lgan qurilmaga accept/offer/answer/ICE yetib bormasdi —
+    // qo'ng'iroq «Ulanmoqda…» da abadiy qolardi. Endi har signal 2 daqiqaga navbatga yoziladi,
+    // klient WS o'lsa /signal/queue orqali o'qiydi (fetch-and-delete).
+    "CREATE TABLE IF NOT EXISTS call_signals (id BIGINT PRIMARY KEY, to_uid BIGINT NOT NULL, from_uid BIGINT NOT NULL, body MEDIUMTEXT NOT NULL, created_at BIGINT NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS idx_csignals_to ON call_signals (to_uid, id)",
   ]
   for (const s of stmts) { try { await db.run(s) } catch {} }
   try {
@@ -2564,9 +2569,30 @@ async function signal(c: C) {
   const to = +c.b.to
   const data = c.b.data
   if (!to || !data) fail("Noto‘g‘ri signal")
-  if (JSON.stringify(data).length > 30000) fail("Signal juda katta")
-  await notify(c.env, [to], { type: "signal", from: c.uid, data })
+  const body = JSON.stringify(data)
+  if (body.length > 30000) fail("Signal juda katta")
+  const sid = newId()
+  // NAVBAT (hal qiluvchi tuzatish): avval signal FAQAT WS orqali yurardi — agar qabul
+  // qiluvchining WebSocket'i o'lik/zombi bo'lsa, POST 200 OK qaytarardi LEKIN signal 0 ta
+  // soketga yetib «Ulanmoqda…» abadiy qolardi. Endi navbat 2 daqiqa saqlanadi — klient
+  // polling bilan albatta oladi.
+  try { await c.db.run("INSERT INTO call_signals(id,to_uid,from_uid,body,created_at) VALUES(?,?,?,?,?)", [sid, to, c.uid, body, now()]) } catch (e) { console.log("sigq", String(e)) }
+  await notify(c.env, [to], { type: "signal", sid, from: c.uid, data })
   return json({ ok: true })
+}
+async function signalQueue(c: C) {
+  // WS uzilgan bo'lsa ham signallar yetib boradi: fetch-and-delete navbat.
+  // `since` — klient ko'rgan eng katta sid (qayta yuklab stale signallarni olmaslik uchun).
+  const since = Math.max(0, +(c.url.searchParams.get("since") || 0))
+  const rows = await c.db.q("SELECT id, from_uid, body FROM call_signals WHERE to_uid=? AND id>? ORDER BY id ASC LIMIT 60", [c.uid, since])
+  if (rows.length) {
+    await c.db.run("DELETE FROM call_signals WHERE id IN (" + ph(rows.map((r) => r.id)) + ")", rows.map((r) => r.id))
+  }
+  const out: any[] = []
+  for (const r of rows) {
+    try { out.push({ sid: r.id, from: r.from_uid, data: JSON.parse(String(r.body)) }) } catch {}
+  }
+  return json({ signals: out })
 }
 async function callStatus(c: C) {
   const call = await c.db.one("SELECT * FROM calls WHERE id=?", [+c.p.id])
@@ -3110,6 +3136,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/calls/pending", callPending],
   ["POST", "/calls/:id/status", callStatus],
   ["POST", "/signal", signal],
+  ["GET", "/signal/queue", signalQueue],
   ["POST", "/p2p/have", p2pHave],
   ["GET", "/p2p/peers", p2pPeers],
   ["POST", "/p2p/signal", p2pSignal],
@@ -3163,6 +3190,8 @@ async function cleanup(env: Env) {
   await db.run("DELETE FROM media WHERE expires_at>0 AND expires_at<? AND keep=0", [t])
   await db.run("DELETE FROM media WHERE dropped=1 AND created_at<? AND id NOT IN (SELECT media_id FROM peer_have)", [t - 30 * DAY])
   await db.run("DELETE FROM pin_jobs WHERE created_at<?", [t - 2 * DAY])
+  // Qo'ng'iroq signal navbati: 2 daqiqadan eski yozuvlar savat (yetib bo'lgan/emirilgan)
+  await db.run("DELETE FROM call_signals WHERE created_at<?", [t - 2 * 60000])
   await planReplicas(db, 300)
   await db.run("DELETE FROM otp WHERE expires_at<?", [t])
   await db.run("DELETE FROM push_subs WHERE updated_at<?", [t - 90 * DAY]) // 90 kun ishlatilmagan obunalar
