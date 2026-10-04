@@ -224,13 +224,25 @@ function incomingCall(ev) {
   startSigPoll() // qo'ng'iroq davomida navbat-polling: WS zombi bo'lsa ham signallar yetadi
   CALL.el.classList.add('incoming')
   callButtons('incoming')
-  ringTone(true)
+  ringTone(true, 'in') // BALAND chiroyli «ding-ding-dooong» — qabul qiluvchi aniq eshitadi
   vibrate([400, 200, 400, 200, 400])
   notifyLocal('📞 ' + uname(peer), ev.video ? 'Video qo‘ng‘iroq' : 'Ovozli qo‘ng‘iroq')
   nativeCallCancel() // APK: agar native bildirishnoma chiqqan bo'lsa — endi UI bor, yopamiz
   CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', false), 75000)
 }
 on('call', incomingCall)
+// DARHOL YETKAZISH — ZAXIRA YO'L (foydalanuvchi: «bir marta qilinganda darhol borishi shart»):
+// WS «zombi» bo'lsa (ko'rinadi, lekin o'lik) server 'call' hodisasi HECH KIMGa yetmaydi va
+// qarshi tomon qo'ng'iroqni umuman ko'rmasdi — bir necha marta qayta qo'ng'iroq kerak bo'lardi.
+// Endi ilova ochi bo'lsa har 6s /calls/pending bilan ham tekshiramiz: WS sog'lom bo'lsa bu
+// so'rov jim qaytadi (CALL bor), zombi bo'lsa qo'ng'iroq oynasi 6 soniyada chiqadi.
+// (APK fonda native xizmat 20s polling, PWA fonda Web Push allaqachon ishlaydi — bu faol holat kafolati.)
+setInterval(() => {
+  if (!S.token || CALL) return
+  api('/calls/pending').then((r) => {
+    if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, from: r.call.from })
+  }).catch(() => {})
+}, 6000)
 // WS qayta ulanganda: WS uzilgan paytda kelgan qo'ng'iroq bo'lsa — darhol qo'ng'iroq oynasi
 window.__50wsOpen = async () => {
   // MUHIM: qo'ng'iroq davomida (CALL bor) HAM davom etish kerak — avvalgi `if (CALL) return`
@@ -462,35 +474,58 @@ async function handleSignalEv(ev) {
 }
 on('signal', handleSignalEv)
 
-// Qo'ng'iroq ohangi (fayl kerak emas — WebAudio)
-// TUZATILDI (foydalanuvchi: «jiringlash ovozi yo'q, jim»): 1) AudioContext await'lardan
-// keyin yaratilardi — brauzer uni SUSPEND holatda qoldirardi = umuman OVOZ CHIQMASDI;
-// endi har safar resume() chaqiriladi. 2) Ovoz juda past edi (0.06) — endi haqiqiy
-// ringback kabi ikki qisqa jiringlash, aniq eshitiladigan darajada (0.14).
+// Qo'ng'iroq ohangi (fayl kerak emas — WebAudio, 0 KB)
+// RINGTON 2.0 (foydalanuvchi: «chiroyliroq rington, ovozi BALAND bo'lsin»):
+// 1) Har nota 3 qatlamli (asos triangle + 2-oktava sine + 3-garmonik) — boy, «chiroyli» tembr;
+// 2) KIRISH RINGTONI (qabul qiluvchi) — baland «ding-ding-dooong» kuyi (0.30–0.34) — eshitilib turadi;
+// 3) Jiringlash (chaqiruvchi) — an'anaviy ringback, biroz balandroq (0.18);
+// 4) AudioContext har siklda resume() — fon rejimidan chiqqanda ham ovoz yo'qolmaydi.
 let ringCtx = null, ringTimer = 0
-function ringTone(on) {
+function ringTone(on, mode) {
   clearInterval(ringTimer)
   if (!on) { try { ringCtx?.close() } catch {} ringCtx = null; return }
   try {
     if (!ringCtx) ringCtx = new (window.AudioContext || window.webkitAudioContext)()
     if (ringCtx.state === 'suspended') ringCtx.resume().catch(() => {})
-    const beepAt = (t, f, d) => {
-      const o = ringCtx.createOscillator(), g = ringCtx.createGain()
-      o.frequency.value = f
-      g.gain.setValueAtTime(0.0001, t)
-      g.gain.linearRampToValueAtTime(0.14, t + 0.03) // yumshoq boshlanish
-      g.gain.setValueAtTime(0.14, t + d - 0.06)
-      g.gain.linearRampToValueAtTime(0.0001, t + d) // yumshoq tugash
-      o.connect(g); g.connect(ringCtx.destination)
-      o.start(t); o.stop(t + d)
+    // Bitta nota — 3 qatlam: asos + oktava yuqori + 3-garmonik (boy tembr)
+    const note = (t, f, d, vol) => {
+      const layer = (type, mult, v) => {
+        const o = ringCtx.createOscillator(), g = ringCtx.createGain()
+        o.type = type
+        o.frequency.value = f * mult
+        g.gain.setValueAtTime(0.0001, t)
+        g.gain.linearRampToValueAtTime(v, t + 0.02)
+        g.gain.setValueAtTime(v, t + d * 0.55)
+        g.gain.exponentialRampToValueAtTime(0.0001, t + d)
+        o.connect(g); g.connect(ringCtx.destination)
+        o.start(t); o.stop(t + d + 0.05)
+      }
+      layer('triangle', 1, vol)
+      layer('sine', 2, vol * 0.4)
+      layer('sine', 3, vol * 0.15)
     }
-    const beepOnce = () => {
-      if (!ringCtx) return
-      if (ringCtx.state === 'suspended') { ringCtx.resume().catch(() => {}); return } // jiringlash yo'qolmasin
-      const t = ringCtx.currentTime + 0.02
-      beepAt(t, 425, 0.42); beepAt(t + 0.62, 425, 0.42) // «dirin-dirin» — haqiqiy qo'ng'iroq ohangi
+    const resumeIf = () => { if (ringCtx && ringCtx.state === 'suspended') ringCtx.resume().catch(() => {}) }
+    if (mode === 'in') {
+      // KIRISH RINGTONI — «ding-ding-dooong» (B5–E6–A5): baland, chiroyli, har 2.5s takrorlanadi
+      const playIn = () => {
+        if (!ringCtx) return
+        resumeIf()
+        const t = ringCtx.currentTime + 0.02
+        note(t, 987.77, 0.3, 0.3)         // B5 — «ding»
+        note(t + 0.36, 1318.51, 0.3, 0.28) // E6 — «ding» (porloq)
+        note(t + 0.72, 880, 0.62, 0.34)    // A5 — «dooong» (uzoq, eng baland)
+      }
+      playIn(); ringTimer = setInterval(playIn, 2500)
+    } else {
+      // JIRINGLASH (chaqiruvchi) — haqiqiy ringback: ikki qisqa jiringlash
+      const beepOnce = () => {
+        if (!ringCtx) return
+        resumeIf()
+        const t = ringCtx.currentTime + 0.02
+        note(t, 425, 0.42, 0.18); note(t + 0.62, 425, 0.42, 0.18)
+      }
+      beepOnce(); ringTimer = setInterval(beepOnce, 2400)
     }
-    beepOnce(); ringTimer = setInterval(beepOnce, 2400)
   } catch {}
 }
 
