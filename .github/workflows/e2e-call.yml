@@ -1,0 +1,27 @@
+name: Qo'ng'iroq MEDIA E2E (2-brauzer)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Playwright o'rnatish (chromium)
+        run: |
+          cd scripts
+          npm init -y >/dev/null 2>&1 || true
+          npm i playwright@1.63.0 --no-audit --no-fund >/dev/null
+          npx playwright install chromium
+          npx playwright install-deps chromium >/dev/null || sudo npx playwright install-deps chromium
+      - name: Deploy tugashini kutish
+        run: sleep 90
+      - name: MEDIA E2E — jonli saytga qarshi
+        env:
+          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+        run: node scripts/e2e_call_media.mjs
