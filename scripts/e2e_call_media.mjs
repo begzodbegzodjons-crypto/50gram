@@ -45,8 +45,10 @@ async function newPage(browser, label) {
     viewport: { width: 420, height: 800 },
     permissions: ['camera', 'microphone'],
   })
-  // WebSocket'ni ushlash (readyState tashxisi uchun)
+  // WebSocket'ni ushlash (readyState tashxisi uchun) + har navigatsiyada belgi
   await ctx.addInitScript(`(() => {
+    window.__navAt = Date.now()
+    document.addEventListener('DOMContentLoaded', () => { window.__navAt = Date.now() })
     const O = window.WebSocket
     if (O && !window.__wshooked) {
       window.__wshooked = true
@@ -59,7 +61,7 @@ async function newPage(browser, label) {
   const page = await ctx.newPage()
   const errs = []
   page.on('pageerror', (e) => errs.push('pageerror: ' + String(e).slice(0, 300)))
-  page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errs.push(m.type() + ': ' + m.text().slice(0, 300)) })
+  page.on('console', (m) => { if (errs.length < 60) errs.push(m.type() + ': ' + m.text().slice(0, 200)) })
   page.on('response', (r) => {
     const u = r.url()
     if (u.includes('/api/signal') && r.status() >= 400) errs.push('HTTP ' + r.status() + ' ' + r.request().method() + ' ' + u.replace(/^.*\/api\//, ''))
@@ -120,10 +122,10 @@ async function logout(page) {
 async function mediaState(page, win = 3200) {
   return page.evaluate((win) => new Promise((res) => {
     const el = document.querySelector('.over.call')
-    if (!el) return res({ ui: false })
+    if (!el) return res({ ui: false, nav: window.__navAt, vis: document.visibilityState })
     const v = el.querySelector('video.remote')
     const a = el.querySelector('audio.ra')
-    const st = { ui: true, cst: (el.querySelector('.cst') || {}).textContent || '', v: null, a: null, pc: [] }
+    const st = { ui: true, cst: (el.querySelector('.cst') || {}).textContent || '', nav: window.__navAt, vis: document.visibilityState, v: null, a: null, pc: [] }
     let rvfc = 0
     if (v && v.requestVideoFrameCallback) {
       const cb = () => { rvfc++; try { v.requestVideoFrameCallback(cb) } catch {} }
@@ -291,9 +293,11 @@ try {
     ok(goneA2, 'B rad etgach A oynasi yopildi (holat yetdi)')
   }
 
-  // JS xatolari — qo'ng'iroq oynasidagi crash'lar
-  const errA = A_.page.__errs.filter((e) => !/favicon|sourcemap/i.test(e))
-  const errB = B_.page.__errs.filter((e) => !/favicon|sourcemap/i.test(e))
+  // JS xatolari — qo'ng'iroq oynasidagi crash'lar (endCall tashxis jurnali ham chop etiladi)
+  log('A konsol oxiri:', JSON.stringify(A_.page.__errs.slice(-14)))
+  log('B konsol oxiri:', JSON.stringify(B_.page.__errs.slice(-14)))
+  const errA = A_.page.__errs.filter((e) => /^(error|warning|pageerror|HTTP)/.test(e) && !/favicon|sourcemap/i.test(e))
+  const errB = B_.page.__errs.filter((e) => /^(error|warning|pageerror|HTTP)/.test(e) && !/favicon|sourcemap/i.test(e))
   ok(errA.length === 0, 'A sahifasida JS xatosi yo\'q', errA.slice(0, 3).join(' | '))
   ok(errB.length === 0, 'B sahifasida JS xatosi yo\'q', errB.slice(0, 3).join(' | '))
 } catch (e) {

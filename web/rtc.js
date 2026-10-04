@@ -565,6 +565,10 @@ async function flipCam() {
 async function flushIce(C) { for (const c of C.ice.splice(0)) try { await C.pc.addIceCandidate(c) } catch {} }
 function endCall(status = 'ended', report = true, msg) {
   const C = CALL; if (!C) return
+  // DOIMIY TASHXIS (jonli CI E2E + APK WebView loglari uchun): qo'ng'iroq NIMA sababdan
+  // tugaganini aniq ko'rsatadi — «UI o'z-o'zidan yo'qoldi» holatlarini kuzatish imkonini
+  // beradi. Ishlab chiqarishda zararsiz (bitta qator log).
+  try { console.info('[call] endCall', status, '|', msg || '', '|', (new Error().stack || '').split('\n')[2]?.trim() || '') } catch {}
   CALL = null
   C.ringMode = '' // qorovul endi jiringlamaydi
   clearInterval(C.nbT) // APK: native oyna qayta jonlantirish halqasi to'xtasin
@@ -596,13 +600,24 @@ function endCall(status = 'ended', report = true, msg) {
 // tez-tez), POST /signal serverga yetardi LEKIN qabul qiluvchiga yetmasdi — 0 ta soketga
 // push bo'lardi va qo'ng'iroq «Ulanmoqda…» da qolardi. Endi server har signalni 2 daqiqaga
 // navbatga yozadi, klient qo'ng'iroq davomida polling bilan ALBATTA oladi.
-let lastSid = 0, sigPollT = 0, sigPollBusy = false
+let lastSid = 0, sigPollT = 0, sigPollBusy = false, sigPollAt = 0
 async function drainSigQueue() {
-  if (!CALL || sigPollBusy) return
+  if (!CALL) return
+  // QOTIQ QOROVULI: api() GET xato bo'lsa 20s timeout + 1 marta retry = 40s gacha osilib
+  // qolishi mumkin (deploy izolyatsiyasi almashinuvi / DB sekinlik) — sigPollBusy SHU vaqtncha
+  // true qolib, accept/offer/answer navbatda YOTIB qolardi (aynan simptom B). Endi 8s'dan
+  // keyin qulflangan bo'lsa ham yangi so'rov yo'lga tushadi (fetch-and-delete atomic —
+  // ikki marta olish sid-dedup bilan xavfsiz).
+  if (sigPollBusy && Date.now() - sigPollAt < 8000) return
   sigPollBusy = true
+  sigPollAt = Date.now()
   try {
-    const r = await api('/signal/queue?since=' + lastSid)
-    for (const s of r.signals || []) {
+    // Poll 5s'dan ko'p kutmaydi — kechikkan javob tashlanadi, keyingi tick qayta urinadi
+    const r = await Promise.race([
+      api('/signal/queue?since=' + lastSid),
+      new Promise((res) => setTimeout(() => res(null), 5000)),
+    ])
+    if (r) for (const s of r.signals || []) {
       const sid = +s.sid || 0 // sid string kelishi mumkin (DB BIGINT) — songa majburlash
       if (sid > lastSid) lastSid = sid
       try { handleSignalEv({ type: 'signal', sid, from: s.from, data: s.data }) } catch {}

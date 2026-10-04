@@ -67,11 +67,11 @@ jobs:
           BV=""; BV_EXP=$(grep -o "50gram-v[0-9]*" web/sw.js | head -1 | grep -oE "[0-9]+$")
           for i in 1 2 3 4 5 6; do
             BV=$(curl -s -A "$UA" "$BASE/api/build" | python3 -c "import sys,json;print(json.load(sys.stdin).get('v',''))" 2>/dev/null || true)
-            [ "$BV" = "$BV_EXP" ] && break
+            [ "$BV" = "v$BV_EXP" ] && break
             sleep 20
           done
-          [ "$BV" = "$BV_EXP" ] || { echo "FAIL build (kutildi: $BV_EXP, olindi: '$BV')"; exit 1; }
-          echo "build: $BV_EXP OK"
+          [ "$BV" = "v$BV_EXP" ] || { echo "FAIL build (kutildi: v$BV_EXP, olindi: '$BV')"; exit 1; }
+          echo "build: v$BV_EXP OK"
           # 1) QO'NG'IROQ YARATISH
           C1=$(curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/calls" -H 'content-type: application/json' -d "{\"to\":$UID2,\"video\":true}")
           CID1=$(echo "$C1" | python3 -c "import sys,json;print(json.load(sys.stdin)['call_id'])")
