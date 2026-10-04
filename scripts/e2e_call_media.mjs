@@ -78,7 +78,9 @@ async function login(page, u, who = 'A') {
   let r = null
   for (let i = 0; i < 4; i++) {
     r = await page.evaluate(async ({ phone, full, who }) => {
-      const j = async (path, m, body) => {
+      const j = async (path, a, b) => {
+        const m = typeof a === 'string' ? a : undefined
+        const body = typeof a === 'string' ? b : a
         const h = { 'content-type': 'application/json' }
         if (localStorage.g50_token) h.authorization = 'Bearer ' + localStorage.g50_token
         const res = await fetch('/api' + path, { method: m || (body ? 'POST' : 'GET'), headers: h, body: body ? JSON.stringify(body) : undefined })
