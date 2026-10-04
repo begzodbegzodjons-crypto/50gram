@@ -1740,10 +1740,8 @@ async function oneInvid(base: string): Promise<any[]> {
 // "youtubeda millionlab shorts videolar bor — trenddagi millionlab shortslarni 50gram
 // dasturga reels bo'limiga olib ko'rsatadigan qilib ishla" — YouTube TREND (FEshorts)
 // lentasi OCHIQ jamoaviy kontent: akkaunt, parol yoki API-kalit KERAK EMAS.
-// 3 qatlamli zaxira: ① Innertube (youtubei) rasmiy FEshorts feed  ② youtube.com/shorts HTML
-// shelf-parser (kanal shorts tabi bilan bir xil parse)  ③ Piped/Invidious trending (≤90s).
-const YT_CLIENT_VER = "2.20241126.01.00"
-const YT_CTX = { context: { client: { clientName: "WEB", clientVersion: YT_CLIENT_VER, hl: "en", gl: "UZ" } } }
+// 2 qatlamli zaxira: ① youtube.com/shorts HTML shelf-parser  ② Piped/Invidious
+// trending-proksi zaxirasi (region=US, ≤90s). YouTube akkaunt/parol/API-kalit KERAK EMAS.
 // O'yin/jangovar kontent + Minecraft QATIY chiqariladi (foydalanuvchi: "batamom o'chir")
 const GAME_RE = /minecraft|minekraf|maynkraft|минекрафт|майнкрафт|gameplay|game\s?play|gta\s?[1-6]|gta\s?online|pubg|roblox|brawl\s?stars|free\s?fire|fortnite|dota\s?2|counter\s?strike|csgo|cs2|fifa\s?\d|ea\s?fc|clash\s?(of\s?clans|royale)|among\s?us|genshin|o['ʻ‘ʼ]?yin(?!choq)|oyun\s?oyn|o['ʻ‘ʼ]?yinlash/i
 function ytCount(s: string): number {
@@ -1765,54 +1763,6 @@ function ytTrendItem(id: string, title: string, views: number, img: string): any
     views, duration: 0, time: now(),
     url: "https://www.youtube.com/watch?v=" + vid, cat: "video",
   }
-}
-// FEshorts javobidan shorts elementlarini yig'ish (2 format: yangi shortsLockupViewModel + eski reelItemRenderer)
-function shortsFromBrowse(j: any): { items: any[]; cont: string } {
-  const items: any[] = []
-  let cont = ""
-  const grid: any[] = j?.contents?.tabs?.[0]?.tabRenderer?.content?.richGridRenderer?.contents
-    || j?.onResponseReceivedActions?.[0]?.appendContinuationItemsAction?.continuationItems
-    || j?.onResponseReceivedActions?.[1]?.appendContinuationItemsAction?.continuationItems || []
-  for (const it of grid) {
-    const ct = it?.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token
-    if (ct) { cont = ct; continue }
-    const c = it?.richItemRenderer?.content
-    const lock = c?.shortsLockupViewModel
-    if (lock) {
-      const id = lock?.onTap?.innertubeCommand?.reelsWatchEndpoint?.videoId
-      const title = lock?.overlayMetadata?.primaryText?.content || ""
-      const views = ytCount(lock?.overlayMetadata?.secondaryText?.content || "")
-      const img = lock?.thumbnailViewModel?.image?.sources?.[0]?.url || ""
-      if (id && title) items.push(ytTrendItem(id, title, views, img))
-      continue
-    }
-    const reel = c?.reelItemRenderer
-    if (reel?.videoId) {
-      const title = reel?.headline?.simpleText || reel?.headline?.runs?.map((x: any) => x?.text || "").join("") || ""
-      const views = ytCount(reel?.viewCountText?.simpleText || "")
-      const img = reel?.thumbnail?.sources?.[0]?.url || ""
-      if (title) items.push(ytTrendItem(reel.videoId, title, views, img))
-    }
-  }
-  return { items, cont }
-}
-async function ytBrowse(body: any, ms: number): Promise<any | null> {
-  try {
-    const r = await fetch("https://www.youtube.com/youtubei/v1/browse", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "user-agent": TREND_UA["user-agent"],
-        "x-youtube-client-name": "1",
-        "x-youtube-client-version": YT_CLIENT_VER,
-        "accept-language": "en",
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(ms),
-    })
-    if (!r.ok) { console.log("yttrend", "HTTP", r.status); return null }
-    return await r.json()
-  } catch (e: any) { console.log("yttrenderr", String(e?.message || e).slice(0, 100)); return null }
 }
 // ② youtube.com/shorts HTML shelf-parser — kanal shorts tabi bilan BIR XIL usul (allaqachon ishlaydi)
 async function ytShortsShelf(): Promise<any[]> {
@@ -1836,19 +1786,33 @@ async function ytShortsShelf(): Promise<any[]> {
     return out
   } catch { return [] }
 }
-// ③ Piped/Invidious TRENDING (region=US) — faqat ≤90s (haqiqiy Shorts uzunligi)
+// ③ Piped/Invidious TRENDING — YouTube trend sahifasi proksi orqali (region=US), faqat ≤90s
+// (haqiqiy Shorts uzunligi; 0/-1 davomiylik = jonli efir — kirmaydi). Ko'p nusxa: kamida
+// bittasi ishlashi kafolatlangan (allSettled), ilk nusxa eng barqaror instance oldinda.
+const TREND_PROXIES: Array<["p" | "i", string]> = [
+  ["p", "https://api.piped.private.coffee"],
+  ["i", "https://inv.nadeko.net"],
+  ["p", "https://pipedapi.reallyaweso.me"],
+  ["i", "https://invidious.f5.si"],
+  ["p", "https://pipedapi.drgns.space"],
+  ["i", "https://yewtu.be"],
+  ["p", "https://pipedapi.orkiv.com"],
+  ["i", "https://iv.ggtyler.dev"],
+]
 async function pipedTrendingShorts(): Promise<any[]> {
-  const bases = ["https://api.piped.private.coffee/trending?region=US", "https://pipedapi.kavin.rocks/trending?region=US", "https://invidious.nerdvpn.de/api/v1/trending?region=US"]
-  const res = await Promise.allSettled(bases.map(async (b) => {
-    const r = await fT(b, 8000, 900)
+  const res = await Promise.allSettled(TREND_PROXIES.map(async ([kind, base]) => {
+    const url = kind === "p" ? base + "/trending?region=US" : base + "/api/v1/trending?region=US"
+    const r = await fT(url, 8000, 900)
     if (!r) return []
     const j: any = await r.json()
-    return (Array.isArray(j) ? j : j.items || []).map((v: any) => {
-      const id = String(v.url || "").split("v=")[1]?.split("&")[0] || String(v.videoId || "")
+    const arr: any[] = Array.isArray(j) ? j : j.items || []
+    return arr.map((v: any) => {
+      const id = kind === "p" ? String(v.url || "").split("v=")[1]?.split("&")[0] : String(v.videoId || "")
       const dur = +v.duration || +v.lengthSeconds || 0
       const title = String(v.title || "")
       if (!id || dur < 1 || dur > 90 || !title) return null
-      return ytTrendItem(id, title, +v.views || +v.viewCount || 0, String(v.thumbnail || v.videoThumbnails?.[0]?.url || ""))
+      const img = kind === "p" ? String(v.thumbnail || "") : String(v.videoThumbnails?.[0]?.url || "")
+      return ytTrendItem(id, title, +v.views || +v.viewCount || 0, img)
     }).filter(Boolean)
   }))
   const out: any[] = []
@@ -1856,19 +1820,10 @@ async function pipedTrendingShorts(): Promise<any[]> {
   for (const r of res) { if (r.status !== "fulfilled") continue; for (const v of r.value) { if (v && !seen.has(v.yt)) { seen.add(v.yt); out.push(v) } } }
   return out
 }
-// ASOSIY: YouTube TREND Shorts — 2 sahifa (≈100 ta) continuation bilan; bo'sh bo'lsa zaxira qatlamlar
+// ASOSIY: YouTube TREND Shorts — HTML shelf (ba'zi holatlarda ishlaydi) → ko'p nusxali
+// trending-proksi zaxirasi. Ikkalasi ham bo'sh bo'lsa — hovuz qolgan manbalar bilan quriladi.
 async function ytGlobalTrend(): Promise<any[]> {
-  const first = await ytBrowse({ ...YT_CTX, browseId: "FEshorts" }, 9000)
-  let out: any[] = []
-  if (first) {
-    const p1 = shortsFromBrowse(first)
-    out = p1.items
-    if (p1.cont && out.length < 60) {
-      const second = await ytBrowse({ ...YT_CTX, browseId: "FEshorts", continuation: p1.cont }, 8000)
-      if (second) out = out.concat(shortsFromBrowse(second).items)
-    }
-  }
-  if (out.length < 12) out = out.concat(await ytShortsShelf())
+  let out = await ytShortsShelf()
   if (out.length < 12) out = out.concat(await pipedTrendingShorts())
   const seen = new Set<string>()
   return out.filter((v: any) => v && v.yt && !BLOCK_VIDS.has(v.yt) && !GAME_RE.test(String(v.title || "")) && !seen.has(v.yt) && seen.add(v.yt))
