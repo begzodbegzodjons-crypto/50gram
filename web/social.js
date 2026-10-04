@@ -1130,7 +1130,6 @@ function shSlideHTML(it, i) {
       : `<div class="sh-who" data-shwho="u${p.author?.id || 0}">${avHTML(p.author, 38)}<b>${esc(uname(p.author))}</b></div>`
     return `<div class="sh-slide paused" data-shi="${i}">
       <video data-media="${p.media_id}" loop playsinline preload="metadata"></video>
-      <div class="sh-load"><i></i><i></i><i></i></div>
       <div class="sh-failbox">⏳ Video yuklanmadi — internet sekin bo'lishi mumkin<br><button data-shretry>↻ Qayta urinish</button> · Pastga suring — keyingi video</div>
       <div class="sh-shade"></div>
       <div class="sh-bot">${who}${p.views ? `<small class="sh-vw">👁 ${p.views}</small>` : ''}${p.text_body ? `<div class="sh-cap">${linkify(p.text_body)}</div>` : ''}</div>
@@ -1163,7 +1162,6 @@ function shSlideHTML(it, i) {
   const ttl = x.live ? '🔴 Jonli efir — ' + (x.title || '') : x.title
   return `<div class="${x.mp4 ? 'sh-slide paused' : 'sh-slide'}" data-shi="${i}" data-ttrend="1"${bg}>
     ${pl}${cov}
-    <div class="sh-load"><i></i><i></i><i></i></div>
     <div class="sh-failbox">⏳ Yuklanmadi — internet sekin bo'lishi mumkin<br>Pastga suring — keyingi ko'rinadi</div>
     <div class="sh-shade"></div>
     <div class="sh-bot">${ttl ? `<b>${esc(ttl)}</b>` : ''}<small>${x.views ? '👁 ' + fmtN(x.views) : ''}${x.duration ? ' · ' + fmtDur(x.duration) : ''}</small></div>
