@@ -78,10 +78,10 @@ async function login(page, u, who = 'A') {
   let r = null
   for (let i = 0; i < 4; i++) {
     r = await page.evaluate(async ({ phone, full, who }) => {
-      const j = async (path, body) => {
+      const j = async (path, m, body) => {
         const h = { 'content-type': 'application/json' }
         if (localStorage.g50_token) h.authorization = 'Bearer ' + localStorage.g50_token
-        const res = await fetch('/api' + path, { method: body ? 'POST' : 'GET', headers: h, body: body ? JSON.stringify(body) : undefined })
+        const res = await fetch('/api' + path, { method: m || (body ? 'POST' : 'GET'), headers: h, body: body ? JSON.stringify(body) : undefined })
         const txt = await res.text()
         try { return JSON.parse(txt) } catch (e) { throw new Error('HTTP ' + res.status + ' ' + path + ': ' + txt.slice(0, 60)) }
       }
