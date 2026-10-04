@@ -480,8 +480,15 @@ function playRemote(C) {
   try { if (v && v.paused) v.play().catch(() => {}) } catch {}
 }
 async function setupPC(C) {
-  C.pc = await newPC((c) => sig(C.peer.id, { k: 'ice', call_id: C.id, c }))
-  for (const t of C.local.getTracks()) C.pc.addTrack(t, C.local)
+  // POYG'A GUARDI: 'accept' signal ikki marta kelib qolsa (sigTo retry'da javob yo'qolgan
+  // bo'lsa — noqulay tarmoqda TIPIK), avvalgi kod C.pc yangi PC bilan IKKI MARTA yaratardi:
+  // ikkinchi PC birinchisining javobini YUTIB, offer/javob mos kelmasdi → birtomonlama media
+  // (simptom B). Endi setupPC bir CALL uchun faqat BIR MARTA ishlaydi.
+  if (C.pc || C.pcStarting) return
+  C.pcStarting = true
+  try {
+    C.pc = await newPC((c) => sig(C.peer.id, { k: 'ice', call_id: C.id, c }))
+    for (const t of C.local.getTracks()) C.pc.addTrack(t, C.local)
   // TEZLIK/SIFAT: qo'ng'iroq videosi 1.2 Mbit (avvalgi 900k «sifatsiz» ko'rinar edi) — mobil
   // tarmoqda ham ravon oqadi, lekin rasm aniqroq. Jonli efir o'zining 900k'idda qoladi.
   limitBitrate(C.pc, 1200000)
@@ -530,6 +537,7 @@ async function setupPC(C) {
       } else if (!C.started) endCall('missed', true, 'Aloqa yo‘q — internetni tekshirib, qayta urinib ko‘ring')
     }
   }
+  } finally { C.pcStarting = false }
 }
 async function restartIce(C, fresh) {
   try {

@@ -43,10 +43,28 @@ async function newPage(browser, label) {
     viewport: { width: 420, height: 800 },
     permissions: ['camera', 'microphone'],
   })
+  // WebSocket'ni ushlash (readyState tashxisi uchun)
+  await ctx.addInitScript(`(() => {
+    const O = window.WebSocket
+    if (O && !window.__wshooked) {
+      window.__wshooked = true
+      window.__wss = []
+      const F = function (u) { const w = new O(u); window.__wss.push(w); return w }
+      F.prototype = O.prototype
+      window.WebSocket = F
+    }
+  })()`)
   const page = await ctx.newPage()
   const errs = []
   page.on('pageerror', (e) => errs.push('pageerror: ' + String(e).slice(0, 300)))
-  page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text().slice(0, 300)) })
+  page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errs.push(m.type() + ': ' + m.text().slice(0, 300)) })
+  page.on('response', (r) => {
+    const u = r.url()
+    if (u.includes('/api/signal')) {
+      const isPost = r.request().method() === 'POST'
+      if (isPost || r.status() >= 400) errs.push('HTTP ' + r.status() + ' ' + r.request().method() + ' ' + u.replace(/^.*\/api\//, ''))
+    }
+  })
   page.__errs = errs
   page.__label = label
   return { ctx, page }
@@ -155,6 +173,39 @@ try {
     ok(uiStill, 'oyna barqaror (bir necha soniyada o\'chib qolmadi)')
   }
   // B javob beradi (haqiqiy tugma bosish yo'li)
+  // B javob beradi (haqiqiy tugma bosish yo'li) — lekin AVVAL signal zanjiri TASHXISI:
+  // B → A ga test signali yuboriladi va A navbatida ko'rinishi tekshiriladi
+  const diagB = await B_.page.evaluate(async (aUid) => {
+    const out = {}
+    const j = async (p, m, b) => fetch('/api' + p, { method: m || 'GET', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + localStorage.g50_token }, body: b ? JSON.stringify(b) : undefined }).then((x) => x.json())
+    try {
+      const me = await j('/me')
+      out.meIdType = typeof me?.id
+      out.post = await j('/signal', 'POST', { to: aUid, data: { k: 'e2ediag', t: Date.now() } })
+    } catch (e) { out.err = String(e) }
+    out.wsStates = (window.__wss || []).map((w) => w.readyState)
+    return out
+  }, ua.uid)
+  log('DIAG B (me.id turi, POST /signal, WS):', JSON.stringify(diagB))
+  await B_.page.waitForTimeout(2500)
+  const diagA = await A_.page.evaluate(async () => {
+    const out = {}
+    const j = async (p) => fetch('/api' + p, { headers: { authorization: 'Bearer ' + localStorage.g50_token } }).then((x) => x.json())
+    try {
+      const me = await j('/me')
+      out.meIdType = typeof me?.id
+      out.queueRaw = await j('/signal/queue?since=0')
+    } catch (e) { out.err = String(e) }
+    out.wsStates = (window.__wss || []).map((w) => w.readyState)
+    return out
+  })
+  log('DIAG A (me.id turi, xom navbat, WS):', JSON.stringify(diagA))
+  ok(diagA.wsStates && diagA.wsStates.some((s) => s === 1), 'A WebSocket OPEN (readyState=1)', JSON.stringify(diagA.wsStates))
+  ok(diagB.wsStates && diagB.wsStates.some((s) => s === 1), 'B WebSocket OPEN (readyState=1)', JSON.stringify(diagB.wsStates))
+  const qRaw = diagA.queueRaw && diagA.queueRaw.signals
+  ok(!!(qRaw && qRaw.length), 'A navbatida B test signali KO\'RINADI (server yetkazishi)', JSON.stringify(diagA.queueRaw || diagA.err))
+  if (qRaw && qRaw.length) log('navbatdan signal TURLARI: sid=' + typeof qRaw[0].sid + ' from=' + typeof qRaw[0].from + ' data=' + JSON.stringify(qRaw[0].data))
+
   const accepted = await B_.page.evaluate(() => {
     const el = document.querySelector('.over.call.incoming')
     const b = el && el.querySelector('.cb.ok')
@@ -183,6 +234,13 @@ try {
     ok(!!SA.v && SA.v.rvfc > 0 && SA.v.w > 0, 'A ekranda masofaviy video kadrlar KELYAPTi (MUHIM — simptom B)', JSON.stringify(SA.v))
     ok(!!SA.a && SA.a.adv > 0.5, 'A audio currentTime oladi (ovoz eshitilyapti)', JSON.stringify(SA.a))
     ok(!!SB.a && SB.a.adv > 0.5, 'B audio currentTime oladi', JSON.stringify(SB.a))
+    // POST-DIAG: qabuldan keyin A'da PC paydo bo'ldimi? navbatda signallar qolib ketdimi?
+    const postDiag = await A_.page.evaluate(async () => {
+      const j = async (p) => fetch('/api' + p, { headers: { authorization: 'Bearer ' + localStorage.g50_token } }).then((x) => x.json())
+      let q = null; try { q = await j('/signal/queue?since=0') } catch (e) { q = { err: String(e) } }
+      return { pcs: (window.__pcs || []).length, queue: q }
+    })
+    log('POST-DIAG A (javobdan keyin):', JSON.stringify(postDiag))
     // Tozalash: A tugatadi
     await hangupByButton(A_.page)
     await A_.page.waitForTimeout(1500)
