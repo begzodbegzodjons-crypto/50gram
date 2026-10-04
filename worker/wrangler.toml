@@ -44,7 +44,7 @@ enabled = true
 # ESKIZ_EMAIL/ESKIZ_PASSWORD secretlar qo'shilgach "0" ga qaytariladi (haqiqiy SMS ishga tushadi)
 DEV_MODE = "1"
 # DEV kod faqat shu raqam(lar)ga: operator hisobi himoyalangan yagona istisno
-DEV_PHONES = "+998907776655"
+DEV_PHONES = "+998907776655,+998900000003,+998900000004,+998900000005,+998900000006"
 # Sinov raqamlari (SMS yuborilmaydi): "+998900000001:111111,+998900000002:222222"
 TEST_PHONES = ""
 # FOYDALANUVCHI MANBALARI (Reels bo'limi — manba nomi klientga KO'RINMAYDI, mahfiy):

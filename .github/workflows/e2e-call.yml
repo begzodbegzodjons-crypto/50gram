@@ -2,7 +2,9 @@ name: Qo'ng'iroq MEDIA E2E (2-brauzer)
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+
+      - main
 jobs:
   e2e:
     runs-on: ubuntu-latest

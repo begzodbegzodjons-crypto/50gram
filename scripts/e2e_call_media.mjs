@@ -19,6 +19,8 @@ const A = { phone: '998900000005', full: '+998900000005' }
 const B = { phone: '998900000006', full: '+998900000006' }
 
 let fails = 0
+let tokA = null, tokB = null // LOGOUT KAFOLATI: crash bo'lsa ham sessiya qolmasin
+const logoutTok = async (token) => { if (!token) return; try { await fetch(BASE + '/api/auth/logout', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token }, body: '{}' }) } catch {} }
 const ok = (cond, label, extra = '') => {
   console.log((cond ? '  ✓ ' : '  ✗ FAIL ') + label + (extra ? ' — ' + extra : ''))
   if (!cond) fails++
@@ -97,7 +99,7 @@ async function login(page, u, who = 'A') {
           const p = await j('/me', 'PATCH', { first_name: who === 'A' ? 'E2E-A' : 'E2E-B' })
           if (p && p.id) localStorage.setItem('g50_me', JSON.stringify(p))
         }
-        return { uid: v.user.id, name: v.user.first_name }
+        return { uid: v.user.id, name: v.user.first_name, token: v.token }
       } catch (e) { return { err: String(e.message || e) } }
     }, { ...u, who })
     if (!r.err) break
@@ -174,6 +176,7 @@ try {
   log('login B …')
   const ub = await login(B_.page, B, 'B')
   ok(!!ub.uid, 'B login', 'uid=' + ub.uid)
+  tokA = ua.token; tokB = ub.token
   if (!ua.uid || !ub.uid) throw new Error('login ishlamadi')
 
   // ============ 1-SSENARIY: A→B video qo'ng'iroq, B JAVOB BERADI (simptom B) ============
@@ -293,14 +296,13 @@ try {
   const errB = B_.page.__errs.filter((e) => !/favicon|sourcemap/i.test(e))
   ok(errA.length === 0, 'A sahifasida JS xatosi yo\'q', errA.slice(0, 3).join(' | '))
   ok(errB.length === 0, 'B sahifasida JS xatosi yo\'q', errB.slice(0, 3).join(' | '))
-
-  await logout(A_.page); await logout(B_.page)
-  await A_.ctx.close(); await B_.ctx.close()
 } catch (e) {
   console.error('E2E XATO:', e)
   fails++
 } finally {
-  await browser.close()
+  // LOGOUT KAFOLATI: sessiya qolib ketsa raqam «band» bo'lib, keyingi test o'ladi
+  try { await Promise.all([logoutTok(tokA), logoutTok(tokB)]) } catch {}
+  try { await browser.close() } catch {}
 }
 console.log(fails === 0 ? '\n=== E2E PASS — qo\'ng\'iroq zanjiri to\'liq ishlayapti ===' : `\n=== E2E FAIL — ${fails} tekshiruv yiqildi ===`)
 process.exit(fails === 0 ? 0 : 1)

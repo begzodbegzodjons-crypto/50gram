@@ -2,11 +2,14 @@ name: Jonli tekshiruv (smoke)
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+
+      - main
 jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: To'liq E2E tekshiruv (deploy'dan keyin avtomatik, o'zini tozalaydi)
         run: |
           set -e
