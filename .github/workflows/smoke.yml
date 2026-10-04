@@ -1,0 +1,26 @@
+name: Jonli tekshiruv (smoke)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Jonli API tekshiruvi (deploy'dan keyin avtomatik)
+        run: |
+          set -e
+          sleep 45  # deploy tugashini kutish
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+          BASE="https://50gram.begzodbegzodjons.workers.dev"
+          H=$(curl -s -A "$UA" "$BASE/api/health"); echo "health: $H"
+          echo "$H" | grep -q '"ok":true' || { echo "SMOKE FAIL: health"; exit 1; }
+          S=$(curl -s -A "$UA" "$BASE/sw.js" | head -2 | tail -1); echo "sw: $S"
+          echo "$S" | grep -q "const V = '50gram-v" || { echo "SMOKE FAIL: sw versiya"; exit 1; }
+          V=$(curl -s -A "$UA" "$BASE/api/push/vapid"); echo "vapid uzunligi: ${#V}"
+          echo "$V" | grep -q '"key"' || { echo "SMOKE FAIL: vapid"; exit 1; }
+          R=$(curl -s -A "$UA" -X POST "$BASE/api/auth/otp" -H 'content-type: application/json' -d '{"phone":"998900000002"}'); echo "api-stack: $R"
+          echo "$R" | grep -qE 'SMS xizmati|band|Kodni|Kod' || { echo "SMOKE FAIL: otp stack"; exit 1; }
+          A=$(curl -s -A "$UA" "$BASE/api/chats"); echo "auth-stack: $A"
+          echo "$A" | grep -q 'Avtorizatsiya' || { echo "SMOKE FAIL: auth stack"; exit 1; }
+          echo "SMOKE OK — barcha qatlamlar ishlayapti (firewall, API, TiDB, statik)"
