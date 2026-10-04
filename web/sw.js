@@ -1,5 +1,5 @@
 // 50 Gram service worker: ilova qobig'ini keshlaydi (oflayn ochiladi) + Telegram-uslubidagi Web Push.
-const V = '50gram-v57'
+const V = '50gram-v58'
 const SHELL = ['./', 'index.html', 'style.css', 'config.js', 'core.js', 'p2p.js', 'storage.js', 'chat.js', 'manage.js', 'social.js', 'rtc.js', 'logo.png', 'icon-192.png', 'icon-512.png', 'maskable-192.png', 'maskable-512.png', 'apple-touch-icon.png', 'favicon.png', 'manifest.json',
   // Task 29: Manrope shrifti + animatsiyali stiker paketlari + sovg'alar
   'fonts/manrope-latin.woff2', 'fonts/manrope-latin-ext.woff2',
@@ -11,6 +11,22 @@ self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) =
 self.addEventListener('fetch', (e) => {
   const u = new URL(e.request.url)
   if (e.request.method !== 'GET' || u.origin !== location.origin || u.pathname.includes('/api/')) return
+  // TEZLIK (umumiy): O'ZGARMAS KONTENT (stikerlar, shriftlar, ikonlar) — keshdan DARHOL (0 ms),
+  // fonda tarmoqdan yangilanadi (stale-while-revalidate). Bu fayllar faqat yangi V versiya bilan
+  // o'zgaradi — install bosqichi keshni yangi nusxa bilan to'ldiradi. Stiker paneli, ikonlar,
+  // shriftlar endi tarmoq kutmasdan chiziladi. Kod fayllari (html/js/css) — avval tarmoq
+  // (har doim yangi versiya kafolati), bo'lmasa kesh — eski kod hech qachon ko'rinmaydi.
+  const p = u.pathname
+  if (/^\/(fonts\/|stickers\/|ios\/|icon-|maskable-|apple-touch-icon|favicon\.png|logo\.png|manifest\.json)/.test(p)) {
+    e.respondWith((async () => {
+      const c = await caches.open(V)
+      const hit = await c.match(e.request)
+      const net = fetch(e.request).then((res) => { if (res.ok) { const cl = res.clone(); c.put(e.request, cl) } return res }).catch(() => null)
+      try { e.waitUntil(net.then(() => {}, () => {})) } catch {}
+      return hit || (await net) || Response.error()
+    })())
+    return
+  }
   // Avval tarmoq (yangi versiya), bo'lmasa kesh
   e.respondWith(fetch(e.request).then((r) => { if (r.ok) { const cl = r.clone(); caches.open(V).then((c) => c.put(e.request, cl)) } return r }).catch(() => caches.match(e.request).then((r) => r || caches.match('index.html'))))
 })

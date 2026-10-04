@@ -485,9 +485,12 @@ async function authLogout(c: C) {
 
 // ------------------------- Profil -------------------------
 async function getMe(c: C) {
-  const u = await c.db.one(`SELECT ${USER_COLS} FROM users WHERE id=?`, [c.uid])
+  // TEZLIK (umumiy): profil va istoriya bayroqlari mustaqil — parallel (1 davra tezroq, ilova ochilishida)
+  const [u, f] = await Promise.all([
+    c.db.one(`SELECT ${USER_COLS} FROM users WHERE id=?`, [c.uid]),
+    storyFlags(c, [c.uid]),
+  ])
   if (!u) fail("Hisob topilmadi", 401)
-  const f = await storyFlags(c, [c.uid])
   return json({ ...pubUser(u, c.uid), privacy_phone: u.privacy_phone, privacy_last_seen: u.privacy_last_seen, prefs: parse((u as any).prefs, { sounds: 1, vibrate: 1, preview: 1, autoload: 1 }), story: f.get(c.uid) || null })
 }
 async function patchMe(c: C) {
@@ -569,6 +572,12 @@ async function search(c: C) {
   const digits = q.replace(/\D/g, "")
   const like = "%" + q.replace(/[%_]/g, "") + "%"
   const uname = q.replace(/^@/, "").replace(/[%_]/g, "") + "%"
+  // TEZLIK (umumiy): kanal/guruh qidiruvi foydalanuvchi qidiruviga bog'liq emas —
+  // oldindan boshlanadi (parallel), qidiruv yozish paytida sezilarli tezroq javob qaytaradi
+  const chatsP = c.db.q(
+    `SELECT ${CHAT_COLS} FROM chats WHERE type<>'direct' AND is_public=1 AND (title LIKE ? OR username LIKE ?) ORDER BY member_count DESC LIMIT 20`,
+    [like, uname],
+  )
   let ids: number[] = []
   if (digits.length >= 9 && digits.length === q.replace(/[\s+()-]/g, "").length) {
     const ph9 = digits.length === 9 ? "+998" + digits : "+" + digits
@@ -581,11 +590,7 @@ async function search(c: C) {
     const cs = await c.db.q("SELECT u.id FROM contacts k JOIN users u ON u.phone=k.phone WHERE k.owner_id=? AND (k.first_name LIKE ? OR k.last_name LIKE ?)", [c.uid, like, like])
     ids = [...new Set([...cs.map((r) => r.id), ...ids])]
   }
-  const um = await usersByIds(c, ids.filter((x) => x !== c.uid))
-  const chats = await c.db.q(
-    `SELECT ${CHAT_COLS} FROM chats WHERE type<>'direct' AND is_public=1 AND (title LIKE ? OR username LIKE ?) ORDER BY member_count DESC LIMIT 20`,
-    [like, uname],
-  )
+  const [um, chats] = await Promise.all([usersByIds(c, ids.filter((x) => x !== c.uid)), chatsP])
   return json({ users: [...um.values()], chats: chats.map(chatOut) })
 }
 async function discover(c: C) {
@@ -646,15 +651,19 @@ async function chatSummaries(c: C, onlyId?: number) {
   )
   if (!rows.length) return []
   const ids = rows.map((r) => r.id)
-  const last = await c.db.q(
-    `SELECT * FROM messages WHERE id IN (SELECT MAX(id) FROM messages WHERE chat_id IN (${ph(ids)}) AND deleted=0 GROUP BY chat_id)`,
-    ids,
-  )
-  const lastMap = new Map(last.map((m) => [m.chat_id, msgOut(m)]))
+  // TEZLIK (umumiy): oxirgi xabarlar va direct-peer qatorlari mustaqil — parallel
+  // (chatlar ro'yxati eng ko'p so'raladigan og'ir endpoint — ilova ochilishi, 30s sinxron, WS reconnect)
   const directIds = rows.filter((r) => r.type === "direct").map((r) => r.id)
-  const peers = directIds.length
-    ? await c.db.q(`SELECT chat_id, user_id, last_read AS peer_last_read FROM chat_members WHERE chat_id IN (${ph(directIds)}) AND user_id<>?`, [...directIds, c.uid])
-    : []
+  const [last, peers] = await Promise.all([
+    c.db.q(
+      `SELECT * FROM messages WHERE id IN (SELECT MAX(id) FROM messages WHERE chat_id IN (${ph(ids)}) AND deleted=0 GROUP BY chat_id)`,
+      ids,
+    ),
+    directIds.length
+      ? c.db.q(`SELECT chat_id, user_id, last_read AS peer_last_read FROM chat_members WHERE chat_id IN (${ph(directIds)}) AND user_id<>?`, [...directIds, c.uid])
+      : Promise.resolve([] as any[]),
+  ])
+  const lastMap = new Map(last.map((m) => [m.chat_id, msgOut(m)]))
   const um = await usersByIds(c, [...peers.map((p) => p.user_id), c.uid])
   const peerMap = new Map(peers.map((p) => [p.chat_id, p]))
   return rows.map((r) => {
@@ -949,10 +958,15 @@ async function enrich(c: C, msgs: any[]) {
   const ids = msgs.map((m) => m.id)
   const out = msgs.map(msgOut) as any[]
   if (!ids.length) return out
-  const rx = await c.db.q(`SELECT message_id, user_id, emoji FROM reactions WHERE message_id IN (${ph(ids)})`, ids)
+  // TEZLIK (umumiy): reaksiyalar, so'rovnoma ovozlari va izohlar soni bir-biridan mustaqil —
+  // 3 ketma-ket TiDB so'rovi (3 HTTP davra) o'rniga BIR to'lqinda parallel so'raladi.
+  // Bu xabarlar ro'yxati va YUBORILGAN har xabar tezligini oshiradi.
   const polls = msgs.filter((m) => m.kind === "poll").map((m) => m.id)
-  const votes = polls.length ? await c.db.q(`SELECT message_id, user_id, opt FROM poll_votes WHERE message_id IN (${ph(polls)})`, polls) : []
-  const cm = await c.db.q(`SELECT message_id, COUNT(*) AS cnt FROM msg_comments WHERE message_id IN (${ph(ids)}) GROUP BY message_id`, ids).catch((): any[] => [])
+  const [rx, votes, cm] = await Promise.all([
+    c.db.q(`SELECT message_id, user_id, emoji FROM reactions WHERE message_id IN (${ph(ids)})`, ids),
+    polls.length ? c.db.q(`SELECT message_id, user_id, opt FROM poll_votes WHERE message_id IN (${ph(polls)})`, polls) : Promise.resolve([] as any[]),
+    c.db.q(`SELECT message_id, COUNT(*) AS cnt FROM msg_comments WHERE message_id IN (${ph(ids)}) GROUP BY message_id`, ids).catch((): any[] => []),
+  ])
   const cmMap = new Map(cm.map((x) => [x.message_id, Number(x.cnt)]))
   for (const m of out) {
     const r: Record<string, number[]> = {}
@@ -971,8 +985,8 @@ async function enrich(c: C, msgs: any[]) {
 }
 async function getMessages(c: C) {
   const id = +c.p.id
-  const ch = await needChat(c, id)
-  const m = await member(c, id)
+  // TEZLIK (umumiy): chat ma'lumoti va a'zolik tekshiruvi mustaqil — parallel
+  const [ch, m] = await Promise.all([needChat(c, id), member(c, id)])
   if (!(m && m.status === "active") && !(ch.type !== "direct" && ch.is_public)) fail("Ruxsat yo‘q", 403)
   const after = +(c.url.searchParams.get("after") || 0)
   const since = +(c.url.searchParams.get("since") || 0)
@@ -1000,9 +1014,13 @@ async function getMessages(c: C) {
     all = [...changed, ...fresh]
     more = fresh.length === 300
   }
-  const messages = await enrich(c, all)
-  const um = await usersByIds(c, [...new Set(all.map((x) => x.sender_id))])
-  const peer = ch.type === "direct" ? await c.db.one("SELECT last_read FROM chat_members WHERE chat_id=? AND user_id<>?", [id, c.uid]) : null
+  // TEZLIK (umumiy): boyitish, mualliflar va peer oxirgi o'qish mustaqil — parallel.
+  // Chat ochilish ketma-ketligi: 5 davra → 3 to'lqin (~40% tezroq).
+  const [messages, um, peer] = await Promise.all([
+    enrich(c, all),
+    usersByIds(c, [...new Set(all.map((x) => x.sender_id))]),
+    ch.type === "direct" ? c.db.one("SELECT last_read FROM chat_members WHERE chat_id=? AND user_id<>?", [id, c.uid]) : Promise.resolve(null as any),
+  ])
   return json({ messages, users: Object.fromEntries(um), now: t, peer_last_read: peer?.last_read ?? null, more })
 }
 async function sendMessage(c: C) {
@@ -1042,13 +1060,15 @@ async function sendMessage(c: C) {
   const exp = t + 100 * 365 * DAY // o'chmas tarix: faqat foydalanuvchi o'chira oladi
   await c.db.run("INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)",
     [mid, id, c.uid, kind, body || null, meta, t, t, exp])
-  await c.db.run("UPDATE chats SET last_msg_at=? WHERE id=?", [t, id])
-  await c.db.run("UPDATE chat_members SET last_read=? WHERE chat_id=? AND user_id=?", [mid, id, c.uid])
+  // TEZLIK (umumiy): chat/a'zo/media belgilari yangilashlari bir-biriga bog'liq emas
+  // (har xil jadval) — parallel. Xabar yuborish ~2 HTTP davra tezroq.
   const mediaId = c.b.meta?.media_id
-  if (mediaId) {
-    await c.db.run("UPDATE media SET expires_at=?, keep=1, chat_id=?, next_check=0 WHERE id=? AND owner_id=?", [exp, id, String(mediaId), c.uid])
-    c.wait(planReplicas(c.db, 1, String(mediaId)))
-  }
+  await Promise.all([
+    c.db.run("UPDATE chats SET last_msg_at=? WHERE id=?", [t, id]),
+    c.db.run("UPDATE chat_members SET last_read=? WHERE chat_id=? AND user_id=?", [mid, id, c.uid]),
+    mediaId ? c.db.run("UPDATE media SET expires_at=?, keep=1, chat_id=?, next_check=0 WHERE id=? AND owner_id=?", [exp, id, String(mediaId), c.uid]) : Promise.resolve(),
+  ])
+  if (mediaId) c.wait(planReplicas(c.db, 1, String(mediaId)))
   const out = (await enrich(c, [await c.db.one("SELECT * FROM messages WHERE id=?", [mid])]))[0]
   out.client_id = c.b.client_id || null
   notifyChat(c, id, { type: "message", chat_id: id, message: out })
@@ -1270,9 +1290,12 @@ async function listStories(c: C) {
     [c.uid, ...ids, now()],
   )
   const own = rows.filter((r) => r.user_id === c.uid).map((r) => r.id)
-  const vc = own.length ? await c.db.q(`SELECT story_id, COUNT(*) AS cnt FROM story_views WHERE story_id IN (${ph(own)}) GROUP BY story_id`, own) : []
+  // TEZLIK (umumiy): ko'rishlar soni va mualliflar mustaqil — parallel (ilova ochilishi + har 60s)
+  const [vc, um] = await Promise.all([
+    own.length ? c.db.q(`SELECT story_id, COUNT(*) AS cnt FROM story_views WHERE story_id IN (${ph(own)}) GROUP BY story_id`, own) : Promise.resolve([] as any[]),
+    usersByIds(c, [...new Set(rows.map((r) => r.user_id))]),
+  ])
   const vcm = new Map(vc.map((r) => [r.story_id, Number(r.cnt)]))
-  const um = await usersByIds(c, [...new Set(rows.map((r) => r.user_id))])
   const groups = new Map<number, any>()
   for (const r of rows) {
     if (!groups.has(r.user_id)) groups.set(r.user_id, { user: um.get(r.user_id), stories: [] })
@@ -2665,16 +2688,22 @@ async function startLive(c: C) {
   return json({ id })
 }
 async function listLives(c: C) {
-  const ids = await circle(c)
-  const my = (await c.db.q("SELECT chat_id FROM chat_members WHERE user_id=? AND status='active'", [c.uid])).map((r) => r.chat_id)
+  // TEZLIK (umumiy): doira va guruhlarim ro'yxati mustaqil — parallel
+  const [ids, myRows] = await Promise.all([
+    circle(c),
+    c.db.q("SELECT chat_id FROM chat_members WHERE user_id=? AND status='active'", [c.uid]),
+  ])
+  const my = myRows.map((r) => r.chat_id)
   const rows = await c.db.q(
     `SELECT * FROM lives WHERE ended_at=0 AND started_at>? AND (user_id IN (${ph(ids)}) ${my.length ? `OR chat_id IN (${ph(my)})` : ""}) ORDER BY started_at DESC LIMIT 30`,
     [now() - 12 * 3600000, ...ids, ...my],
   )
-  const um = await usersByIds(c, rows.map((r) => r.user_id))
-  // Efirchilar martabasi (coin darajalari) — ro'yxatda tega ko'rinsin
+  // TEZLIK (umumiy): efirchilar va coin darajalari mustaqil — parallel
   const hosts = rows.map((r) => r.user_id)
-  const wl = hosts.length ? await c.db.q(`SELECT user_id, earned FROM wallets WHERE user_id IN (${ph(hosts)})`, hosts).catch((): any[] => []) : []
+  const [um, wl] = await Promise.all([
+    usersByIds(c, hosts),
+    hosts.length ? c.db.q(`SELECT user_id, earned FROM wallets WHERE user_id IN (${ph(hosts)})`, hosts).catch((): any[] => []) : Promise.resolve([] as any[]),
+  ])
   const lv = new Map(wl.map((x) => [x.user_id, levelOf(Number(x.earned))]))
   return json(rows.map((r) => ({ id: r.id, title: r.title, chat_id: r.chat_id, viewers: r.viewers, started_at: r.started_at, user: um.get(r.user_id) ? { ...um.get(r.user_id), lvl: lv.get(r.user_id) || levelOf(0) } : null })))
 }
