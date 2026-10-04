@@ -1740,8 +1740,8 @@ async function oneInvid(base: string): Promise<any[]> {
 // "youtubeda millionlab shorts videolar bor — trenddagi millionlab shortslarni 50gram
 // dasturga reels bo'limiga olib ko'rsatadigan qilib ishla" — YouTube TREND (FEshorts)
 // lentasi OCHIQ jamoaviy kontent: akkaunt, parol yoki API-kalit KERAK EMAS.
-// 2 qatlamli zaxira: ① youtube.com/shorts HTML shelf-parser  ② Piped/Invidious
-// trending-proksi zaxirasi (region=US, ≤90s). YouTube akkaunt/parol/API-kalit KERAK EMAS.
+// 2 qatlam: ① YouTube qidiruv-shorts filtr (EgIYAQ== — viral shortslar)  ② HTML shelf
+// zaxirasi. YouTube akkaunt/parol/API-kalit KERAK EMAS (ochiq jamoaviy kontent).
 // O'yin/jangovar kontent + Minecraft QATIY chiqariladi (foydalanuvchi: "batamom o'chir")
 const GAME_RE = /minecraft|minekraf|maynkraft|минекрафт|майнкрафт|gameplay|game\s?play|gta\s?[1-6]|gta\s?online|pubg|roblox|brawl\s?stars|free\s?fire|fortnite|dota\s?2|counter\s?strike|csgo|cs2|fifa\s?\d|ea\s?fc|clash\s?(of\s?clans|royale)|among\s?us|genshin|o['ʻ‘ʼ]?yin(?!choq)|oyun\s?oyn|o['ʻ‘ʼ]?yinlash/i
 function ytCount(s: string): number {
@@ -1764,7 +1764,59 @@ function ytTrendItem(id: string, title: string, views: number, img: string): any
     url: "https://www.youtube.com/watch?v=" + vid, cat: "video",
   }
 }
-// ② youtube.com/shorts HTML shelf-parser — kanal shorts tabi bilan BIR XIL usul (allaqachon ishlaydi)
+// ① ASOSIY: YouTube QIDIRUV + SHORTS FILTR (innertube, params=EgIYAQ==) — "trenddagi
+// millionlab shortslar" manbasi: qidiruv natijalari MILLIONLAB ko'rishli viral shortslar
+// (81M/26M/17M views tekshirildi). Akkaunt/parol/API-kalit KERAK EMAS (ochiq jamoaviy manba).
+// Har hovuz qurilishida tasodifiy 5 mavzu — har sahifa xilma-xil (bir xillik yo'q).
+const YT_PUBKEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8" // youtube.com sahifasidagi OCHIQ kalit (maxfiy emas)
+const TREND_QUERIES = [
+  "funny shorts", "comedy shorts", "viral shorts", "satisfying shorts", "prank shorts",
+  "music shorts", "dance shorts", "animals shorts", "food shorts", "football skills",
+  "asmr shorts", "travel shorts", "try not to laugh", "tiktok compilation", "reaction shorts",
+  "sports shorts", "cartoon shorts", "diy shorts", "nature shorts", "city shorts",
+]
+// Daraxt bo'ylab barcha shortsLockupViewModel yig'uvchi (layout o'zgarsa ham ishlaydi)
+function collectShorts(o: any, out: any[]) {
+  if (!o || typeof o !== "object") return
+  if (Array.isArray(o)) { for (const v of o) collectShorts(v, out); return }
+  const lock = o.shortsLockupViewModel
+  if (lock) {
+    const id = ((((lock.onTap || {}).innertubeCommand || {}).reelWatchEndpoint || {}).videoId) || ""
+    const om = lock.overlayMetadata || {}
+    const title = (om.primaryText || {}).content || ""
+    const views = ytCount((om.secondaryText || {}).content || "")
+    if (id && title && !out.some((x: any) => x.yt === id)) out.push(ytTrendItem(id, title, views, ""))
+  }
+  for (const k of Object.keys(o)) collectShorts(o[k], out)
+}
+async function ytSearchShorts(): Promise<any[]> {
+  const qs = TREND_QUERIES.slice().sort(() => Math.random() - 0.5).slice(0, 5)
+  const res = await Promise.allSettled(qs.map(async (q) => {
+    const r = await fetch("https://www.youtube.com/youtubei/v1/search?key=" + YT_PUBKEY + "&prettyPrint=false", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": TREND_UA["user-agent"],
+        "x-origin": "https://www.youtube.com",
+        "x-youtube-client-name": "1",
+        "x-youtube-client-version": "2.20241126.01.00",
+        "accept-language": "en",
+      },
+      body: JSON.stringify({ context: { client: { clientName: "WEB", clientVersion: "2.20241126.01.00", hl: "en", gl: "US" } }, query: q, params: "EgIYAQ==" }),
+      signal: AbortSignal.timeout(9000),
+      cf: { cacheTtl: 1800, cacheEverything: true },
+    } as any)
+    if (!r.ok) { console.log("ytsearch", r.status); return [] }
+    const j: any = await r.json()
+    const out: any[] = []
+    collectShorts(j, out)
+    return out
+  }))
+  const out: any[] = []
+  for (const r of res) { if (r.status === "fulfilled") for (const v of r.value) out.push(v) }
+  return out
+}
+// ② youtube.com/shorts HTML shelf-parser — zaxira (ba'zi holatlarda ishlaydi)
 async function ytShortsShelf(): Promise<any[]> {
   const r = await fT("https://www.youtube.com/shorts", 9000, 900)
   if (!r) return []
@@ -1786,47 +1838,13 @@ async function ytShortsShelf(): Promise<any[]> {
     return out
   } catch { return [] }
 }
-// ③ Piped/Invidious TRENDING — YouTube trend sahifasi proksi orqali (region=US), faqat ≤90s
-// (haqiqiy Shorts uzunligi; 0/-1 davomiylik = jonli efir — kirmaydi). Ko'p nusxa: kamida
-// bittasi ishlashi kafolatlangan (allSettled), ilk nusxa eng barqaror instance oldinda.
-const TREND_PROXIES: Array<["p" | "i", string]> = [
-  ["p", "https://api.piped.private.coffee"],
-  ["i", "https://inv.nadeko.net"],
-  ["p", "https://pipedapi.reallyaweso.me"],
-  ["i", "https://invidious.f5.si"],
-  ["p", "https://pipedapi.drgns.space"],
-  ["i", "https://yewtu.be"],
-  ["p", "https://pipedapi.orkiv.com"],
-  ["i", "https://iv.ggtyler.dev"],
-]
-async function pipedTrendingShorts(): Promise<any[]> {
-  const res = await Promise.allSettled(TREND_PROXIES.map(async ([kind, base]) => {
-    const url = kind === "p" ? base + "/trending?region=US" : base + "/api/v1/trending?region=US"
-    const r = await fT(url, 8000, 900)
-    if (!r) return []
-    const j: any = await r.json()
-    const arr: any[] = Array.isArray(j) ? j : j.items || []
-    return arr.map((v: any) => {
-      const id = kind === "p" ? String(v.url || "").split("v=")[1]?.split("&")[0] : String(v.videoId || "")
-      const dur = +v.duration || +v.lengthSeconds || 0
-      const title = String(v.title || "")
-      if (!id || dur < 1 || dur > 90 || !title) return null
-      const img = kind === "p" ? String(v.thumbnail || "") : String(v.videoThumbnails?.[0]?.url || "")
-      return ytTrendItem(id, title, +v.views || +v.viewCount || 0, img)
-    }).filter(Boolean)
-  }))
-  const out: any[] = []
-  const seen = new Set<string>()
-  for (const r of res) { if (r.status !== "fulfilled") continue; for (const v of r.value) { if (v && !seen.has(v.yt)) { seen.add(v.yt); out.push(v) } } }
-  return out
-}
-// ASOSIY: YouTube TREND Shorts — HTML shelf (ba'zi holatlarda ishlaydi) → ko'p nusxali
-// trending-proksi zaxirasi. Ikkalasi ham bo'sh bo'lsa — hovuz qolgan manbalar bilan quriladi.
+// ASOSIY: YouTube TREND Shorts — qidiruv-shorts filtr (millionlab ko'rishli viral shortslar)
+// + HTML shelf zaxirasi. Piped/Invidious TRENDING olib tashlandi (tekshirildi: 0 ta short
+// qaytaradi — faqat jonli efir/uzun videolar). Ikkalasi bo'sh bo'lsa hovuz qolgan manbalar bilan.
 async function ytGlobalTrend(): Promise<any[]> {
-  let out = await ytShortsShelf()
-  if (out.length < 12) out = out.concat(await pipedTrendingShorts())
+  const [search, shelf] = await Promise.all([ytSearchShorts(), ytShortsShelf()])
   const seen = new Set<string>()
-  return out.filter((v: any) => v && v.yt && !BLOCK_VIDS.has(v.yt) && !GAME_RE.test(String(v.title || "")) && !seen.has(v.yt) && seen.add(v.yt))
+  return [...search, ...shelf].filter((v: any) => v && v.yt && !BLOCK_VIDS.has(v.yt) && !GAME_RE.test(String(v.title || "")) && !seen.has(v.yt) && seen.add(v.yt))
 }
 // --- Yagona video hovuzi: stale-while-revalidate — eski hovuz DARHOL qaytadi, yangilash fonda ketadi.
 // Bu foydalanuvchining asosiy shikoyati ("lenta juda sekin ochmoqda") uchun asosiy yechim:
@@ -1962,9 +1980,9 @@ async function buildVideoPool(env: Env): Promise<{ shorts: any[]; vids: any[] }>
   return { shorts: shorts.slice(0, 240), vids: [] }
 }
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  // v17: YOUTUBE GLOBAL TREND shorts asosiy manba bo'ldi (foydalanuvchi talabi) + hovuz 240 —
+  // v18: trend manba = qidiruv-shorts filtr (haqiqiy viral shortslar) — eski hovuz bekor —
   // eski hovuz (v16, trendsiz) BATAMOM bekor, yangi kesh kaliti
-  const ck = "https://trend.50gram.internal/poolv17"
+  const ck = "https://trend.50gram.internal/poolv18"
   const meta = await cacheGetJSON<{ shorts: any[]; vids: any[] }>(ck)
   if (meta && meta.data && meta.data.shorts?.length) {
     if (now() - meta.t < POOL_FRESH_MS) return meta.data
