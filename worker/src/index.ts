@@ -2524,10 +2524,13 @@ async function ice(c: C) {
   const servers: any[] = [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }]
   if (c.env.TURN_KEY_ID && c.env.TURN_KEY_TOKEN) {
     try {
+      // TIMEOUT 3.5s: rtc.live.cloudflare.com javob bermasa /ice ABADIY osilib qolmasin —
+      // aks holda setupPC ham osilib, qo'ng'iroq «Ulanmoqda…» da qotib qolardi (STUN zaxirasi bor)
       const r = await fetch("https://rtc.live.cloudflare.com/v1/turn/keys/" + c.env.TURN_KEY_ID + "/credentials/generate-ice-servers", {
         method: "POST",
         headers: { Authorization: `Bearer ${c.env.TURN_KEY_TOKEN}`, "content-type": "application/json" },
         body: JSON.stringify({ ttl: 86400 }),
+        signal: AbortSignal.timeout(3500),
       })
       const j: any = await r.json()
       const s = j.iceServers

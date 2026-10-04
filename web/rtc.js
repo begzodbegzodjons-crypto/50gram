@@ -12,12 +12,29 @@ async function iceServers() {
 const sig = (to, data) => post('/signal', { to, data }).catch(() => {})
 async function getMedia(video) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('Brauzer qo‘ng‘iroqni qo‘llamaydi (HTTPS kerak)')
+  // APK: OS darajasidagi kamera/mikrofon ruxsat kafolati — WebView ichki ruxsati
+  // tushib qolgan bo‘lsa ham haqiqiy Android ruxsat oynasi chiqadi (Android50.ensurePerms)
+  try {
+    if (window.Android50 && typeof window.Android50.ensurePerms === 'function') {
+      window.Android50.ensurePerms()
+      await new Promise((r) => setTimeout(r, 380)) // OS oynasi chiqishi/javob berishiga ozgina vaqt
+    }
+  } catch {}
   const con = { audio: { echoCancellation: true, noiseSuppression: true }, video: video ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } : false }
   let last = null
   for (let i = 0; i < 2; i++) {
-    try { return await navigator.mediaDevices.getUserMedia(con) }
-    catch (e) {
+    let got = null
+    try {
+      // MUHIM: getUserMedia ba'zi qurilmalarda (WebView ruxsati bekorga qolganda) ABADIY osilib qoladi —
+      // 12s watchdog: osilib qolsa aniq xato bilan yopiladi, «Ulanmoqda…» cheksiz qolmaydi
+      return await Promise.race([
+        navigator.mediaDevices.getUserMedia(con).then((s) => { got = s; return s }),
+        new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('hang'), { name: 'MediaHangError' })), 12000)),
+      ])
+    } catch (e) {
       last = e
+      try { if (got) got.getTracks().forEach((t) => t.stop()) } catch {} // kechikkan oqim sizhtirmasligi uchun
+      if (e && e.name === 'MediaHangError') break // qayta urinishning ma'nosi yo'q — osilib qolgan
       if (e && (e.name === 'NotFoundError' || e.name === 'OverconstrainedError')) throw new Error(video ? 'Kamera topilmadi' : 'Mikrofon topilmadi')
       if (e && (e.name === 'NotReadableError' || e.name === 'AbortError')) { await new Promise((r) => setTimeout(r, 450)); continue } // qurilma band — bir marta qayta urinamiz
       break
@@ -26,7 +43,10 @@ async function getMedia(video) {
   // MUHIM: Chrome ruxsat bir marta rad etilsa boshqa hech qachon oyna ko'rsatmaydi —
   // shuning uchun foydalanuvchiga aniq yo'nalish beramiz (🔒 belgi orqali yoqish)
   if (last && (last.name === 'NotAllowedError' || last.name === 'SecurityError')) {
-    throw new Error('Ruxsat berilmagan — manzil satridagi 🔒 belgi orqali Kamera va Mikrofonga “Ruxsat berilgan” qiling')
+    throw new Error('Kamera va mikrofonga ruxsat berilmagan — Sozlamalarda ilova ruxsatlaridan Kamera va Mikrofoni yoqing')
+  }
+  if (last && last.name === 'MediaHangError') {
+    throw new Error('Kamera javob bermadi — ilovani to‘liq yopib qayta oching, so‘ng Sozlamalardan Kamera/Mikrofon ruxsatini tekshiring')
   }
   throw new Error(video ? 'Kamera/mikrofon ochilmadi — qayta urinib ko‘ring' : 'Mikrofon ochilmadi — qayta urinib ko‘ring')
 }
@@ -54,6 +74,30 @@ async function newPC(onIce) {
 
 // ---------------- Qo'ng'iroqlar ----------------
 let CALL = null
+// ISHONCHLI SIGNAL: avvalgi sig() xatoni JIM yutardi — 'accept'/'offer'/'answer' yo'qolsa
+// qo'ng'iroq ABADIY «Ulanmoqda…» da qolardi (aynan foydalanuvchi shikoyati). Endi 3 martagacha
+// qayta uriniladi; muhim signallarda natija tekshiriladi — yetmasa qo'ng'iroq aniq xato bilan yopiladi.
+async function sigTo(to, data, tries = 3) {
+  for (let i = 0; i < tries; i++) {
+    try { await post('/signal', { to, data }); return true }
+    catch (e) { if (i < tries - 1) await new Promise((r) => setTimeout(r, 700)) }
+  }
+  return false
+}
+// ULANISH QOROVULI: qabul qilingach ikkala tomonda ham taymer bor — 25s'da ulanmasa ICE
+// restart (yangi tarmoq yo'li), 45s'da ham ulanmasa ANIQ xato bilan yopiladi.
+// Avval: qabul qiluvchida umuman taymer yo'q edi, chaqiruvchiki 'accept' kelishi bilan o'chardi.
+function armConnectWatchdog(C) {
+  clearTimeout(C.connWatch); clearTimeout(C.connWatch2)
+  C.connWatch = setTimeout(() => {
+    if (CALL !== C || C.started || !C.pc || C.pc.connectionState === 'connected' || C.pc.connectionState === 'closed') return
+    restartIce(C)
+  }, 25000)
+  C.connWatch2 = setTimeout(() => {
+    if (CALL !== C || C.started) return
+    endCall('missed', true, 'Ulanib bo‘lmadi — internetni tekshirib, qayta urinib ko‘ring')
+  }, 45000)
+}
 // SVG ikonkalar — har bir qurilmada aniq ko'rinadi (emoji o'rniga)
 const IC = {
   phone: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>',
@@ -113,7 +157,12 @@ async function callUser(uid, video) {
     setCallState('Chaqirilmoqda…')
     ringTone(true)
     CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', true, 'Javob bermadi'), 75000)
-  } catch (e) { toast('⚠️ ' + e.message); endCall('ended', !!CALL?.id) }
+  } catch (e) {
+    // XATO KO‘RINADIGAN bo‘lsin: nima uchun kamera ochilmaganini qo‘ng‘iroq oynasida ham ko‘rsatamiz
+    try { if (CALL) setCallState('⚠️ ' + e.message) } catch {}
+    toast('⚠️ ' + e.message)
+    endCall('ended', !!CALL?.id, '⚠️ ' + e.message)
+  }
 }
 // ---------------- FON REJIMIDA QO'NG'IROQ ----------------
 // APK (native WebView): window.Android50 bridge — to'liq ekran qo'ng'iroq bildirishnomasi (Javob berish/Rad etish)
@@ -177,6 +226,9 @@ window.__50wsOpen = async () => {
     const r = await api('/calls/pending')
     if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, from: r.call.from })
   } catch {}
+  // QO'NG'IROQ davomida WS qayta ulandi va hali ulanmagan bo'lsa — offer qayta yuboriladi
+  // (uzilish paytida yo'qolgan offer/answer tufayli «Ulanmoqda…» da osilib qolmaslik uchun)
+  try { if (CALL && !CALL.started && CALL.pc && CALL.pc.localDescription) restartIce(CALL) } catch {}
   // Task 34: WS uzilib-tiklanganda efir signalari (offer/ICE) YO‘QOLGAN bo‘lishi mumkin —
   // tomoshabin hali ulanmagan bo‘lsa darhol qayta ulanishni so‘raymiz.
   const L = LIVE
@@ -191,9 +243,16 @@ async function acceptCall() {
     C.local = await getMedia(C.video)
     qs('.local', C.el).srcObject = C.local
     await setupPC(C)
-    sig(C.peer.id, { k: 'accept', call_id: C.id })
+    // 'accept' yo'qolsa chaqiruvchi hech qachon offer yaratmaydi — natijani tekshiramiz
+    const ok = await sigTo(C.peer.id, { k: 'accept', call_id: C.id })
+    if (!ok) return endCall('missed', true, 'Signal yetmadi — internetni tekshirib ko‘ring')
+    armConnectWatchdog(C) // 45s ichida ulanmasa — aniq xato (abadiy «Ulanmoqda…» yo‘q)
     post(`/calls/${C.id}/status`, { status: 'active' }).catch(() => {})
-  } catch (e) { toast('⚠️ ' + e.message); endCall('declined', true) }
+  } catch (e) {
+    try { if (CALL) setCallState('⚠️ ' + e.message) } catch {}
+    toast('⚠️ ' + e.message)
+    endCall('declined', true, '⚠️ ' + e.message)
+  }
 }
 async function setupPC(C) {
   C.pc = await newPC((c) => sig(C.peer.id, { k: 'ice', call_id: C.id, c }))
@@ -208,12 +267,21 @@ async function setupPC(C) {
     const s = C.pc.connectionState
     if (s === 'connected' && !C.started) {
       C.started = Date.now()
-      clearTimeout(C.timeout)
+      clearTimeout(C.timeout); clearTimeout(C.connWatch); clearTimeout(C.connWatch2)
       C.tick = setInterval(() => setCallState(fmtDur((Date.now() - C.started) / 1000)), 1000)
       if (C.video) qs('.cinfo', C.el).classList.add('mini')
     }
     if (s === 'disconnected') setCallState('Aloqa uzildi, qayta ulanmoqda…')
-    if (s === 'failed') { if (C.outgoing) restartIce(C); else setCallState('Aloqa yomon…') }
+    if (s === 'failed') {
+      // ULANMADI: ikkala tomonda ham qayta urinish — ICE restart (2 martagacha), bo‘lmasa aniq xato.
+      // Avval faqat chaqiruvchi 1 marta urinardi, qabul qiluvchi umuman jim qolardi.
+      C.iceTries = (C.iceTries || 0) + 1
+      if (C.iceTries <= 2 && !C.restaring) {
+        C.restaring = true
+        setCallState('Qayta ulanmoqda…')
+        Promise.resolve(restartIce(C)).catch(() => {}).finally(() => { C.restaring = false })
+      } else if (!C.started) endCall('missed', true, 'Aloqa yo‘q — internetni tekshirib, qayta urinib ko‘ring')
+    }
   }
 }
 async function restartIce(C) {
@@ -239,6 +307,7 @@ function endCall(status = 'ended', report = true, msg) {
   ringTone(false)
   nativeCallCancel() // APK: qo'ng'iroq bildirishnomasini yopish
   clearTimeout(C.timeout); clearInterval(C.tick)
+  clearTimeout(C.connWatch); clearTimeout(C.connWatch2)
   const dur = C.started ? Math.round((Date.now() - C.started) / 1000) : 0
   if (report && C.id) {
     sig(C.peer.id, { k: 'hangup', call_id: C.id })
@@ -248,7 +317,8 @@ function endCall(status = 'ended', report = true, msg) {
   C.local?.getTracks().forEach((t) => t.stop())
   qs('.cst', C.el).textContent = msg || (C.started ? 'Tugadi · ' + fmtDur(dur) : 'Tugadi')
   qs('.cbar', C.el).innerHTML = ''
-  setTimeout(() => C.el.remove(), 1200)
+  // Xato sababi ko‘rinib tursin — darhol yo‘qolmasin (oddiy yopilish 1.2s, xato 3.2s)
+  setTimeout(() => C.el.remove(), msg ? 3200 : 1200)
 }
 
 // Signal: qo'ng'iroq va efir uchun
@@ -258,20 +328,24 @@ on('signal', async (ev) => {
   const C = CALL
   if (!C || C.id !== d.call_id || C.peer.id !== from) return
   try {
-    if (d.k === 'accept' && C.outgoing) {
+    if (d.k === 'accept' && C.outgoing && !C.pc) {
       ringTone(false); clearTimeout(C.timeout)
       setCallState('Ulanmoqda…')
       await setupPC(C)
       const o = await C.pc.createOffer()
       await C.pc.setLocalDescription(o)
-      sig(from, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON() })
+      // 'offer' yo'qolsa qabul qiluvchi abadiy kutadi — 3 marta qayta urinamiz, yetmasa aniq yopamiz
+      const ok = await sigTo(from, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON() })
+      if (!ok && !C.started) return endCall('missed', true, 'Signal yetmadi — internetni tekshirib ko‘ring')
+      armConnectWatchdog(C)
     }
     if (d.k === 'offer' && C.pc) {
       await C.pc.setRemoteDescription(d.sdp)
       await flushIce(C)
       const a = await C.pc.createAnswer()
       await C.pc.setLocalDescription(a)
-      sig(from, { k: 'answer', call_id: C.id, sdp: C.pc.localDescription.toJSON() })
+      const ok = await sigTo(from, { k: 'answer', call_id: C.id, sdp: C.pc.localDescription.toJSON() })
+      if (!ok && !C.started) endCall('missed', true, 'Signal yetmadi — internetni tekshirib ko‘ring')
     }
     if (d.k === 'answer' && C.pc) { await C.pc.setRemoteDescription(d.sdp); await flushIce(C) }
     if (d.k === 'ice') { if (C.pc?.remoteDescription) await C.pc.addIceCandidate(d.c).catch(() => {}); else C.ice.push(d.c) }
