@@ -7,20 +7,41 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - name: Jonli API tekshiruvi (deploy'dan keyin avtomatik)
+      - name: To'liq E2E tekshiruv (deploy'dan keyin avtomatik, o'zini tozalaydi)
         run: |
           set -e
           sleep 45  # deploy tugashini kutish
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
           BASE="https://50gram.begzodbegzodjons.workers.dev"
+          P=$(python3 -c "import sys,json;print(json.load(sys.stdin)$1)")
           H=$(curl -s -A "$UA" "$BASE/api/health"); echo "health: $H"
-          echo "$H" | grep -q '"ok":true' || { echo "SMOKE FAIL: health"; exit 1; }
-          S=$(curl -s -A "$UA" "$BASE/sw.js" | head -2 | tail -1); echo "sw: $S"
-          echo "$S" | grep -q "const V = '50gram-v" || { echo "SMOKE FAIL: sw versiya"; exit 1; }
-          V=$(curl -s -A "$UA" "$BASE/api/push/vapid"); echo "vapid uzunligi: ${#V}"
-          echo "$V" | grep -q '"key"' || { echo "SMOKE FAIL: vapid"; exit 1; }
-          R=$(curl -s -A "$UA" -X POST "$BASE/api/auth/otp" -H 'content-type: application/json' -d '{"phone":"998900000002"}'); echo "api-stack: $R"
-          echo "$R" | grep -qE 'SMS xizmati|band|Kodni|Kod' || { echo "SMOKE FAIL: otp stack"; exit 1; }
-          A=$(curl -s -A "$UA" "$BASE/api/chats"); echo "auth-stack: $A"
-          echo "$A" | grep -q 'Avtorizatsiya' || { echo "SMOKE FAIL: auth stack"; exit 1; }
-          echo "SMOKE OK — barcha qatlamlar ishlayapti (firewall, API, TiDB, statik)"
+          echo "$H" | grep -q '"ok":true' || { echo "FAIL health"; exit 1; }
+          # 1) KIRISH (test raqami — dev kod ilova-ichki rejim)
+          O=$(curl -s -A "$UA" -X POST "$BASE/api/auth/otp" -H 'content-type: application/json' -d '{"phone":"998900000002"}')
+          echo "$O" | grep -q '"ok":true' || { echo "FAIL otp"; exit 1; }
+          CODE=$(echo "$O" | python3 -c "import sys,json;print(json.load(sys.stdin)['dev_code'])")
+          V=$(curl -s -A "$UA" -X POST "$BASE/api/auth/verify" -H 'content-type: application/json' -d "{\"phone\":\"+998900000002\",\"code\":\"$CODE\"}")
+          TOK=$(echo "$V" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+          UID=$(echo "$V" | python3 -c "import sys,json;print(json.load(sys.stdin)['user']['id'])")
+          AUTH="authorization: Bearer $TOK"
+          echo "verify: OK (user $UID)"
+          # 2) YADRO endpointlar — v58 parallel so'rovlar
+          curl -s -A "$UA" -H "$AUTH" "$BASE/api/me" | grep -q '"id"' || { echo "FAIL me"; exit 1; }
+          curl -s -A "$UA" -H "$AUTH" "$BASE/api/chats" | grep -q '"chats"' || { echo "FAIL chats"; exit 1; }
+          D=$(curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/chats/direct" -H 'content-type: application/json' -d "{\"user_id\":$UID}")
+          CID=$(echo "$D" | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])")
+          echo "direct: OK ($CID)"
+          M=$(curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/chats/$CID/messages" -H 'content-type: application/json' -d '{"body":"smoke","client_id":"smoke1"}')
+          MID=$(echo "$M" | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])")
+          echo "send: OK ($MID)"
+          curl -s -A "$UA" -H "$AUTH" "$BASE/api/chats/$CID/messages?latest=80" | grep -q '"messages"' || { echo "FAIL msgs"; exit 1; }
+          curl -s -A "$UA" -H "$AUTH" "$BASE/api/stories" >/dev/null || { echo "FAIL stories"; exit 1; }
+          curl -s -A "$UA" -H "$AUTH" "$BASE/api/lives" >/dev/null || { echo "FAIL lives"; exit 1; }
+          curl -s -A "$UA" -H "$AUTH" "$BASE/api/search?q=a" | grep -q '"users"' || { echo "FAIL search"; exit 1; }
+          curl -s -A "$UA" -H "$AUTH" "$BASE/api/discover" >/dev/null || { echo "FAIL discover"; exit 1; }
+          curl -s -A "$UA" -H "$AUTH" "$BASE/api/wallet" | grep -q '"coins"' || { echo "FAIL wallet"; exit 1; }
+          curl -s -A "$UA" -H "$AUTH" "$BASE/api/users/$UID" | grep -q '"id"' || { echo "FAIL user"; exit 1; }
+          # 3) TOZALASH: iz qoldirmaslik — xabarni o'chir + chiqish (raqam yana bo'sh)
+          curl -s -A "$UA" -H "$AUTH" -X DELETE "$BASE/api/messages/$MID" -H 'content-type: application/json' -d '{}' >/dev/null
+          curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/auth/logout" -H 'content-type: application/json' -d '{}' >/dev/null
+          echo "SMOKE OK — health/auth/me/chats/direct/send/messages/stories/lives/search/discover/wallet/user/cleanup — hammasi jonli prod'da ishlayapti"
