@@ -539,23 +539,71 @@ function giftCombo(el, gid) {
   if (L.cbT) clearTimeout(L.cbT)
   L.cbT = setTimeout(() => { const c = qs('.lcombo', el); if (c) c.remove(); if (LIVE === L) L.cb = null }, 2600)
 }
-// Sovg'a jarangi — WebAudio (muvaffaqiyatsizlik JIM o'tadi, efirga xalaqit bermaydi)
-let gGiftCtx = 0
-function giftChime(big) {
+// ---- Task 41: OVOZ EFFEKLARI — hammasi WebAudio sintez (audio fayl YO'Q, 0 KB yuklama) ----
+let sndCtx = 0
+let sndOn = true
+try { sndOn = (localStorage.getItem('g50snd') || '1') === '1' } catch {}
+function sndC() {
   try {
-    gGiftCtx = gGiftCtx || new (window.AudioContext || window.webkitAudioContext)()
-    if (gGiftCtx.state === 'suspended') gGiftCtx.resume().catch(() => {})
-    const t = gGiftCtx.currentTime + 0.02
-    const o = gGiftCtx.createOscillator(), g = gGiftCtx.createGain()
-    o.type = 'triangle'
-    o.frequency.setValueAtTime(big ? 740 : 590, t)
-    o.frequency.exponentialRampToValueAtTime(big ? 1180 : 880, t + 0.14)
+    sndCtx = sndCtx || new (window.AudioContext || window.webkitAudioContext)()
+    if (sndCtx.state === 'suspended') sndCtx.resume().catch(() => {})
+    return sndCtx
+  } catch { return null }
+}
+function tone(c, f0, f1, dur, type, vol, delay = 0) {
+  try {
+    const t = c.currentTime + delay
+    const o = c.createOscillator(), g = c.createGain()
+    o.type = type
+    o.frequency.setValueAtTime(f0, t)
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur)
     g.gain.setValueAtTime(0.0001, t)
-    g.gain.exponentialRampToValueAtTime(big ? 0.2 : 0.1, t + 0.04)
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55)
-    o.connect(g).connect(gGiftCtx.destination)
-    o.start(t); o.stop(t + 0.6)
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.012)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur)
+    o.connect(g).connect(c.destination)
+    o.start(t); o.stop(t + dur + 0.05)
   } catch {}
+}
+// Kichik sovg'a — pufakcha "pop"
+function sndPop() { const c = sndC(); if (!c || !sndOn) return; tone(c, 380, 780, 0.1, 'sine', 0.13) }
+// O'rta sovg'a — oltin tanga "ding-ding"
+function sndCoin() { const c = sndC(); if (!c || !sndOn) return; tone(c, 988, 988, 0.07, 'square', 0.055); tone(c, 1319, 1319, 0.28, 'square', 0.055, 0.07) }
+// Katta sovg'a — shovqin (whoosh) + portlash
+function sndBoom() {
+  const c = sndC(); if (!c || !sndOn) return
+  try {
+    const t = c.currentTime, len = Math.floor(c.sampleRate * 0.4)
+    const buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0)
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len)
+    const src = c.createBufferSource(); src.buffer = buf
+    const f = c.createBiquadFilter(); f.type = 'lowpass'
+    f.frequency.setValueAtTime(500, t)
+    f.frequency.exponentialRampToValueAtTime(3200, t + 0.16)
+    f.frequency.exponentialRampToValueAtTime(280, t + 0.38)
+    const g = c.createGain(); g.gain.setValueAtTime(0.13, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4)
+    src.connect(f).connect(g).connect(c.destination); src.start(t)
+  } catch {}
+  tone(c, 150, 62, 0.45, 'sine', 0.2, 0.14)
+}
+// TO'LIQ EKRAN sovg'a — fozil fanfara (arpeggio + yulduz miltillashi)
+function sndFanfare() {
+  const c = sndC(); if (!c || !sndOn) return
+  ;[523, 659, 784, 1047].forEach((f, i) => tone(c, f, f, 0.22, 'triangle', 0.11, i * 0.11))
+  tone(c, 2093, 1568, 0.5, 'sine', 0.05, 0.46)
+}
+// Hayvon sovg'alari — o'ynoqi "boing"
+function sndBoing() { const c = sndC(); if (!c || !sndOn) return; tone(c, 320, 165, 0.14, 'sine', 0.09) }
+// Tomoshabin qo'shildi — yumshoq "salom"
+function sndJoin() { const c = sndC(); if (!c || !sndOn) return; tone(c, 660, 660, 0.08, 'sine', 0.05); tone(c, 880, 880, 0.12, 'sine', 0.05, 0.09) }
+// Yurak — juda jim pop (tez-tez bosilgani uchun)
+function sndHeart() { const c = sndC(); if (!c || !sndOn) return; tone(c, 500, 900, 0.07, 'sine', 0.035) }
+// Sovg'a ovoz routeri: daraja bo'yicha + hayvonlarga qo'shimcha "boing"
+function sndGift(gid, cost) {
+  const fx = giftFx(cost || giftById(gid)?.p || 0)
+  if (fx === 'tk') return sndFanfare()
+  if (fx === 'lg') return sndBoom()
+  if (fx === 'md') { sndCoin(); if (giftById(gid)?.cat === 'ani') sndBoing(); return }
+  sndPop()
 }
 async function updateGiftPanel(el) {
   const bal = qs('#lg-bal', el), daily = qs('#lg-daily', el)
@@ -573,7 +621,7 @@ function liveUI(user, title, host) {
   const el = document.createElement('div')
   el.className = 'over live v2'
   el.innerHTML = `<video class="lv" autoplay playsinline ${host ? 'muted' : ''}></video>
-    <div class="lhd"><div class="lh-u">${avHTML(user, 40, { noStory: true })}<div class="lh-t"><b>${esc(uname(user))}</b>${user.lvl ? `<span class="lvlbadge mini" style="background:linear-gradient(135deg,#a5d8ff,#4dabf7)">${user.lvl.emoji} ${esc(user.lvl.name)}</span>` : ''}</div></div><span class="lb">🔴 EFIR · <span class="lvc">0</span> 👁</span><button class="ic" data-lx>✕</button></div>
+    <div class="lhd"><div class="lh-u">${avHTML(user, 40, { noStory: true })}<div class="lh-t"><b>${esc(uname(user))}</b>${user.lvl ? `<span class="lvlbadge mini" style="background:linear-gradient(135deg,#a5d8ff,#4dabf7)">${user.lvl.emoji} ${esc(user.lvl.name)}</span>` : ''}</div></div><span class="lb">🔴 EFIR · <span class="lvc">0</span> 👁 · 🏆 <span class="lpk">0</span></span><button class="ic" data-lx>✕</button></div>
     ${host ? '<div class="learn">🪙 <b id="l-coins">0</b> coin · <small>tomoshabinlar sovg‘alari</small></div>' : ''}
     <div class="ltop" id="l-top"></div>
     ${host ? '' : '<div class="wait">⏳ Efirga ulanmoqda…</div>'}
@@ -581,6 +629,7 @@ function liveUI(user, title, host) {
     <div class="lrail">
       <button class="rb" data-lh title="Yurak — +1 ball">❤️</button>
       <button class="rb gift" data-lg title="Sovg‘a yuborish">🎁</button>
+      <button class="rb snd" data-lsnd title="Ovoz effektlari">${sndOn ? '🔊' : '🔇'}</button>
     </div>
     <div class="lbot"><input class="inp" maxlength="300" placeholder="Izoh yozing… +2 ball"><button class="cb" data-ls>➤</button>${host ? '<button class="cb" data-lf>🔄</button><button class="cb end" data-le>Tugatish</button>' : ''}</div>
     <div class="lgift hide" id="l-gift">
@@ -603,10 +652,12 @@ function liveUI(user, title, host) {
   qs('[data-ls]', el).onclick = () => { if (inp.value.trim()) { send(inp.value.trim(), false); inp.value = '' } }
   // TEZLIK: yurak spam'i DOM va serverni yuklamasin — 350ms'da bir marta so'rov, bosishlar ko'rinishi saqlanadi
   let lastHeartAt = 0
-  qs('[data-lh]', el).onclick = () => { const t = Date.now(); if (t - lastHeartAt < 350) return; lastHeartAt = t; send('', true); heartBurst(el) }
+  qs('[data-lh]', el).onclick = () => { const t = Date.now(); if (t - lastHeartAt < 350) return; lastHeartAt = t; send('', true); heartBurst(el); sndHeart() }
   qs('[data-lx]', el).onclick = () => (host ? endLive() : leaveLive())
   const le = qs('[data-le]', el); if (le) le.onclick = endLive
   const lf = qs('[data-lf]', el); if (lf) lf.onclick = liveFlip
+  // Ovoz effektlari yoqish/o'chirish (xotirada eslab qolinadi)
+  qs('[data-lsnd]', el).onclick = () => { sndOn = !sndOn; try { localStorage.setItem('g50snd', sndOn ? '1' : '0') } catch {}; qs('[data-lsnd]', el).textContent = sndOn ? '🔊' : '🔇'; if (sndOn) sndPop() }
   // Sovg‘a paneli (TikTok-uslubi) — 26 sovg‘a 3 ta katrgoria tab’ida
   const gp = qs('#l-gift', el), grid = qs('#lg-grid', el)
   const renderGrid = (cat) => { grid.innerHTML = LIVE_GIFTS.filter((g) => g.cat === cat).map((g) => `<button class="gcard" data-g="${g.id}"><img src="${giftImg(g.id)}" alt="" loading="lazy"><b>${g.name}</b><span>🪙 ${g.p}</span></button>`).join('') }
@@ -622,7 +673,7 @@ function liveUI(user, title, host) {
       gp.classList.add('hide')
       flyGift(el, gi.id, gi.name, S.me.first_name, gi.p)
       giftCombo(el, gi.id)
-      giftChime(gi.p >= 349)
+      sndGift(gi.id, gi.p)
       if (WALLET) WALLET.coins = r.coins
       toast(`🎁 ${gi.name} yuborildi — efirchi +${r.cost} ball oldi`)
     } catch (e2) { toast('⚠️ ' + e2.message) }
@@ -640,7 +691,14 @@ function liveComment(name, text, heart) {
   box.appendChild(d)
   while (box.children.length > 30) box.firstChild.remove()
 }
-function liveSetCount(v) { if (LIVE) { LIVE.viewers = v; qs('.lvc', LIVE.el).textContent = v } }
+function liveSetCount(v) {
+  if (!LIVE) return
+  LIVE.viewers = v
+  // Task 41: peak — efir davomida eng yuqori tomoshabinlar soni (🏆 bilan ko'rsatiladi)
+  if (v > (LIVE.peak || 0)) LIVE.peak = v
+  const c = qs('.lvc', LIVE.el); if (c) c.textContent = v
+  const p = qs('.lpk', LIVE.el); if (p) p.textContent = LIVE.peak || 0
+}
 // Xabarni barcha "farzand" tomoshabinlarga uzatish
 function liveRelay(msg) {
   const L = LIVE; if (!L) return
@@ -656,7 +714,7 @@ function liveMsg(m) {
   if (!LIVE || !m) return
   if (m.t === 'c') liveComment(m.n, m.x, m.h)
   if (m.t === 'n') liveSetCount(m.v)
-  if (m.t === 'g') { flyGift(LIVE.el, m.g, '×' + (m.gn || 1), m.n, m.cost); giftCombo(LIVE.el, m.g); giftChime((m.cost || giftById(m.g)?.p || 0) >= 349); liveTopAdd(m.n, m.cost || 0) }
+  if (m.t === 'g') { flyGift(LIVE.el, m.g, '×' + (m.gn || 1), m.n, m.cost); giftCombo(LIVE.el, m.g); sndGift(m.g, m.cost); liveTopAdd(m.n, m.cost || 0) }
   liveRelay(m)
   if (m.t === 'end') liveEnded()
 }
@@ -685,17 +743,19 @@ function startLive(chatId = 0) {
   const chans = [...S.chats.values()].filter((c) => c.type !== 'direct' && (c.role === 'owner' || c.role === 'admin'))
   const sh = sheet(h3('🔴 Jonli efir') + `<input class="inp" id="lv-t" maxlength="200" placeholder="Efir mavzusi">
     <label class="mut">Kimga ko‘rsatiladi</label><select class="inp" id="lv-c"><option value="0">👥 Kontaktlarim va suhbatdoshlarim</option>${chans.map((c) => `<option value="${c.id}" ${c.id === chatId ? 'selected' : ''}>${c.type === 'channel' ? '📢' : '👥'} ${esc(c.title)}</option>`).join('')}</select>
-    <div class="hint">Tomoshabinlar soni cheklanmagan. Ular izoh/yurak bilan <b>ball yig‘adi</b>, sovg‘a yuborsa — sizga <b>coin</b> va <b>martaba</b> qo‘shiladi. 🎁</div><button class="btn big" id="lv-s">Efirni boshlash</button>`)
+    <div class="hint">Tomoshabinlar soni cheklanmagan. Ular izoh/yurak bilan <b>ball yig‘adi</b>, sovg‘a yuborsa — sizga <b>coin</b> va <b>martaba</b> qo‘shiladi. 🎁</div><button class="btn big" id="lv-s">Efirni boshlash</button><button class="btn gh" id="lv-top" style="margin-top:8px">🏆 TOP efir reytingi</button>`)
+  qs('#lv-top', sh).onclick = () => { closeSheet(sh); topLiveSheet() }
   qs('#lv-s', sh).onclick = async () => {
     const title = qs('#lv-t', sh).value.trim(), cid = +qs('#lv-c', sh).value
     closeSheet(sh)
     try {
       const stream = await getMedia(true)
       const r = await post('/lives', { title, chat_id: cid })
-      LIVE = { id: r.id, host: true, stream, kids: new Map(), viewers: 0 }
+      LIVE = { id: r.id, host: true, stream, kids: new Map(), viewers: 0, peak: 0 }
       LIVE.el = liveUI(S.me, title, true)
       qs('.lv', LIVE.el).srcObject = stream
       toast('🔴 Efir boshlandi')
+      sndFanfare()
     } catch (e) { toast('⚠️ ' + e.message) }
   }
 }
@@ -771,8 +831,10 @@ async function watchLive(id) {
   LTOP.clear()
   try {
     const r = await post(`/lives/${id}/join`)
-    LIVE = { id, host: false, hostId: r.user.id, parentId: r.parent, ice: [], kids: new Map(), stream: new MediaStream(), viewers: r.viewers, tries: 0 }
+    LIVE = { id, host: false, hostId: r.user.id, parentId: r.parent, ice: [], kids: new Map(), stream: new MediaStream(), viewers: r.viewers, peak: r.peak || 0, tries: 0 }
     LIVE.el = liveUI(r.user, r.title, false)
+    // Task 41: hafta reytingida 1-o'rindagi efir — maxsus chip
+    if (r.rank === 1 && r.peak > 0) { const t1 = document.createElement('div'); t1.className = 'ltop1'; t1.textContent = '🏆 HAFTANING TOP EFIRI'; LIVE.el.appendChild(t1) }
     liveSetCount(r.viewers)
     liveWait(LIVE)
     armRetry(LIVE)
@@ -855,8 +917,19 @@ async function endLive() {
   setTimeout(() => { for (const k of L.kids.values()) try { k.pc.close() } catch {} }, 800)
   L.stream.getTracks().forEach((t) => t.stop())
   L.el.remove()
-  try { const r = await post(`/lives/${L.id}/end`); toast(`Efir tugadi · ${r.viewers || 0} tomoshabin`) } catch {}
+  try { const r = await post(`/lives/${L.id}/end`); toast(r.record && r.peak ? `🏆 REKORD — ${r.peak} tomoshabin! Yangi balandlik!` : `Efir tugadi · ${r.viewers || 0} tomoshabin`) } catch {}
   loadLives()
+}
+// Task 41: TOP efir reytingi oynasi — haftaning eng ko'p tomoshabin yig'gan 10 efiri
+async function topLiveSheet() {
+  const sh = sheet(h3('🏆 TOP efir — hafta reytingi') + '<div class="tl-list"><div class="tl-empty">⏳ Yuklanmoqda…</div></div>')
+  try {
+    const rows = await api('/lives/top')
+    const box = qs('.tl-list', sh)
+    if (!rows.length) box.innerHTML = '<div class="tl-empty">Hali reyting bo‘sh — birinchi bo‘lib rekord o‘rnating! 🔴</div>'
+    else box.innerHTML = rows.map((r) => `<div class="tl-row${r.live ? ' now' : ''}"${r.live ? ` data-tl="${r.id}"` : ''}><span class="tl-pos ${r.pos <= 3 ? 'p' + r.pos : ''}">${['🥇', '🥈', '🥉'][r.pos - 1] || r.pos}</span>${avHTML(r.user, 44, { noStory: true })}<div class="tl-mid"><b>${esc(uname(r.user))}${r.user && r.user.lvl ? ` <span class="lvlbadge mini" style="background:linear-gradient(135deg,#a5d8ff,#4dabf7)">${r.user.lvl.emoji} ${esc(r.user.lvl.name)}</span>` : ''}</b><small>${esc(r.title || 'Efir')} · ${r.live ? '<i class="tl-on">🔴 jonli hozir</i>' : new Date(r.started_at).toLocaleDateString()}</small></div><div class="tl-n">👁 <b>${fmtN(r.peak)}</b></div></div>`).join('')
+    box.onclick = (e) => { const row = e.target.closest('[data-tl]'); if (!row) return; closeSheet(sh); watchLive(+row.dataset.tl) }
+  } catch (e) { const b = qs('.tl-list', sh); if (b) b.innerHTML = '<div class="tl-empty">⚠️ Yuklanmadi — keyinroq urinib ko‘ring</div>' }
 }
 async function liveSignal(from, d) {
   const L = LIVE
@@ -905,7 +978,7 @@ async function liveSignal(from, d) {
 }
 on('live_join', (ev) => {
   const L = LIVE; if (!L || L.id !== ev.live_id) return
-  if (L.host) { liveSetCount(ev.viewers); liveComment(ev.from.first_name, 'qo‘shildi 👋'); liveRelayCount() }
+  if (L.host) { liveSetCount(ev.viewers); liveComment(ev.from.first_name, 'qo‘shildi 👋'); sndJoin(); liveRelayCount() }
   if (ev.parent !== false) addChild(ev.from.id)
 })
 on('live_leave', (ev) => {
@@ -923,7 +996,7 @@ on('live_gift', (ev) => {
   const L = LIVE; if (!L || !L.host || L.id !== ev.live_id) return
   flyGift(L.el, ev.gift, '×' + (ev.n || 1), ev.from?.first_name, ev.cost)
   giftCombo(L.el, ev.gift)
-  giftChime(ev.cost >= 349)
+  sndGift(ev.gift, ev.cost)
   liveTopAdd(ev.from?.first_name, ev.cost || 0)
   const c = qs('#l-coins', L.el); if (c) c.textContent = fmtN(ev.host_coins || 0)
   // Barcha tomoshabinlarga ham ko‘rinsin — daraxt bo‘ylab

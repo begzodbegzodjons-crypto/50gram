@@ -244,6 +244,8 @@ async function ensureSchema(db: Db) {
     "CREATE INDEX IF NOT EXISTS idx_msg_comments_mid ON msg_comments (message_id)",
     "CREATE INDEX IF NOT EXISTS idx_msg_comments_chat ON msg_comments (chat_id, created_at)",
     "ALTER TABLE live_viewers ADD COLUMN rewarded INT NOT NULL DEFAULT 0",
+    // Task 41: TOP efir reytingi — efirning eng yuqori tomoshabinlar rekordi
+    "ALTER TABLE lives ADD COLUMN peak INT NOT NULL DEFAULT 0",
     // Task 39: izohlar — javob-replies, stiker izohlar va reaksiyalar (baholash)
     "ALTER TABLE post_comments ADD COLUMN parent_id BIGINT NOT NULL DEFAULT 0",
     "ALTER TABLE post_comments ADD COLUMN sticker VARCHAR(64) NOT NULL DEFAULT ''",
@@ -2711,7 +2713,25 @@ async function listLives(c: C) {
     hosts.length ? c.db.q(`SELECT user_id, earned FROM wallets WHERE user_id IN (${ph(hosts)})`, hosts).catch((): any[] => []) : Promise.resolve([] as any[]),
   ])
   const lv = new Map(wl.map((x) => [x.user_id, levelOf(Number(x.earned))]))
-  return json(rows.map((r) => ({ id: r.id, title: r.title, chat_id: r.chat_id, viewers: r.viewers, started_at: r.started_at, user: um.get(r.user_id) ? { ...um.get(r.user_id), lvl: lv.get(r.user_id) || levelOf(0) } : null })))
+  return json(rows.map((r) => ({ id: r.id, title: r.title, chat_id: r.chat_id, viewers: r.viewers, peak: Number(r.peak || 0), started_at: r.started_at, user: um.get(r.user_id) ? { ...um.get(r.user_id), lvl: lv.get(r.user_id) || levelOf(0) } : null })))
+}
+// Task 41: TOP efir reytingi — oxirgi 7 kun ichida eng ko'p tomoshabin yig'gan efirlar
+async function listTopLives(c: C) {
+  const rows = await c.db.q(
+    "SELECT id, user_id, title, viewers, peak, started_at, ended_at FROM lives WHERE started_at>? AND peak>0 ORDER BY peak DESC, started_at DESC LIMIT 10",
+    [now() - 7 * DAY],
+  )
+  const uids = rows.map((r) => r.user_id)
+  const [um, wl] = await Promise.all([
+    uids.length ? usersByIds(c, uids) : Promise.resolve(new Map()),
+    uids.length ? c.db.q(`SELECT user_id, earned FROM wallets WHERE user_id IN (${ph(uids)})`, uids).catch((): any[] => []) : Promise.resolve([] as any[]),
+  ])
+  const lv = new Map(wl.map((x) => [x.user_id, levelOf(Number(x.earned))]))
+  return json(rows.map((r, i) => ({
+    pos: i + 1, id: r.id, title: r.title, peak: Number(r.peak), live: !r.ended_at,
+    started_at: r.started_at, ended_at: r.ended_at,
+    user: um.get(r.user_id) ? { ...um.get(r.user_id), lvl: lv.get(r.user_id) || levelOf(0) } : null,
+  })))
 }
 async function liveRow(c: C) {
   const l = await c.db.one("SELECT * FROM lives WHERE id=?", [+c.p.id])
@@ -2725,7 +2745,8 @@ const FAN = 3
 async function liveCount(c: C, l: any) {
   const n = await c.db.one("SELECT COUNT(*) AS cnt FROM live_viewers WHERE live_id=?", [l.id])
   const v = Number(n?.cnt || 0)
-  await c.db.run("UPDATE lives SET viewers=? WHERE id=?", [v, l.id])
+  // Task 41: peak — bu efirning eng yuqori tomoshabinlar soni (TOP efir reytingi uchun)
+  await c.db.run("UPDATE lives SET viewers=?, peak=MAX(peak,?) WHERE id=?", [v, v, l.id])
   return v
 }
 async function detachFromParent(c: C, l: any, row: any) {
@@ -2765,10 +2786,12 @@ async function joinLive(c: C) {
   const from = { id: c.uid, first_name: u.real_name }
   // Efirchi martabasi (coin darajasi) — jonli efir yuqori panelida ko'rinsin
   const hw = await c.db.one("SELECT earned FROM wallets WHERE user_id=?", [l.user_id]).catch(() => null) as any
+  // Task 41: bu efir shu hafta reytingda nechinchi o'rinda (peak bo'yicha)
+  const rk = await c.db.one("SELECT COUNT(*)+1 AS pos FROM lives WHERE started_at>? AND peak>?", [now() - 7 * DAY, Number(l.peak || 0)])
   const evs: Promise<unknown>[] = [notify(c.env, [par.id], { type: "live_join", live_id: l.id, from, viewers: v, parent: true })]
   if (par.id !== l.user_id && !me) evs.push(notify(c.env, [l.user_id], { type: "live_join", live_id: l.id, from, viewers: v, parent: false }))
   c.wait(Promise.all(evs))
-  return json({ id: l.id, title: l.title, viewers: v, user: um.get(l.user_id) ? { ...um.get(l.user_id), lvl: levelOf(Number(hw?.earned || 0)) } : null, started_at: l.started_at, parent: par.id, depth })
+  return json({ id: l.id, title: l.title, viewers: v, user: um.get(l.user_id) ? { ...um.get(l.user_id), lvl: levelOf(Number(hw?.earned || 0)) } : null, started_at: l.started_at, parent: par.id, depth, peak: Number(l.peak || 0), rank: Number(rk?.pos || 1) })
 }
 // Tomoshabin efirni olib bo'lgach, o'zi ham boshqalarga uzata oladi
 async function readyLive(c: C) {
@@ -2830,7 +2853,10 @@ async function endLive(c: C) {
       notify(c.env, ids, { type: "live_end", live_id: l.id, from: l.user_id }),
     ]))
   } catch { c.wait(notify(c.env, top, { type: "live_end", live_id: l.id })) }
-  return json({ ok: true, viewers: Math.max(total, l.viewers) })
+  // Task 41: rekord — bu efir foydalanuvchining oldingi barcha efirlaridan ko'p tomoshabin yig'dimi?
+  const rec = await c.db.one("SELECT MAX(peak) AS mx FROM lives WHERE user_id=? AND id<>?", [l.user_id, l.id])
+  const peak = Math.max(Number(l.peak || 0), total)
+  return json({ ok: true, viewers: Math.max(total, l.viewers), peak, record: peak > 0 && peak >= Number(rec?.mx || 0) })
 }
 
 // ------------------------- Coin / Martaba endpointlari -------------------------
@@ -3204,6 +3230,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/storage/drop", storageDrop],
   ["GET", "/storage/stats", storageStats],
   ["GET", "/lives", listLives],
+  ["GET", "/lives/top", listTopLives],
   ["POST", "/lives", startLive],
   ["POST", "/lives/:id/join", joinLive],
   ["POST", "/lives/:id/leave", leaveLive],

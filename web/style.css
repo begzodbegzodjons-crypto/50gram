@@ -1139,3 +1139,33 @@ body.dark .stile{box-shadow:inset 0 1.5px 0 rgba(255,255,255,.15),inset 0 -2px 0
 
 /* GPU maslahatlari — yurak/ball uchuvchilari ham qatlamda uchsın */
 .live .fly,.live .ballf{will-change:transform,opacity}
+
+/* ============================================================
+   Task 41 — OVOZ EFFEKLARI + TOP EFIR REYTINGI
+   ============================================================ */
+
+/* Ovoz effektlari tugmasi (efir o'ng paneli) */
+.rb.snd{font-size:19px;background:rgba(255,255,255,.13)}
+
+/* Hafta TOP-1 efirchisi — avatar ustida oltin toj (istoriyalar doirasi) */
+#stories .st{position:relative}
+#stories .crown{position:absolute;top:-7px;right:-1px;font-size:17px;z-index:2;filter:drop-shadow(0 1px 3px rgba(0,0,0,.35));animation:crnb 2.2s ease-in-out infinite;pointer-events:none}
+@keyframes crnb{0%,100%{transform:rotate(-9deg) scale(1)}50%{transform:rotate(9deg) scale(1.14)}}
+
+/* Efir ichida: peak ko'rsatkichi + TOP-1 chip */
+.lb .lpk{margin-left:2px}
+.ltop1{position:absolute;top:calc(108px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:3;background:linear-gradient(135deg,#ffd43b,#ff9f0a);color:#5b3a00;font-weight:900;font-size:12px;padding:5px 14px;border-radius:999px;box-shadow:0 5px 16px rgba(255,159,10,.5),inset 0 1.5px 0 rgba(255,255,255,.5);animation:cpop .4s;white-space:nowrap;pointer-events:none}
+
+/* TOP efir reytingi oynasi */
+.tl-list{display:flex;flex-direction:column;gap:8px;max-height:56vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.tl-row{display:flex;align-items:center;gap:10px;padding:9px 10px;border:1.5px solid var(--chiziq);border-radius:16px;background:var(--sirt2);animation:kir .25s}
+.tl-row.now{border-color:#e52550;background:linear-gradient(135deg,rgba(229,37,80,.08),rgba(255,107,129,.08));cursor:pointer}
+.tl-pos{width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:14.5px;color:var(--xira)}
+.tl-pos.p1,.tl-pos.p2,.tl-pos.p3{font-size:22px}
+.tl-mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.tl-mid b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-mid small{color:var(--xira);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.tl-on{color:#e52550;font-style:normal;font-weight:800}
+.tl-n{flex-shrink:0;text-align:center;color:var(--xira);font-size:11.5px}
+.tl-n b{display:block;font-size:14.5px;color:var(--matn)}
+.tl-empty{padding:18px 14px;text-align:center;color:var(--xira);font-size:13.5px}

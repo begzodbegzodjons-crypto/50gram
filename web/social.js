@@ -20,7 +20,7 @@ function renderStories() {
   const liveMap = new Map((S.lives || []).map((l) => [l.user.id, l]))
   box.innerHTML = `<div class="st" data-mystory>${avHTML(S.me, 58)}${mine ? '' : '<span class="plus">+</span>'}<small>Mening</small></div>` +
     others.map((g) => { const lv = liveMap.get(g.user.id); return `<div class="st" data-sto="${g.user.id}">${avHTML(g.user, 58, lv ? { live: true, liveId: lv.id } : {})}<small${lv ? ' class="onl"' : ''}>${esc(g.user.first_name || '')}</small></div>` }).join('') +
-    (S.lives || []).map((l) => `<div class="st" data-live="${l.id}">${avHTML(l.user, 58, { live: true, noStory: true, liveId: l.id })}<small class="onl">🔴 Efir</small></div>`).join('')
+    (() => { const ls = S.lives || []; const mx = Math.max(0, ...ls.map((x) => x.peak || 0)); return ls.map((l) => `<div class="st" data-live="${l.id}">${avHTML(l.user, 58, { live: true, noStory: true, liveId: l.id })}${l.peak > 0 && l.peak === mx ? '<span class="crown">👑</span>' : ''}<small class="onl">🔴 Efir</small></div>`).join('') })()
   hydrate(box)
 }
 $('stories').addEventListener('click', (e) => {
