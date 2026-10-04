@@ -247,15 +247,15 @@ function trendSkeleton() {
 // ZUDLIK keshi: oxirgi 1-sahifa localStorage'da (3 kun) — lenta HAR QAYTA OCHILGANDA, hatto ilova
 // qayta ishga tushganda/oflaynda ham darhol chiziladi (fon yangilanadi). Bu "lenta sekin" muammosi yechimi.
 function trendCacheSave(items) {
-  try { localStorage.setItem('g50_trend_c4', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
+  try { localStorage.setItem('g50_trend_c5', JSON.stringify({ t: Date.now(), items: items.slice(0, 24) })) } catch {}
 }
 function trendCacheAge() {
-  try { const d = JSON.parse(localStorage.getItem('g50_trend_c4') || ''); return d && d.t ? Date.now() - d.t : Infinity } catch { return Infinity }
+  try { const d = JSON.parse(localStorage.getItem('g50_trend_c5') || ''); return d && d.t ? Date.now() - d.t : Infinity } catch { return Infinity }
 }
 function trendCacheGet() {
   try {
     // c3: eski c2 keshdagi Anilan-Minecraft videolari BATAMOM unutiladi (foydalanuvchi: "eski shunday" — keshda qolib ketgandi)
-    const d = JSON.parse(localStorage.getItem('g50_trend_c4') || '')
+    const d = JSON.parse(localStorage.getItem('g50_trend_c5') || '')
     // 3 kun — mavzular tezroq yangilanadi (random algoritm bilan har safar xilma-xil ko'rinish uchun)
     if (d && d.items && d.items.length && Date.now() - d.t < 3 * 864e5) return d.items
   } catch {}
@@ -481,7 +481,48 @@ function reelHTML(p) {
 }
 // Reels holati (alohida bo'lim): reelPosts + kesh (oflaynda ham ochiladi)
 let reelPosts = [], reelsEnd = false, reelsBusy = false
-const RKEY = 'g50_reels_c5' // v5: eski kesh tozalandi (mine-belgili yangi pool + qora ekran qopqog'i)
+const RKEY = 'g50_reels_c6' // v6: eski kesh (c5, eski pool davri qoldiqlari bilan) batamom unutiladi
+
+// YOUTUBE TREND SHORTS — REELS BO'LIMIDA (foydalanuvchi talabi: "trenddagi millionlab
+// shortslarni reels bo'limiga olib ko'rsat"). Platform videolaridan keyin trend slaydlari
+// qo'shiladi: thumbnail qopqoqli to'liq ekran karta — bosilganda to'liq ekran pleyer ochiladi.
+// Hovuzda 200+ shorts (server v17) — hamma foydalanuvchi ko'radi, manba nomi SIR.
+let reelTrend = [], reelTrendBusy = false
+async function reelTrendLoad() {
+  if (reelTrend.length >= 12 || reelTrendBusy) return
+  // 1) xotira (trendItems) → 2) qurilma-keshi → 3) tarmoq (2 sahifa PARALLEL — 24 xil video)
+  let list = (trendItems || []).filter((x) => x && x.kind === 'short')
+  if (list.length < 6) { const c = trendCacheGet(); if (c) list = c.filter((x) => x && x.kind === 'short') }
+  if (list.length < 6) {
+    reelTrendBusy = true
+    try {
+      const [a, b] = await Promise.all([api('/trend?cat=video&page=1').catch(() => null), api('/trend?cat=video&page=2').catch(() => null)])
+      const la = (a && (a.items || a)) || [], lb = (b && (b.items || b)) || []
+      const merged = [...la, ...lb]
+      if (merged.length >= 6) { list = merged; if (!trendItems.length) trendItems = shShuffle(list.slice()); trendCacheSave(trendItems) }
+    } finally { reelTrendBusy = false }
+  }
+  const fresh = shNormTrend(list).map((y) => y.x).filter((x) => x && !reelTrend.some((t) => t.id === x.id))
+  if (fresh.length) { reelTrend.push(...shShuffle(fresh)); renderReelsTrendAppend() }
+}
+function reelTrendHTML(x) {
+  const img = x.image ? `<img loading="lazy" src="${esc(x.image)}" alt="">` : ''
+  return `<div class="reel rtv" data-tv="${esc(x.id || '')}">${img}<div class="rshade"></div><div class="rtag">⚡ Trend</div><div class="rplay">▶</div><div class="rbot"><b>${esc(x.title || 'Shorts')}</b><small class="rviews">${x.views ? '👁 ' + fmtN(x.views) : '⚡ Trend Shorts'}</small></div><div class="rtap"></div></div>`
+}
+function renderReelsTrendAppend() {
+  const box = $('reelslist')
+  const rd = box && qs('.reels', box)
+  if (!rd) { if (reelTrend.length) renderReels() // tarmoq xatosidan keyin ham trend ko'rinsin (xato oynasini almashtiradi)
+    return }
+  const have = new Set(qsa('.reel.rtv[data-tv]', rd).map((el) => el.dataset.tv))
+  const html = reelTrend.filter((x) => !have.has(x.id)).map(reelTrendHTML).join('')
+  if (!html) return
+  const lg = qs('.reel.rlogo', rd)
+  if (lg) lg.insertAdjacentHTML('beforebegin', html)
+  else rd.insertAdjacentHTML('beforeend', html)
+  if (lg && reelPosts.length + reelTrend.length >= 10) lg.remove()
+  reelsHint(box)
+}
 function reelsCacheSave() {
   try { localStorage.setItem(RKEY, JSON.stringify({ t: Date.now(), posts: reelPosts.slice(0, 30).map((p) => ({ ...p, meta: p.meta || null })) })) } catch {}
 }
@@ -524,12 +565,17 @@ async function loadReels(reset) {
     renderReels(!fromCache)
     reelsCacheSave()
   } catch (e) {
-    if (!reelPosts.length) $('reelslist').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`
+    // Trend baribir yuklanadi — Reels bo'limi tarmoq xatosida ham BO'SH QOLMAYDI
+    reelTrendLoad()
+    if (!reelPosts.length && !reelTrend.length) $('reelslist').innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`
   } finally { reelsBusy = false }
+  // TREND SHORTS: platform videolardan keyin YouTube trend shortslar qo'shiladi (fon rejimida)
+  reelTrendLoad()
 }
 // TASODIFIY KARTALAR OLIB TASHLANDI (foydalanuvchi tanlovi: "olib tashla — 50 Gram logotipini
-// qo'y, moslab to'liq ko'rinsin"): Reels bo'limida endi FAQAT platform videolari turadi.
-// Platform Reels 10 tadan kam bo'lsa — bo'sh o'rnida 50 Gram logotipi to'liq ko'rinadi.
+// qo'y, moslab to'liq ko'rinsin"). v48: foydalanuvchi yangi talabi — "trenddagi millionlab
+// shortslarni reels bo'limiga olib ko'rsat" — endi bo'limda platform videolari + YOUTUBE TREND
+// SHORTS slaydlari birga; kontent kam bo'lsa 50 Gram logotipi ko'rinadi.
 function logoSlide() {
   return `<div class="reel rlogo"><img src="logo.png" alt="50 Gram"><div class="rl-b"><b>50 Gram</b><span>${reelPosts.length ? '🎬 Reels — vertikal video lenta' : 'Hali Reels yo‘q — ➕ tugmasi bilan birinchi videoni joylang'}</span></div></div>`
 }
@@ -561,10 +607,10 @@ function renderReels(inc) {
       return
     }
   }
-  // LOGO: platform Reels kam bo'lsa — tasodifiy rasmlar o'rnida 50 Gram logotipi to'liq ko'rinadi
-  const logoHTML = reelPosts.length < 10 ? logoSlide() : ''
-  box.innerHTML = (reelPosts.length || logoHTML)
-    ? `<div class="reels">${reelPosts.map(reelHTML).join('')}${logoHTML}</div><div class="hint" id="reelshint" style="text-align:center;padding:12px"></div>`
+  // LOGO: kontent kam bo'lsa — 50 Gram logotipi to'liq ko'rinadi (endi TREND slaydlari ham kontent)
+  const logoHTML = reelPosts.length + reelTrend.length < 10 ? logoSlide() : ''
+  box.innerHTML = (reelPosts.length || reelTrend.length || logoHTML)
+    ? `<div class="reels">${reelPosts.map(reelHTML).join('')}${reelTrend.map(reelTrendHTML).join('')}${logoHTML}</div><div class="hint" id="reelshint" style="text-align:center;padding:12px"></div>`
     : `<div class="empty"><span class="big">🎬</span>Hali Reels yo‘q — <b>➕</b> tugmasi bilan birinchi videoni joylang!</div>`
   hydrate(box)
   if (reelsObserver) reelsObserver.disconnect()
@@ -604,6 +650,12 @@ function renderFeed() {
 $('feedseg').onclick = (e) => { const d = e.target.closest('[data-m]'); if (!d) return; feedMode = d.dataset.m; qsa('#feedseg div').forEach((x) => x.classList.toggle('on', x === d)); $('b-post').classList.toggle('hide', feedMode === 'trend'); $('trendchips').classList.toggle('hide', feedMode !== 'trend'); feedMode === 'trend' ? loadTrend(true) : loadFeed(true) }
 // --- Reels bo'limi: kliklar (like/izoh/ulashish/o'chirish/shorts) ---
 $('reelslist').addEventListener('click', async (e) => {
+  // TREND SHORTS karta: bosilganda to'liq ekran pleyer o'sha videodan ochiladi
+  const tv = e.target.closest('[data-tv]')
+  if (tv) {
+    const x = reelTrend.find((t) => t.id === tv.dataset.tv)
+    if (x) return shortsStart({ trend: x })
+  }
   const reel = e.target.closest('[data-reel]')
   if (!reel) return
   const p = reelPosts.find((x) => x.id === +reel.dataset.reel); if (!p) return

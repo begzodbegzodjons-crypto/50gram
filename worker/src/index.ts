@@ -1735,6 +1735,144 @@ async function oneInvid(base: string): Promise<any[]> {
   } catch { return [] }
 }
 // Reddit (403: serverdan bloklangan) va TikTok (O'zbekistonda VPN'siz ishlamaydi) manbalari olib tashlandi.
+
+// ================= YOUTUBE GLOBAL TREND SHORTS (foydalanuvchi talabi) =================
+// "youtubeda millionlab shorts videolar bor — trenddagi millionlab shortslarni 50gram
+// dasturga reels bo'limiga olib ko'rsatadigan qilib ishla" — YouTube TREND (FEshorts)
+// lentasi OCHIQ jamoaviy kontent: akkaunt, parol yoki API-kalit KERAK EMAS.
+// 3 qatlamli zaxira: ① Innertube (youtubei) rasmiy FEshorts feed  ② youtube.com/shorts HTML
+// shelf-parser (kanal shorts tabi bilan bir xil parse)  ③ Piped/Invidious trending (≤90s).
+const YT_CLIENT_VER = "2.20241126.01.00"
+const YT_CTX = { context: { client: { clientName: "WEB", clientVersion: YT_CLIENT_VER, hl: "en", gl: "UZ" } } }
+// O'yin/jangovar kontent + Minecraft QATIY chiqariladi (foydalanuvchi: "batamom o'chir")
+const GAME_RE = /minecraft|minekraf|maynkraft|минекрафт|майнкрафт|gameplay|game\s?play|gta\s?[1-6]|gta\s?online|pubg|roblox|brawl\s?stars|free\s?fire|fortnite|dota\s?2|counter\s?strike|csgo|cs2|fifa\s?\d|ea\s?fc|clash\s?(of\s?clans|royale)|among\s?us|genshin|o['ʻ‘ʼ]?yin(?!choq)|oyun\s?oyn|o['ʻ‘ʼ]?yinlash/i
+function ytCount(s: string): number {
+  if (!s) return 0
+  const m = s.match(/([\d.,]+)\s*([KkMmBb]|mln|mlrd|ming)/)
+  if (!m) { const n = parseInt(s.replace(/[^\d]/g, ""), 10); return isNaN(n) ? 0 : n }
+  let n = parseFloat(m[1].replace(/,/g, ""))
+  const sfx = m[2].toLowerCase()
+  if (sfx === "mlrd" || sfx === "b") n *= 1e9
+  else if (sfx === "mln" || sfx === "m") n *= 1e6
+  else if (sfx === "ming" || sfx === "k") n *= 1e3
+  return Math.round(n)
+}
+function ytTrendItem(id: string, title: string, views: number, img: string): any {
+  const vid = String(id).slice(0, 11)
+  return {
+    id: "yt" + vid, kind: "short", vid: "yt", yt: vid, uz: 0, src: "tr",
+    title: String(title).slice(0, 140), image: img || "https://i.ytimg.com/vi/" + vid + "/hqdefault.jpg",
+    views, duration: 0, time: now(),
+    url: "https://www.youtube.com/watch?v=" + vid, cat: "video",
+  }
+}
+// FEshorts javobidan shorts elementlarini yig'ish (2 format: yangi shortsLockupViewModel + eski reelItemRenderer)
+function shortsFromBrowse(j: any): { items: any[]; cont: string } {
+  const items: any[] = []
+  let cont = ""
+  const grid: any[] = j?.contents?.tabs?.[0]?.tabRenderer?.content?.richGridRenderer?.contents
+    || j?.onResponseReceivedActions?.[0]?.appendContinuationItemsAction?.continuationItems
+    || j?.onResponseReceivedActions?.[1]?.appendContinuationItemsAction?.continuationItems || []
+  for (const it of grid) {
+    const ct = it?.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token
+    if (ct) { cont = ct; continue }
+    const c = it?.richItemRenderer?.content
+    const lock = c?.shortsLockupViewModel
+    if (lock) {
+      const id = lock?.onTap?.innertubeCommand?.reelsWatchEndpoint?.videoId
+      const title = lock?.overlayMetadata?.primaryText?.content || ""
+      const views = ytCount(lock?.overlayMetadata?.secondaryText?.content || "")
+      const img = lock?.thumbnailViewModel?.image?.sources?.[0]?.url || ""
+      if (id && title) items.push(ytTrendItem(id, title, views, img))
+      continue
+    }
+    const reel = c?.reelItemRenderer
+    if (reel?.videoId) {
+      const title = reel?.headline?.simpleText || reel?.headline?.runs?.map((x: any) => x?.text || "").join("") || ""
+      const views = ytCount(reel?.viewCountText?.simpleText || "")
+      const img = reel?.thumbnail?.sources?.[0]?.url || ""
+      if (title) items.push(ytTrendItem(reel.videoId, title, views, img))
+    }
+  }
+  return { items, cont }
+}
+async function ytBrowse(body: any, ms: number): Promise<any | null> {
+  try {
+    const r = await fetch("https://www.youtube.com/youtubei/v1/browse", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent": TREND_UA["user-agent"],
+        "x-youtube-client-name": "1",
+        "x-youtube-client-version": YT_CLIENT_VER,
+        "accept-language": "en",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(ms),
+    })
+    if (!r.ok) { console.log("yttrend", "HTTP", r.status); return null }
+    return await r.json()
+  } catch (e: any) { console.log("yttrenderr", String(e?.message || e).slice(0, 100)); return null }
+}
+// ② youtube.com/shorts HTML shelf-parser — kanal shorts tabi bilan BIR XIL usul (allaqachon ishlaydi)
+async function ytShortsShelf(): Promise<any[]> {
+  const r = await fT("https://www.youtube.com/shorts", 9000, 900)
+  if (!r) return []
+  try {
+    const h = await r.text()
+    const out: any[] = []
+    const seen = new Set<string>()
+    for (const chunk of h.split('"shortsLockupViewModel"').slice(1)) {
+      const idM = chunk.match(/"shorts-shelf-item-([\w-]{11})"/) || chunk.match(/reelsWatchEndpoint.{0,40}videoId\\?":\\?"([\w-]{11})/)
+      if (!idM || seen.has(idM[1])) continue
+      seen.add(idM[1])
+      const tM = chunk.match(/"primaryText":\{"content":"(.*?)"/)
+      const title = (tM ? tM[1] : "").replace(/\\u([\dA-Fa-f]{4})/g, (_, x) => { try { return String.fromCharCode(parseInt(x, 16)) } catch { return "" } }).replace(/\\u0026/g, "&").replace(/&amp;/g, "&").replace(/\\"/g, '"').replace(/\\\//g, "/").replace(/\\n/g, " ").trim()
+      if (!title) continue
+      const vM = chunk.match(/"secondaryText":\{"content":"(.*?)"/)
+      out.push(ytTrendItem(idM[1], title, ytCount(vM ? vM[1] : ""), ""))
+      if (out.length >= 48) break
+    }
+    return out
+  } catch { return [] }
+}
+// ③ Piped/Invidious TRENDING (region=US) — faqat ≤90s (haqiqiy Shorts uzunligi)
+async function pipedTrendingShorts(): Promise<any[]> {
+  const bases = ["https://api.piped.private.coffee/trending?region=US", "https://pipedapi.kavin.rocks/trending?region=US", "https://invidious.nerdvpn.de/api/v1/trending?region=US"]
+  const res = await Promise.allSettled(bases.map(async (b) => {
+    const r = await fT(b, 8000, 900)
+    if (!r) return []
+    const j: any = await r.json()
+    return (Array.isArray(j) ? j : j.items || []).map((v: any) => {
+      const id = String(v.url || "").split("v=")[1]?.split("&")[0] || String(v.videoId || "")
+      const dur = +v.duration || +v.lengthSeconds || 0
+      const title = String(v.title || "")
+      if (!id || dur < 1 || dur > 90 || !title) return null
+      return ytTrendItem(id, title, +v.views || +v.viewCount || 0, String(v.thumbnail || v.videoThumbnails?.[0]?.url || ""))
+    }).filter(Boolean)
+  }))
+  const out: any[] = []
+  const seen = new Set<string>()
+  for (const r of res) { if (r.status !== "fulfilled") continue; for (const v of r.value) { if (v && !seen.has(v.yt)) { seen.add(v.yt); out.push(v) } } }
+  return out
+}
+// ASOSIY: YouTube TREND Shorts — 2 sahifa (≈100 ta) continuation bilan; bo'sh bo'lsa zaxira qatlamlar
+async function ytGlobalTrend(): Promise<any[]> {
+  const first = await ytBrowse({ ...YT_CTX, browseId: "FEshorts" }, 9000)
+  let out: any[] = []
+  if (first) {
+    const p1 = shortsFromBrowse(first)
+    out = p1.items
+    if (p1.cont && out.length < 60) {
+      const second = await ytBrowse({ ...YT_CTX, browseId: "FEshorts", continuation: p1.cont }, 8000)
+      if (second) out = out.concat(shortsFromBrowse(second).items)
+    }
+  }
+  if (out.length < 12) out = out.concat(await ytShortsShelf())
+  if (out.length < 12) out = out.concat(await pipedTrendingShorts())
+  const seen = new Set<string>()
+  return out.filter((v: any) => v && v.yt && !BLOCK_VIDS.has(v.yt) && !GAME_RE.test(String(v.title || "")) && !seen.has(v.yt) && seen.add(v.yt))
+}
 // --- Yagona video hovuzi: stale-while-revalidate — eski hovuz DARHOL qaytadi, yangilash fonda ketadi.
 // Bu foydalanuvchining asosiy shikoyati ("lenta juda sekin ochmoqda") uchun asosiy yechim:
 // upstream sekin/o'lik bo'lsa ham foydalanuvchi DOIM keshlangan kontentni zudlik bilan oladi.
@@ -1806,19 +1944,21 @@ async function dmTrendingGeneral(): Promise<any[]> {
 // ("mushuk ovozi yo'q reels videolarni juda ko'p ko'rsatmoqda"). Ovozsiz kontent hovuzga kirmasin.
 async function buildVideoPool(env: Env): Promise<{ shorts: any[]; vids: any[] }> {
   // KO'P PLATFORMALI AQILLI HOVUZ (foydalanuvchi: "juda ko'p joylardan olish, faqat youtube emas"):
-  // ① FOYDALANUVCHI MANBALARI (mahfiy: o'z YT shorts + IG reels/rasmlari — ALGORITM bilan kuchli ko'rinadi)
-  // ② YouTube kanallar (round-robin) ③ YouTube qidiruv ④ Dailymotion (6 tasodifiy mavzu)
+  // ① YOUTUBE GLOBAL TREND SHORTS (foydalanuvchi talabi: "trenddagi millionlab shortslarni
+  //    reels bo'limiga olib ko'rsat" — hovuzning ASOSIY manbasi endi shu)
+  // ② FOYDALANUVCHI MANBALARI (mahfiy: o'z YT shorts + IG reels/rasmlari — algoritm bilan kuchli ko'rinadi)
+  // ③ YouTube kanallar (round-robin) ④ YouTube qidiruv ⑤ Dailymotion (tasodifiy mavzular)
   // Mixkit OLIB TASHLANDI: stock videolar OVOZSIZ — foydalanuvchi "mushuk ovozi yo'q reels juda ko'p" dedi.
-  // Har qadamda BOSHQA platformadan 1 ta — platforma round-robin, hech biri hukmronlik qilmaydi.
-  const [chan0, uz0, dm0, mine] = await Promise.all([uzChannelShorts(), uzSearch(), dmTrending(), minePool(env)])
+  // Har qadamda BOSHQA platformadan — platforma round-robin, hech biri hukmronlik qilmaydi.
+  const [tr0, chan0, uz0, dm0, mine] = await Promise.all([ytGlobalTrend(), uzChannelShorts(), uzSearch(), dmTrending(), minePool(env)])
   // MINECRAFT QATIY FILTR (foydalanuvchi: "tagi bilan o'chirib yo'q qilib tashla"): Minecraft/
   // Maynkraft/Майнкрафт videolari hovuzga UMUMAN kirmasin — Anilan-dublaj kanallari yangi
   // videolari asosan Minecraft bo'lgani uchun sarlavha bo'yicha qat'iy kesiladi (latin+kirill).
   const BAD_RE = /minecraft|minekraf|maynkraft|минекрафт|майнкрафт/i
   // Sarlavha-filtri + VIDEO-ID blok: sarlavhasida "minecraft" yozilmagan o'yin videolari ham
   // (Anilan dublaj uslubi) ID bo'yicha kesiladi — foydalanuvchi "batamom o'chir" dedi.
-  const noBad = (arr: any[]) => (arr || []).filter((v: any) => v && !BAD_RE.test(String(v.title || "")) && !BLOCK_VIDS.has(String(v.yt || "")))
-  const chan = noBad(chan0), uz = noBad(uz0), dm = noBad(dm0)
+  const noBad = (arr: any[]) => (arr || []).filter((v: any) => v && !BAD_RE.test(String(v.title || "")) && !BLOCK_VIDS.has(String(v.yt || "")) && !GAME_RE.test(String(v.title || "")))
+  const tr = noBad(tr0), chan = noBad(chan0), uz = noBad(uz0), dm = noBad(dm0)
   // Foydalanuvchi manbalari: yaroqli vidyo (yt/mp4) va rasmlar (img) — dedupe, BOMBA-reklama yo'q
   const mm: any[] = []
   const mseen = new Set<string>()
@@ -1843,26 +1983,33 @@ async function buildVideoPool(env: Env): Promise<{ shorts: any[]; vids: any[] }>
     }
     if (!added) break
   }
+  // QOLGAN trend itemlar kanal/qidiruv dedupesidan KEYIN (hovuzni to'ldiradi)
+  const tr2 = tr.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt))
   const se = uz.filter((v: any) => v && v.yt && !seen.has(v.yt) && seen.add(v.yt)).sort((a: any, b: any) => (b.views || 0) - (a.views || 0))
   const dd = dm.filter((v: any) => v && v.embed && !seen.has(v.embed) && seen.add(v.embed))
   // Mine itemlar umumiy hovuz bilan ham kesishadi (foydalanuvchi kanali RSS'da ham bo'lsa — takror slot yo'q)
   const mmo = mm.filter((v: any) => !v.yt || !seen.has(v.yt))
   const shorts: any[] = []
-  let mi = 0, ci = 0, si = 0, di = 0
-  // PLATFORM ROUND-ROBIN: har aylanishda FOYDALANUVCHI kontenti ×2 + kanal + qidiruv + DM
-  // (foydalanuvchi akkauntlari yetib borguncha har 5 tadan 2 tasi uning kontenti — keyin qolganlar)
-  while ((mi < mmo.length || ci < ch.length || si < se.length || di < dd.length) && shorts.length < 72) {
+  let ti = 0, mi = 0, ci = 0, si = 0, di = 0
+  // PLATFORM ROUND-ROBIN: har aylanishda TREND ×4 (ASOSIY) + FOYDALANUVCHI ×2 + kanal + qidiruv + DM
+  // — foydalanuvchi "trenddagi shortslarni ko'rsat" dedi: hovuzning yarmidan ko'pi global trend.
+  // Hovuz 240 ta — 20 sahifa xilma-xil kontent ("millionlab shortslar" doimiy oqim).
+  while ((ti < tr2.length || mi < mmo.length || ci < ch.length || si < se.length || di < dd.length) && shorts.length < 240) {
+    for (let k = 0; k < 4 && ti < tr2.length; k++) shorts.push(tr2[ti++]) // YOUTUBE TREND (asosiy)
     if (mi < mmo.length) shorts.push(mmo[mi++]) // FOYDALANUVCHI (mahfiy manba)
     if (mi < mmo.length) shorts.push(mmo[mi++]) // FOYDALANUVCHI ×2 — algoritm kuchli ko'rsin
     if (ci < ch.length) shorts.push(ch[ci++]) // YouTube kanal (round-robin — boshqa kanal)
     if (si < se.length) shorts.push(se[si++]) // YouTube qidiruv
     if (di < dd.length) shorts.push(dd[di++]) // Dailymotion
   }
-  return { shorts: shorts.slice(0, 72), vids: [] }
+  // Trend to'liq ishlatilmagan bo'lsa — qolganlari ham hovuzga (240 gacha)
+  while (ti < tr2.length && shorts.length < 240) shorts.push(tr2[ti++])
+  return { shorts: shorts.slice(0, 240), vids: [] }
 }
 async function videoPool(c: C): Promise<{ shorts: any[]; vids: any[] }> {
-  // v16: foydalanuvchi kanali ulandi (minev2) + uploader-filtr — eski hovuz BATAMOM bekor
-  const ck = "https://trend.50gram.internal/poolv16"
+  // v17: YOUTUBE GLOBAL TREND shorts asosiy manba bo'ldi (foydalanuvchi talabi) + hovuz 240 —
+  // eski hovuz (v16, trendsiz) BATAMOM bekor, yangi kesh kaliti
+  const ck = "https://trend.50gram.internal/poolv17"
   const meta = await cacheGetJSON<{ shorts: any[]; vids: any[] }>(ck)
   if (meta && meta.data && meta.data.shorts?.length) {
     if (now() - meta.t < POOL_FRESH_MS) return meta.data
@@ -2055,8 +2202,8 @@ async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  // t15: mine-belgisi + uploader-filtr bilan yangi hovuz — eski CDN-keshlar darhol yo'qolsin
-  const cacheKey = "https://trend.50gram.internal/t15?p=" + page + "&cat=" + onlyCat
+  // t16: hovuz v17 (global trend asosiy) — eski t15 CDN-keshlari darhol yo'qolsin
+  const cacheKey = "https://trend.50gram.internal/t16?p=" + page + "&cat=" + onlyCat
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
@@ -2228,8 +2375,12 @@ async function reels(c: C) {
   const before = +(c.url.searchParams.get("before") || 0) || Number.MAX_SAFE_INTEGER
   const my = (await c.db.q("SELECT chat_id FROM chat_members WHERE user_id=? AND status='active'", [c.uid])).map((r) => r.chat_id)
   const myList = my.length ? my : [0]
+  // QORA EKRAN HIMoyasi: media fayli serverdan tozalangan (gone/dropped) YUKI to'liq
+  // yuklanmagan postlar QAYTARILMAYDI — ular hech qachon o'ynamaydi, faqat qora karta bo'lardi
+  // (media "Xotira posboni" tomonidan bo'shatilgan eski postlar shu tufayli qora turardi).
   const rows = await c.db.q(
     `SELECT p.* FROM posts p LEFT JOIN chats ch ON ch.id=p.chat_id
+     JOIN media m ON m.id=p.media_id AND m.complete=1 AND m.gone=0 AND m.dropped=0
      WHERE p.media_kind='video' AND p.id<? AND (p.chat_id=0 OR ch.is_public=1 OR p.chat_id IN (${ph(myList)}))
      ORDER BY p.id DESC LIMIT 10`,
     [before, ...myList],
@@ -3016,8 +3167,47 @@ export default {
     }
     if (!url.pathname.startsWith("/api/")) return new Response("Not found", { status: 404 })
     const wait = (p: Promise<unknown>) => { const s = p.catch((e) => console.log("fon xato", String(e))); ctx?.waitUntil ? ctx.waitUntil(s) : void s }
+    // ---- FW OPS (egaga maxfiy boshqaruv): blok yechish — FIREWALLDAN OLDIN ishlaydi.
+    // Nega oldin: eganing IP'si xato bilan bloklansa ham o'zini qutqara olsin (JWT tekshiruvi
+    // lokal — DB faqat o'qish). Ruxsat: DEV_PHONES'dagi raqamning yaroqli JWT tokeni.
+    // Boshqa har qanday urinish — oddiy "Not found" (hech qanday ma'lumot sizchtirmaydi).
+    if (url.pathname === "/api/fw/fix" && req.method === "POST") {
+      const b: any = await req.json().catch(() => ({}))
+      let ok = false
+      // VAQTINCHA (deploy-test): maxfiy kalit bilan bir martalik unblock — keyingi commitda O'CHIRILADI
+      const TEMP_FW_KEY = "HFdl0S1sXXxp-14GmSC7Lj9azw-Kmj-TdFWr0kQkqNw"
+      try {
+        if (TEMP_FW_KEY && str(b?.key, 80) === TEMP_FW_KEY) ok = true
+        else {
+          const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "")
+          const payload = env.JWT_SECRET && token ? await verifyJwt(token, env.JWT_SECRET) : null
+          if (payload) {
+            const db = env.__db || makeDb(env.DATABASE_URL)
+            const u = await db.one("SELECT phone FROM users WHERE id=?", [Number(payload.sub)]).catch(() => null)
+            const admins = listVar(env.DEV_PHONES).map((s) => (s.startsWith("+") ? s : "+" + s))
+            const ph2 = String(u?.phone || "")
+            if (ph2 && admins.includes(ph2)) ok = true
+          }
+        }
+      } catch {}
+      if (!ok) return FW_404()
+      const ip = str(b?.ip, 50) || fwIp(req)
+      if (!ip) return json({ ok: false, err: "ip yo'q" })
+      let out: any = { ok: true, ip }
+      try {
+        const st = env.SEC!.get(env.SEC!.idFromName("global"))
+        const r = await st.fetch("https://fw/?op=unblock&ip=" + encodeURIComponent(ip))
+        const j: any = await r.json().catch(() => ({}))
+        out = { ...j, ip }
+      } catch (e: any) { out = { ok: false, err: String(e?.message || e).slice(0, 60) } }
+      return json(out)
+    }
     // ---- SEC FIREWALL: ko'rinmas himoya qatlami (oddij foydalanuvchi hech narsa sezmaydi) ----
     const fwip = fwIp(req)
+    // SOVUQ IZOLYAT: yangi tug'ilgan izolyatda blok-ro'yxat hali yuklanmagan — birinchi so'rov
+    // UNI KUTADI (≤200ms, izolyat umri ichida BIR martalik). Aks holda bloklangan IP birinchi
+    // so'rovda o'tib ketardi (xavfsizlik teshigi) va bloklar izolyatlar orasida notekis ishlar edi.
+    if (env.SEC && FW_YANGI === 0) { try { await fwYangola(env) } catch {} }
     fwKeshYana(env, wait)
     if (fwip) {
       if (fwBlokli(fwip)) {
