@@ -2601,23 +2601,40 @@ async function ice(c: C) {
   return json({ iceServers: servers })
 }
 async function callPending(c: C) {
+  // O'ZI-O'ZINI TIKLASH («band bo'lib» ildizi): 90s+ eski "ringing" = hech kim javob bermagan
+  // o'lik qo'ng'iroq — darhol yakunlanadi. Aks holda klient uni QAYTA-QAYTA jiringlar va
+  // CALL holati band bo'lib, barcha yangi qo'ng'iroqlarga yolg'on "Band" qaytardi.
+  const t0 = now()
+  await c.db.run("UPDATE calls SET status='missed', ended_at=? WHERE ended_at=0 AND status='ringing' AND started_at<=? AND (callee_id=? OR caller_id=?)", [t0, t0 - 90000, c.uid, c.uid])
   // WS uzilgan paytda kelgan qo'ng'iroqni qayta o'ynatish: ilova ochilganda o'zini "ringing" holatda topadi
-  const row = await c.db.one("SELECT * FROM calls WHERE callee_id=? AND status='ringing' AND started_at>? ORDER BY started_at DESC LIMIT 1", [c.uid, now() - 80 * 1000])
+  const row = await c.db.one("SELECT * FROM calls WHERE callee_id=? AND status='ringing' AND started_at>? ORDER BY started_at DESC LIMIT 1", [c.uid, t0 - 80000])
   if (!row) return json({ call: null })
   const from = (await usersByIds(c, [+row.caller_id])).get(+row.caller_id)
   if (!from) return json({ call: null })
-  return json({ call: { call_id: row.id, video: !!row.video, from: { ...from, first_name: (from as any).real_name || from.first_name, last_name: "" } } })
+  return json({ call: { call_id: row.id, video: !!row.video, started_at: +row.started_at, from: { ...from, first_name: (from as any).real_name || from.first_name, last_name: "" } } })
 }
 async function startCall(c: C) {
   const to = +c.b.to
   if (!to || to === c.uid) fail("Kimga qo‘ng‘iroq?")
   if (await blockedBetween(c, c.uid, to)) fail("Bu foydalanuvchiga qo‘ng‘iroq qilib bo‘lmaydi", 403)
+  const t0 = now()
+  // GHOST TOZALASH («band bo‘lib qo‘ng‘iroq ketmayapti» ildizi): hech kim status yozmagan
+  // eski "ringing" qatorlar qabul qiluvchida qayta-qayta jiringlar va CALL holatini band
+  // qilardi — natijada HAR YANGI qo‘ng‘iroqqa yolg‘on "Band" javobi qaytardi. Endi yangi
+  // qo‘ng‘iroq boshlanishida: 1) shu juftlikning barcha eski ringing yozuvlari (yangi qo‘ng‘iroq
+  // ularni “supurib tashlaydi”), 2) ikkala foydalanuvchiga tegishli 90s+ eski o‘lik ringing
+  // yozuvlari yakunlanadi — o‘lik holat hech qachon yangi qo‘ng‘iroqqa to‘sqinlik qilolmaydi.
+  await c.db.run("UPDATE calls SET status='missed', ended_at=? WHERE ended_at=0 AND status='ringing' AND ((caller_id=? AND callee_id=?) OR (caller_id=? AND callee_id=?))", [t0, c.uid, to, to, c.uid])
+  await c.db.run("UPDATE calls SET status='missed', ended_at=? WHERE ended_at=0 AND status='ringing' AND started_at<=? AND (caller_id=? OR callee_id=? OR caller_id=? OR callee_id=?)", [t0, t0 - 90000, c.uid, c.uid, to, to])
   const id = newId()
-  await c.db.run("INSERT INTO calls(id,caller_id,callee_id,video,status,started_at) VALUES(?,?,?,?,'ringing',?)", [id, c.uid, to, c.b.video ? 1 : 0, now()])
+  await c.db.run("INSERT INTO calls(id,caller_id,callee_id,video,status,started_at) VALUES(?,?,?,?,'ringing',?)", [id, c.uid, to, c.b.video ? 1 : 0, t0])
   const me = (await usersByIds(c, [c.uid])).get(c.uid)
   // qo'ng'iroq qiluvchi qabul qiluvchining kontakt nomini ko'rmaydi — haqiqiy ismi yuboriladi
-  c.wait(notify(c.env, [to], { type: "call", call_id: id, video: !!c.b.video, from: { ...me, first_name: me.real_name, last_name: "" } }))
-  c.wait(pushUsers(c.env, [to], { t: `${me?.real_name || "50 Gram"} qo‘ng‘iroq qilmoqda`, b: c.b.video ? "📹 Video qo‘ng‘iroq" : "📞 Audio qo‘ng‘iroq", c: 0, tag: "g50call" + id, call: 1 }, { urgency: "high", ttl: 90 }))
+  c.wait(notify(c.env, [to], { type: "call", call_id: id, video: !!c.b.video, started_at: t0, from: { ...me, first_name: me.real_name, last_name: "" } }))
+  // MAJBURIY PUSH (force): WS "zombi" bo‘lsa (ko‘rinadi, lekin o‘lik) DO uni "online" hisoblab
+  // pushni O‘TKAZIB YUBORARDI — qo‘ng‘iroq umuman yetmasdi. Qo‘ng‘iroqda push HAR DOIM
+  // yuboriladi (dublikat xavfi yo‘q — klient bir xil call_id ni ikki marta ko‘rsatmaydi).
+  c.wait(pushUsers(c.env, [to], { t: `${me?.real_name || "50 Gram"} qo‘ng‘iroq qilmoqda`, b: c.b.video ? "📹 Video qo‘ng‘iroq" : "📞 Audio qo‘ng‘iroq", c: 0, tag: "g50call" + id, call: 1 }, { urgency: "high", ttl: 90, force: true }))
   return json({ call_id: id })
 }
 async function signal(c: C) {
@@ -3281,6 +3298,11 @@ async function cleanup(env: Env) {
   await db.run("DELETE FROM pin_jobs WHERE created_at<?", [t - 2 * DAY])
   // Qo'ng'iroq signal navbati: 2 daqiqadan eski yozuvlar savat (yetib bo'lgan/emirilgan)
   await db.run("DELETE FROM call_signals WHERE created_at<?", [t - 2 * 60000])
+  // O'LIK QO'NG'IROQLAR SWEEP: status yozilmagan "ringing" (5 daqiqadan eski) yakunlanadi —
+  // aks holda qabul qiluvchida qayta jiringlab, yangi qo'ng'iroqlarga "Band" to'sqinlik qilardi.
+  await db.run("UPDATE calls SET status='missed', ended_at=? WHERE ended_at=0 AND status='ringing' AND started_at<?", [t, t - 5 * 60000])
+  // Uzilgan qo'ng'iroqlar gigiyenasi: 3 soatdan eski "active" lekin hech kim tugatmagan yozuvlar yopiladi
+  await db.run("UPDATE calls SET status='ended', ended_at=? WHERE ended_at=0 AND status='active' AND started_at<?", [t, t - 3 * 3600000])
   await planReplicas(db, 300)
   await db.run("DELETE FROM otp WHERE expires_at<?", [t])
   await db.run("DELETE FROM push_subs WHERE updated_at<?", [t - 90 * DAY]) // 90 kun ishlatilmagan obunalar

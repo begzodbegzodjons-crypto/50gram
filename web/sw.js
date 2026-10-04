@@ -1,5 +1,5 @@
 // 50 Gram service worker: ilova qobig'ini keshlaydi (oflayn ochiladi) + Telegram-uslubidagi Web Push.
-const V = '50gram-v62'
+const V = '50gram-v63'
 const SHELL = ['./', 'index.html', 'style.css', 'config.js', 'core.js', 'p2p.js', 'storage.js', 'chat.js', 'manage.js', 'social.js', 'rtc.js', 'logo.png', 'icon-192.png', 'icon-512.png', 'maskable-192.png', 'maskable-512.png', 'apple-touch-icon.png', 'favicon.png', 'manifest.json',
   // Task 29: Manrope shrifti + animatsiyali stiker paketlari + sovg'alar
   'fonts/manrope-latin.woff2', 'fonts/manrope-latin-ext.woff2',
@@ -59,6 +59,11 @@ const idbSet = (k, v) => idb('readwrite', (st) => st.put(v, k))
 self.addEventListener('message', (e) => {
   const d = e.data || {}
   if (d.type === 'prefs' && d.prefs) e.waitUntil(idbSet('prefs', d.prefs))
+  // QO'NG'IROQ TUGADI: javob berilgach/bekor qilingach qo'ng'iroq bildirishnomasi
+  // ekranda "qotib qolmasin" — ilova tegishli tag'li bildirishnomani yopishni so'raydi
+  if (d.type === 'callend' && d.tag) {
+    e.waitUntil(self.registration.getNotifications({ tag: d.tag }).then((ns) => { for (const n of ns) try { n.close() } catch {} }))
+  }
 })
 self.addEventListener('push', (e) => {
   let d = {}

@@ -98,11 +98,14 @@ export async function webPushSend(
 
 // Bir nechta foydalanuvchiga push: WS orqali ONLAYN bo'lsa push yuborilmaydi (ikkilanash yo'q).
 // DO javob bermasa — baribir yuboriladi (ishonchlilik birinchi).
+// opts.force — QO'NG'IROQLAR UCHUN: "online" tekshiruvi o'tkazilmaydi, push HAR DOIM yuboriladi.
+// Sabab: WS "zombi" bo'lsa (soket ko'rinishi tirik, aslida o'lik) DO uni online hisoblab
+// pushni o'tkazib yuborardi — qo'ng'iroq qabul qiluvchiga UMUMAN yetmasdi.
 export async function pushUsers(
   env: { DATABASE_URL: string; USER_SOCKET: any; VAPID_PUBLIC_KEY?: string; VAPID_PRIVATE_KEY?: string; __db?: Db },
   uids: number[],
   payload: { t: string; b?: string; c?: number; tag?: string; call?: number },
-  opts?: { urgency?: string; ttl?: number; db?: Db },
+  opts?: { urgency?: string; ttl?: number; db?: Db; force?: boolean },
 ) {
   if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY || !uids.length) return
   const ids = [...new Set(uids)].slice(0, 40)
@@ -112,12 +115,14 @@ export async function pushUsers(
     try {
       const subs = await db.q("SELECT endpoint, p256dh, auth FROM push_subs WHERE user_id=?", [uid])
       if (!subs.length) return // obunasi yo'q — DO so'rovi ham kerak emas (subrequest tejash)
-      try {
-        const stub = env.USER_SOCKET.get(env.USER_SOCKET.idFromName(String(uid)))
-        const r = await stub.fetch("https://do/online")
-        const j: any = await r.json().catch(() => ({ online: false }))
-        if (j && j.online) return
-      } catch {} // DO javob bermasa — baribir push yuboriladi (ishonchlilik birinchi)
+      if (!opts?.force) {
+        try {
+          const stub = env.USER_SOCKET.get(env.USER_SOCKET.idFromName(String(uid)))
+          const r = await stub.fetch("https://do/online")
+          const j: any = await r.json().catch(() => ({ online: false }))
+          if (j && j.online) return
+        } catch {} // DO javob bermasa — baribir push yuboriladi (ishonchlilik birinchi)
+      }
       for (const s of subs) {
         try {
           const st = await webPushSend(env, s as PushSub, body, opts?.urgency || "normal", opts?.ttl || 86400)

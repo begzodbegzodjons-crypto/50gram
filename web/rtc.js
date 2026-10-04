@@ -164,7 +164,8 @@ async function callUser(uid, video) {
     if (!CALL) return
     CALL.id = r.call_id
     setCallState('Chaqirilmoqda…')
-    CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', true, 'Javob bermadi'), 75000)
+    // 60s (qabul qiluvchi 65s) — uzoq kutish «qotib turibdi» hissi bermasin; javob bo'lmasa aniq xato
+    CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', true, 'Javob berilmadi'), 60000)
   } catch (e) {
     // XATO KO‘RINADIGAN bo‘lsin: nima uchun kamera ochilmaganini qo‘ng‘iroq oynasida ham ko‘rsatamiz
     try { if (CALL) setCallState('⚠️ ' + e.message) } catch {}
@@ -187,8 +188,9 @@ window.__50call = (act, id) => {
     if (CALL && String(CALL.id) === String(id)) { nativeCallCancel(); acceptCall(); return }
     // Bildirishnoma orqali javob, lekin JS hodisani olmagan (WS o'lgan/fon) — qo'ng'iroqni serverdan olamiz
     nativeCallCancel()
+    // Qo'ng'iroqni serverdan olamiz (started_at bilan — ghost tekshiruvi uchun)
     api('/calls/pending').then((r) => {
-      if (r && r.call && !CALL) { incomingCall({ call_id: r.call.call_id, video: r.call.video, from: r.call.from }); acceptCall() }
+      if (r && r.call && !CALL) { incomingCall({ call_id: r.call.call_id, video: r.call.video, started_at: r.call.started_at, from: r.call.from }); acceptCall() }
       else if (!CALL) post(`/calls/${id}/status`, { status: 'declined' }).catch(() => {})
     }).catch(() => { toast('Qo‘ng‘iroqqa ulanolmadik — internetni tekshiring') })
   } else if (act === 'decline') {
@@ -211,6 +213,11 @@ document.addEventListener('visibilitychange', () => {
 })
 function incomingCall(ev) {
   if (CALL) { sig(ev.from.id, { k: 'busy', call_id: ev.call_id }); return }
+  // GHOST HIMOYASI («band bo'lib qo'ng'iroq ketmayapti» ildizi): 65s+ eski "ringing" — hech kim
+  // javob bermagan O'LIK qo'ng'iroq (server ham 90s'da yakunlaydi). JIM rad etiladi — jiringlamaydi,
+  // foydalanuvchini aldamaydi, CALL holatini band qilmaydi — keyingi HAQIQIY qo'ng'iroq erkin kiradi.
+  const age = ev.started_at ? Date.now() - +ev.started_at : 0
+  if (age > 65000) { post(`/calls/${ev.call_id}/status`, { status: 'declined' }).catch(() => {}); return }
   // FON REJIMIDA (APK): sahifa yashirin bo'lsa — native to'liq ekran qo'ng'iroq oynasi (tugmalar bilan)
   const nb = nativeCall()
   if (nb && document.hidden) {
@@ -228,7 +235,9 @@ function incomingCall(ev) {
   vibrate([400, 200, 400, 200, 400])
   notifyLocal('📞 ' + uname(peer), ev.video ? 'Video qo‘ng‘iroq' : 'Ovozli qo‘ng‘iroq')
   nativeCallCancel() // APK: agar native bildirishnoma chiqqan bo'lsa — endi UI bor, yopamiz
-  CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', false), 75000)
+  // 65s (chaqiruvchi 60s'da o'zi yopadi) — MUHIM report=true: status serverga yoziladi, aks
+  // holda o'lik "ringing" bazada qolib, har 6s QAYTA jiringlar edi («band bo'lib» ildizi)
+  CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', true), 65000)
 }
 on('call', incomingCall)
 // DARHOL YETKAZISH — ZAXIRA YO'L (foydalanuvchi: «bir marta qilinganda darhol borishi shart»):
@@ -240,7 +249,7 @@ on('call', incomingCall)
 setInterval(() => {
   if (!S.token || CALL) return
   api('/calls/pending').then((r) => {
-    if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, from: r.call.from })
+    if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, started_at: r.call.started_at, from: r.call.from })
   }).catch(() => {})
 }, 6000)
 // WS qayta ulanganda: WS uzilgan paytda kelgan qo'ng'iroq bo'lsa — darhol qo'ng'iroq oynasi
@@ -250,7 +259,7 @@ window.__50wsOpen = async () => {
   if (!CALL && !pendingNativeCall) {
     try {
       const r = await api('/calls/pending')
-      if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, from: r.call.from })
+      if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, started_at: r.call.started_at, from: r.call.from })
     } catch {}
   }
   // QO'NG'IROQ davomida WS qayta ulandi va hali ulanmagan bo'lsa — offer qayta yuboriladi
@@ -304,9 +313,9 @@ function playRemote(C) {
 async function setupPC(C) {
   C.pc = await newPC((c) => sig(C.peer.id, { k: 'ice', call_id: C.id, c }))
   for (const t of C.local.getTracks()) C.pc.addTrack(t, C.local)
-  // TEZLIK/SIFAT: video yuborish 900 kbit bilan cheklanadi (jonli efirdagi bilan bir xil) —
-  // cheksiz 720p kuchsiz tarmoqda tarmoqni to'ldi: video QOTARDI, ovoz bo'linardi.
-  limitBitrate(C.pc)
+  // TEZLIK/SIFAT: qo'ng'iroq videosi 1.2 Mbit (avvalgi 900k «sifatsiz» ko'rinar edi) — mobil
+  // tarmoqda ham ravon oqadi, lekin rasm aniqroq. Jonli efir o'zining 900k'idda qoladi.
+  limitBitrate(C.pc, 1200000)
   C.pc.ontrack = (e) => {
     const st = e.streams[0] || new MediaStream([e.track])
     qs('.remote', C.el).srcObject = st
@@ -389,6 +398,8 @@ function endCall(status = 'ended', report = true, msg) {
   }
   try { C.pc?.close() } catch {}
   C.local?.getTracks().forEach((t) => t.stop())
+  // Web Push qo'ng'iroq bildirishnomasini yopish (javob berilgach ekranda "qotib qolmasin")
+  try { navigator.serviceWorker?.controller?.postMessage({ type: 'callend', tag: 'g50call' + C.id }) } catch {}
   qs('.cst', C.el).textContent = msg || (C.started ? 'Tugadi · ' + fmtDur(dur) : 'Tugadi')
   qs('.cbar', C.el).innerHTML = ''
   // Xato sababi ko‘rinib tursin — darhol yo‘qolmasin (oddiy yopilish 1.2s, xato 3.2s)
@@ -809,12 +820,12 @@ function liveEnded() {
   setTimeout(() => L.el.remove(), 2000)
   loadLives()
 }
-function limitBitrate(pc) {
+function limitBitrate(pc, max) {
   const s = pc.getSenders().find((x) => x.track?.kind === 'video'); if (!s) return
   try {
     const p = s.getParameters()
     if (!p.encodings || !p.encodings.length) p.encodings = [{}]
-    p.encodings[0].maxBitrate = 900000
+    p.encodings[0].maxBitrate = max || 900000
     s.setParameters(p).catch(() => {})
   } catch {}
 }
