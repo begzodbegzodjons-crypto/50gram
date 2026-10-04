@@ -930,7 +930,7 @@ async function openMsgComments(m) {
   }
 }
 
-// ---------------- Foydalanuvchi profili ----------------
+// ---------------- Foydalanuvchi profili (Telegram-uslubi, TO'LIQ EKRAN, TEZ) ----------------
 async function openDirectWith(uid) {
   try {
     const c = await post('/chats/direct', { user_id: uid })
@@ -939,53 +939,83 @@ async function openDirectWith(uid) {
     openChat(c.id)
   } catch (e) { toast('⚠️ ' + e.message) }
 }
+// TEZLIK prinsipi (Telegramdagi kabi): foydalanuvchi bosishi bilan profil sahifasi
+// DARHOL ochiladi — qurilmadagi keshdagi ma'lumot bilan (0 ms kutish). Server javobi
+// fonda kelgach sahifa joyida yangilanadi. Hech qachon bo'sh ekran kutilmaydi.
+function profBodyHTML(u, opt = {}) {
+  const isC = (S.contacts || []).some((k) => k.user && k.user.id === u.id)
+  const loading = !u.first_name && !u.username && !u.avatar_ver
+  return `<div class="prof upage-prof">
+    <div class="bigav" style="width:124px;height:124px">${avHTML(u, 124, { live: !!u.live_id, liveId: u.live_id })}</div>
+    <h2>${loading ? '<span class="mut">…</span>' : esc(uname(u))}</h2>
+    <div class="mut">${u.lvl ? `<span class="lvlbadge" style="display:inline-flex;margin-right:6px">${u.lvl.emoji} ${esc(u.lvl.name)}</span>` : ''}${loading ? '' : esc(lastSeen(u))}${u.live_id ? ' · 🔴 hozir efirda' : ''}</div>
+    ${u.avatar_ver && !loading ? '<small class="mut pf-hint">🖼 Rasmini katta ko‘rish uchun ustiga bosing</small>' : ''}
+  </div>
+  <div class="pbtns" style="display:flex;gap:8px;margin:6px 0 12px">
+    <button class="btn" style="flex:1" data-a="msg">💬 Xabar</button>
+    <button class="btn gh" style="flex:1" data-a="call">📞</button>
+    <button class="btn gh" style="flex:1" data-a="video">📹</button>
+    ${u.live_id ? '<button class="btn red" style="flex:1" data-a="live">🔴 Efir</button>' : ''}
+  </div>
+  <div class="rows">
+    ${u.phone ? `<div data-a="phone"><span class="ri">📱</span><div class="rt">${esc(u.phone)}<small>Telefon — bosib nusxa oling</small></div></div>` : ''}
+    ${u.username ? `<div data-a="un"><span class="ri">@</span><div class="rt">@${esc(u.username)}<small>Username — nusxa olish</small></div></div>` : ''}
+    ${u.bio ? `<div><span class="ri">ℹ️</span><div class="rt">${esc(u.bio)}<small>Bio</small></div></div>` : ''}
+    ${!u.phone && !u.username && !u.bio && loading ? '<div><span class="ri">⏳</span><div class="rt">Ma’lumotlar yuklanmoqda…<small>Bir necha soniya kuting</small></div></div>' : ''}
+  </div>
+  <div class="rows">
+    ${!loading && !isC ? '<div data-a="add"><span class="ri">➕</span><div class="rt">Kontaktlarga qo‘shish</div></div>' : ''}
+    ${u.username ? '<div data-a="share"><span class="ri">🔗</span><div class="rt">Profilni ulashish</div></div>' : ''}
+    ${opt.inChat ? '<div data-a="clear"><span class="ri">🧹</span><div class="rt">Suhbatni tozalash</div></div>' : ''}
+    ${!loading ? `<div data-a="block"><span class="ri">🚫</span><div class="rt red">${u.i_blocked ? 'Blokdan chiqarish' : 'Bloklash'}</div></div>` : ''}
+  </div>`
+}
 async function openUser(uid, opt = {}) {
   if (!uid) return
   if (uid === S.me?.id) return tabGo('t-me')
-  let u
-  try { u = await api('/users/' + uid) } catch (e) { return toast('⚠️ ' + e.message) }
-  S.users.set(u.id, u)
-  const isC = (S.contacts || []).some((k) => k.user && k.user.id === u.id)
-  const sh = sheet(`<div class="prof">${bigAvatar(u, 116, { live: !!u.live_id, liveId: u.live_id })}<h2>${esc(uname(u))}</h2><div class="mut">${u.lvl ? `<span class="lvlbadge" style="display:inline-flex;margin-right:6px">${u.lvl.emoji} ${esc(u.lvl.name)}</span>` : ''}${esc(lastSeen(u))}${u.live_id ? ' · 🔴 hozir efirda' : ''}</div>${u.avatar_ver ? '<small class="mut" style="opacity:.75;display:block;margin-top:4px">🖼 Rasmini katta ko‘rish uchun ustiga bosing</small>' : ''}</div>
-    <div class="pbtns" style="display:flex;gap:8px;margin-bottom:12px">
-      <button class="btn" style="flex:1" data-a="msg">💬 Xabar</button>
-      <button class="btn gh" style="flex:1" data-a="call">📞</button>
-      <button class="btn gh" style="flex:1" data-a="video">📹</button>
-      ${u.live_id ? '<button class="btn red" style="flex:1" data-a="live">🔴 Efir</button>' : ''}
-    </div>
-    <div class="rows">
-      ${u.phone ? `<div data-a="phone"><span class="ri">📱</span><div class="rt">${esc(u.phone)}<small>Telefon — bosib nusxa oling</small></div></div>` : ''}
-      ${u.username ? `<div data-a="un"><span class="ri">@</span><div class="rt">@${esc(u.username)}<small>Username — nusxa olish</small></div></div>` : ''}
-      ${u.bio ? `<div><span class="ri">ℹ️</span><div class="rt">${esc(u.bio)}<small>Bio</small></div></div>` : ''}
-    </div>
-    <div class="rows">
-      ${isC ? '' : '<div data-a="add"><span class="ri">➕</span><div class="rt">Kontaktlarga qo‘shish</div></div>'}
-      ${u.username ? '<div data-a="share"><span class="ri">🔗</span><div class="rt">Profilni ulashish</div></div>' : ''}
-      ${opt.inChat ? '<div data-a="clear"><span class="ri">🧹</span><div class="rt red">Suhbatni tozalash</div></div>' : ''}
-      <div data-a="block"><span class="ri">🚫</span><div class="rt red">${u.i_blocked ? 'Blokdan chiqarish' : 'Bloklash'}</div></div>
-    </div>`)
-  // Profil rasmi ustiga bosilsa (istoriya halqasiga emas) — Telegramdagi kabi TO'LIQ EKRAN katta ko'rish
-  const pav = qs('.bigav', sh)
-  if (pav) pav.onclick = (e) => { if (!e.target.closest('[data-cam],[data-story]') && u.avatar_ver) { e.stopPropagation(); viewPhoto(avSrc(u, false), uname(u), u.username ? '@' + u.username : lastSeen(u)) } }
-  sh.onclick = async (e) => {
+  // Profil eng ustdagi to'liq oyna bo'ladi — ostidagi eski pastki oynalarni yopamiz
+  closeAllSheets()
+  let u = S.users.get(uid) || { id: uid }
+  const p = openPage('Profil', '')
+  const body = qs('.pbody', p)
+  const draw = () => { body.innerHTML = profBodyHTML(u, opt) }
+  draw() // MUDDATSIZ: keshdagi ma'lumot bilan chizildi — foydalanuvchi kutmaydi
+  p.onclick = async (e) => {
+    if (e.target.closest('[data-pback]')) return // orqaga tugmasini openPage o'zi boshqaradi
+    // Profil rasmi ustiga bosilsa — Telegramdagi kabi TO'LIQ EKRAN katta ko'rish
+    // (istoriya halqasiga bosilsa — istoriya ochiladi, u alohida ushlanadi)
+    if (e.target.closest('.bigav') && !e.target.closest('[data-cam],[data-story]') && u.avatar_ver) {
+      e.stopPropagation()
+      return viewPhoto(avSrc(u, false), uname(u), u.username ? '@' + u.username : lastSeen(u))
+    }
     const it = e.target.closest('[data-a]'); if (!it) return
     const a = it.dataset.a
-    if (a === 'msg') { closeSheet(sh); openDirectWith(u.id) }
-    if (a === 'call' || a === 'video') { closeSheet(sh); callUser(u.id, a === 'video') }
-    if (a === 'live') { closeSheet(sh); watchLive(u.live_id) }
-    if (a === 'phone') copy(u.phone)
-    if (a === 'un') copy('@' + u.username)
-    if (a === 'share') share('50 Gram: @' + u.username, location.origin + location.pathname + '#@' + u.username)
-    if (a === 'add') { closeSheet(sh); contactForm({ phone: u.phone || '', first_name: u.first_name, last_name: u.last_name }) }
-    if (a === 'clear') {
-      closeSheet(sh)
+    if (a === 'msg') { closePage(p); openDirectWith(u.id) }
+    else if (a === 'call' || a === 'video') { closePage(p); callUser(u.id, a === 'video') }
+    else if (a === 'live') { closePage(p); watchLive(u.live_id) }
+    else if (a === 'phone') copy(u.phone)
+    else if (a === 'un') copy('@' + u.username)
+    else if (a === 'share') share('50 Gram: @' + u.username, location.origin + location.pathname + '#@' + u.username)
+    else if (a === 'add') { closePage(p); contactForm({ phone: u.phone || '', first_name: u.first_name, last_name: u.last_name }) }
+    else if (a === 'clear') {
+      closePage(p)
       const cc = [...S.chats.values()].find((x) => x.type === 'direct' && !x.saved && x.peer?.id === u.id)
       clearChatConfirm(cc)
     }
-    if (a === 'block') {
+    else if (a === 'block') {
       if (!u.i_blocked && !(await confirmBox(uname(u) + ' bloklansinmi? U sizga yoza olmaydi va qo‘ng‘iroq qila olmaydi.', 'Bloklash'))) return
-      try { u.i_blocked ? await del('/blocks/' + u.id) : await post('/blocks/' + u.id); toast(u.i_blocked ? '✅ Blokdan chiqarildi' : '🚫 Bloklandi'); closeSheet(sh) } catch (er) { toast('⚠️ ' + er.message) }
+      try { u.i_blocked ? await del('/blocks/' + u.id) : await post('/blocks/' + u.id); toast(u.i_blocked ? '✅ Blokdan chiqarildi' : '🚫 Bloklandi'); closePage(p) } catch (er) { toast('⚠️ ' + er.message) }
     }
+  }
+  // Fonda yangilash — sahifa allaqachon ochiq; javob kelgach maydonlar joyida yangilanadi
+  try {
+    const fresh = await api('/users/' + uid)
+    u = { id: uid, ...fresh }
+    S.users.set(u.id, u)
+    draw()
+  } catch (e) {
+    // Keshda hech narsa bo'lmasa xabar beramiz; aks holda sahifa kesh bilan ishlashda davom etadi
+    if (!S.users.get(uid)) { closePage(p); toast('⚠️ ' + e.message) }
   }
 }
 // Ochiq kanal/guruhni ko'rib chiqish (qo'shilmasdan oldin)

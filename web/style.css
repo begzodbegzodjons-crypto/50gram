@@ -1076,3 +1076,21 @@ body.dark .stile{box-shadow:inset 0 1.5px 0 rgba(255,255,255,.15),inset 0 -2px 0
 
 /* Obunachilar soni kanal ma'lumotida sal ko'rkamlashtirildi */
 .prof small.mut{display:block;margin-top:3px}
+
+/* ============================================================
+   Task 7 — Profil TEZ va TO'LIQ EKRAN (Telegram-uslubi)
+   ============================================================ */
+
+/* MUHIM TUZATISH: rasm ko'rish oynasi (.pav) .over'dan z-index:80 meros olardi —
+   pastki oyna (.shbg z-270) va barcha to'liq ekran qatlamlar ortida qolib,
+   FOYDALANUVCHIGA KO'RINMASDI («rasm kattalashmayapti» shikoyatining ildizi).
+   Endi u eng ustda: .shbg(270) > #toast(280) > .pav(290) */
+.pav{z-index:290}
+
+/* To'liq ekran profil sahifasi (chat.js openUser) — Telegram profilidagi kabi */
+.upage-prof{padding:22px 0 10px}
+.upage-prof .bigav{margin-bottom:6px}
+.upage-prof .bigav .avw{box-shadow:0 12px 32px rgba(18,28,68,.22)}
+.upage-prof h2{font-size:22px;font-weight:800;margin:10px 0 3px;letter-spacing:-.3px}
+.upage-prof .mut{font-size:14px}
+.pf-hint{opacity:.72;font-size:12px;margin-top:5px}

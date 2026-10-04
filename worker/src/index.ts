@@ -308,9 +308,13 @@ async function usersByIds(c: C, ids: number[], cmap?: Map<string, any>) {
   const out = new Map<number, any>()
   const u = [...new Set(ids)].filter(Boolean)
   if (!u.length) return out
-  const m = cmap || (await contactMap(c))
-  const rows = await c.db.q(`SELECT ${USER_COLS} FROM users WHERE id IN (${ph(u)})`, u)
-  const flags = await storyFlags(c, u)
+  // TEZLIK: foydalanuvchilar, kontakt-xarita va istoriya bayroqlari bir-biridan
+  // bog'liq emas — PARALLEL so'raladi (3 ketma-ket HTTP so'rov → 1 to'lqin)
+  const [rows, m, flags] = await Promise.all([
+    c.db.q(`SELECT ${USER_COLS} FROM users WHERE id IN (${ph(u)})`, u),
+    cmap ? Promise.resolve(cmap) : contactMap(c),
+    storyFlags(c, u),
+  ])
   for (const r of rows) out.set(r.id, { ...pubUser(r, c.uid, m.get(r.phone)), story: flags.get(r.id) || null })
   return out
 }
@@ -515,14 +519,18 @@ async function avatar(c: C, table: "users" | "chats") {
 }
 async function getUser(c: C) {
   const id = +c.p.id
-  const m = await usersByIds(c, [id])
+  // TEZLIK: 5 ta so'rov oldin ketma-ket edi (5 ta HTTP davra yurishi = sekundlab kutish).
+  // Barchasi bir-biridan bog'liq emas — PARALLEL yuboriladi, javob ~3-5 baravar tez qaytadi.
+  const [m, iBlocked, live, direct, w] = await Promise.all([
+    usersByIds(c, [id]),
+    c.db.one("SELECT 1 AS x FROM blocks WHERE user_id=? AND blocked_id=?", [c.uid, id]),
+    c.db.one("SELECT id FROM lives WHERE user_id=? AND ended_at=0 AND started_at>?", [id, now() - 12 * 3600000]),
+    c.db.one("SELECT id FROM chats WHERE direct_key=?", [[c.uid, id].sort((a: number, b: number) => a - b).join(":")]),
+    c.db.one("SELECT earned FROM wallets WHERE user_id=?", [id]).catch(() => null) as any,
+  ])
   const u = m.get(id)
   if (!u) fail("Foydalanuvchi topilmadi", 404)
-  const iBlocked = !!(await c.db.one("SELECT 1 AS x FROM blocks WHERE user_id=? AND blocked_id=?", [c.uid, id]))
-  const live = await c.db.one("SELECT id FROM lives WHERE user_id=? AND ended_at=0 AND started_at>?", [id, now() - 12 * 3600000])
-  const direct = await c.db.one("SELECT id FROM chats WHERE direct_key=?", [[c.uid, id].sort((a, b) => a - b).join(":")])
-  const w = await c.db.one("SELECT earned FROM wallets WHERE user_id=?", [id]).catch(() => null) as any
-  return json({ ...u, lvl: levelOf(Number(w?.earned || 0)), i_blocked: iBlocked, live_id: live?.id || null, chat_id: direct?.id || null })
+  return json({ ...u, lvl: levelOf(Number(w?.earned || 0)), i_blocked: !!iBlocked, live_id: live?.id || null, chat_id: direct?.id || null })
 }
 
 // ------------------------- Qidiruv -------------------------
