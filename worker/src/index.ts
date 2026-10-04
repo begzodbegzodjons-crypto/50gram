@@ -2696,6 +2696,7 @@ async function startLive(c: C) {
   return json({ id })
 }
 async function listLives(c: C) {
+  await ensureSchema(c.db) // Task 41: peak kolonkasi kafolati
   // TEZLIK (umumiy): doira va guruhlarim ro'yxati mustaqil — parallel
   const [ids, myRows] = await Promise.all([
     circle(c),
@@ -2717,6 +2718,7 @@ async function listLives(c: C) {
 }
 // Task 41: TOP efir reytingi — oxirgi 7 kun ichida eng ko'p tomoshabin yig'gan efirlar
 async function listTopLives(c: C) {
+  await ensureSchema(c.db) // Task 41: peak kolonkasi kafolati
   const rows = await c.db.q(
     "SELECT id, user_id, title, viewers, peak, started_at, ended_at FROM lives WHERE started_at>? AND peak>0 ORDER BY peak DESC, started_at DESC LIMIT 10",
     [now() - 7 * DAY],
@@ -2734,6 +2736,7 @@ async function listTopLives(c: C) {
   })))
 }
 async function liveRow(c: C) {
+  await ensureSchema(c.db) // Task 41: peak kolonkasi kafolati (har bir efir endpoint'idan oldin)
   const l = await c.db.one("SELECT * FROM lives WHERE id=?", [+c.p.id])
   if (!l || l.ended_at) fail("Efir tugagan", 404)
   return l
