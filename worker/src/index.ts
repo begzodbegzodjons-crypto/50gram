@@ -3147,20 +3147,15 @@ export default {
     if (url.pathname === "/api/fw/fix" && req.method === "POST") {
       const b: any = await req.json().catch(() => ({}))
       let ok = false
-      // VAQTINCHA (deploy-test): maxfiy kalit bilan bir martalik unblock — keyingi commitda O'CHIRILADI
-      const TEMP_FW_KEY = "HFdl0S1sXXxp-14GmSC7Lj9azw-Kmj-TdFWr0kQkqNw"
       try {
-        if (TEMP_FW_KEY && str(b?.key, 80) === TEMP_FW_KEY) ok = true
-        else {
-          const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "")
-          const payload = env.JWT_SECRET && token ? await verifyJwt(token, env.JWT_SECRET) : null
-          if (payload) {
-            const db = env.__db || makeDb(env.DATABASE_URL)
-            const u = await db.one("SELECT phone FROM users WHERE id=?", [Number(payload.sub)]).catch(() => null)
-            const admins = listVar(env.DEV_PHONES).map((s) => (s.startsWith("+") ? s : "+" + s))
-            const ph2 = String(u?.phone || "")
-            if (ph2 && admins.includes(ph2)) ok = true
-          }
+        const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "")
+        const payload = env.JWT_SECRET && token ? await verifyJwt(token, env.JWT_SECRET) : null
+        if (payload) {
+          const db = env.__db || makeDb(env.DATABASE_URL)
+          const u = await db.one("SELECT phone FROM users WHERE id=?", [Number(payload.sub)]).catch(() => null)
+          const admins = listVar(env.DEV_PHONES).map((s) => (s.startsWith("+") ? s : "+" + s))
+          const ph2 = String(u?.phone || "")
+          if (ph2 && admins.includes(ph2)) ok = true
         }
       } catch {}
       if (!ok) return FW_404()
