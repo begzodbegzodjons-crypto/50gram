@@ -13,13 +13,16 @@ jobs:
           sleep 45  # deploy tugashini kutish
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
           BASE="https://50gram.begzodbegzodjons.workers.dev"
+          TOK=""
+          cleanup() { if [ -n "$TOK" ]; then curl -s -A "$UA" -H "authorization: Bearer $TOK" -X POST "$BASE/api/auth/logout" -H 'content-type: application/json' -d '{}' >/dev/null || true; fi; }
+          trap cleanup EXIT
           H=$(curl -s -A "$UA" "$BASE/api/health"); echo "health: $H"
           echo "$H" | grep -q '"ok":true' || { echo "FAIL health"; exit 1; }
           # 1) KIRISH (test raqami — dev kod ilova-ichki rejim)
-          O=$(curl -s -A "$UA" -X POST "$BASE/api/auth/otp" -H 'content-type: application/json' -d '{"phone":"998900000002"}')
-          echo "$O" | grep -q '"ok":true' || { echo "FAIL otp"; exit 1; }
+          O=$(curl -s -A "$UA" -X POST "$BASE/api/auth/otp" -H 'content-type: application/json' -d '{"phone":"998900000003"}')
+          echo "$O" | grep -q '"ok":true' || { echo "FAIL otp: $O"; exit 1; }
           CODE=$(echo "$O" | python3 -c "import sys,json;print(json.load(sys.stdin)['dev_code'])")
-          V=$(curl -s -A "$UA" -X POST "$BASE/api/auth/verify" -H 'content-type: application/json' -d "{\"phone\":\"+998900000002\",\"code\":\"$CODE\"}")
+          V=$(curl -s -A "$UA" -X POST "$BASE/api/auth/verify" -H 'content-type: application/json' -d "{\"phone\":\"+998900000003\",\"code\":\"$CODE\"}")
           TOK=$(echo "$V" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
           MYUID=$(echo "$V" | python3 -c "import sys,json;print(json.load(sys.stdin)['user']['id'])")
           AUTH="authorization: Bearer $TOK"
@@ -29,10 +32,10 @@ jobs:
           curl -s -A "$UA" -H "$AUTH" "$BASE/api/chats" | grep -q '"chats"' || { echo "FAIL chats"; exit 1; }
           D=$(curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/chats/direct" -H 'content-type: application/json' -d "{\"user_id\":$MYUID}")
           CID=$(echo "$D" | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])")
-          echo "direct: OK ($CID)"
+          echo "direct: OK"
           M=$(curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/chats/$CID/messages" -H 'content-type: application/json' -d '{"body":"smoke","client_id":"smoke1"}')
           MID=$(echo "$M" | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])")
-          echo "send: OK ($MID)"
+          echo "send: OK"
           curl -s -A "$UA" -H "$AUTH" "$BASE/api/chats/$CID/messages?latest=80" | grep -q '"messages"' || { echo "FAIL msgs"; exit 1; }
           curl -s -A "$UA" -H "$AUTH" "$BASE/api/stories" >/dev/null || { echo "FAIL stories"; exit 1; }
           curl -s -A "$UA" -H "$AUTH" "$BASE/api/lives" >/dev/null || { echo "FAIL lives"; exit 1; }
@@ -40,7 +43,4 @@ jobs:
           curl -s -A "$UA" -H "$AUTH" "$BASE/api/discover" >/dev/null || { echo "FAIL discover"; exit 1; }
           curl -s -A "$UA" -H "$AUTH" "$BASE/api/wallet" | grep -q '"coins"' || { echo "FAIL wallet"; exit 1; }
           curl -s -A "$UA" -H "$AUTH" "$BASE/api/users/$MYUID" | grep -q '"id"' || { echo "FAIL user"; exit 1; }
-          # 3) TOZALASH: iz qoldirmaslik — xabarni o'chir + chiqish (raqam yana bo'sh)
-          curl -s -A "$UA" -H "$AUTH" -X DELETE "$BASE/api/messages/$MID" -H 'content-type: application/json' -d '{}' >/dev/null
-          curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/auth/logout" -H 'content-type: application/json' -d '{}' >/dev/null
-          echo "SMOKE OK — health/auth/me/chats/direct/send/messages/stories/lives/search/discover/wallet/user/cleanup — hammasi jonli prod'da ishlayapti"
+          echo "messages/chats/me/stories/lives/search/discover/wallet/user: OK"
