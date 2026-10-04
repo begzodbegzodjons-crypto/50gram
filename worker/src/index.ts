@@ -200,6 +200,12 @@ const DEF_PERMS = { send: 1, media: 1, stickers: 1, links: 1, polls: 1, invite: 
 const DEF_SET = { signatures: 0, comments: 1, reactions: 1, protect: 0, slow: 0 }
 const MSG_KINDS = new Set(["text", "sticker", "gif", "photo", "video", "voice", "round", "file", "contact", "poll", "location"])
 const NOTIFY_CAP = 40
+// BUILD QOROVUSI (qo'ng'iroq qo'riqxonasi — «o'zgarmas qotirish»): har deploy bilan shu
+// konstanta + web/core.js'dagi __50BUILD + web/sw.js'dagi V BIRGA oshiriladi. Klient har
+// 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
+// tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
+// effekti abadiy yo'qoladi).
+const BUILD_V = "v64"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -2693,6 +2699,12 @@ async function callStatus(c: C) {
   await c.db.run("UPDATE chats SET last_msg_at=? WHERE id=?", [t, ch.id])
   const out = (await enrich(c, [await c.db.one("SELECT * FROM messages WHERE id=?", [mid])]))[0]
   c.wait(notify(c.env, [call.caller_id, call.callee_id], { type: "message", chat_id: ch.id, message: out }))
+  // PROAKTIV YOPISH («qotib turibdi» ildizi): chaqiruvchi kutish vaqtini tugatib yuborsa /
+  // bekor qilsa — qabul qiluvchining jiringlash ekrani o'z 65s taymerigacha QOLMASDI (WS
+  // zombi bo'lsa 'hangup' signali ham yetmasdi). Endi server o'lgan qo'ng'iroqni IKKALA
+  // tomonga xabar qiladi — klient jiringlashni zudlik bilan yopadi (faqat hali javob
+  // berilmagan holatda; faol qo'ng'iroq 'hangup' orqali yopilaveradi).
+  c.wait(notify(c.env, [call.caller_id, call.callee_id], { type: "call_closed", call_id: call.id, status: final }))
   return json({ ok: true })
 }
 
@@ -3169,6 +3181,9 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/avatar/u/:id", (c) => avatar(c, "users"), true],
   ["GET", "/avatar/c/:id", (c) => avatar(c, "chats"), true],
   ["GET", "/health", async () => json({ ok: true, app: "50 Gram" }), true],
+  // BUILD QOROVUSI: klient (core.js) versiyasini tekshiradi — mos kelmasa o'zi yangilanadi.
+  // Ochiq (auth'siz): kirish ekranida ham eski kod yangilanib qolsin. Keshlanmaydi.
+  ["GET", "/build", async () => json({ v: BUILD_V, now: now() }), true],
   ["GET", "/me", getMe],
   ["PATCH", "/me", patchMe],
   ["POST", "/ping", async (c) => { const t = now(); await c.db.run("UPDATE users SET last_seen=?, token_exp=? WHERE id=?", [t, t + 180 * 86400 * 1000, c.uid]); return json({ ok: true, now: t }) }],

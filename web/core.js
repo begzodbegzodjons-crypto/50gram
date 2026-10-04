@@ -684,17 +684,34 @@ function logout(silent) {
 }
 
 // ---------------- REAL-TIME ----------------
-let wsRetry = 1000, pingT = 0
+// QO'NG'IROQ QO'RIQHONASI — 1-QALQON: WS PONG QOROVUSI.
+// ILDIZ («avval ishlar, keyin o'zi buzilardi»): klient har 25s 'ping' yuborardi LEKIN
+// 'pong' qaytishini HECH QACHON tekshirmasdi. Mobil tarmoq o'zgarganda (Wi-Fi↔mobil,
+// NAT timeout, WebView uxlashi) soket JIM o'ladi: readyState 1-da qolaveradi, onclose
+// MINUTLAR davomida kelmaydi — ilova «ulanagan» deb xato hisoblab yuradi va barcha
+// hodisalar (QO'NG'IROQ!) yo'qolardi. Endi: har kelgan xabar 'lastWsRecv'ni yangilaydi;
+// 55s davomida HECH NARSA kelmasa (2 ta ping'ga javob yo'q) — soket O'LIK deb e'lon
+// qilinadi, majburiy yopiladi va DARHOL qayta ulanadi. Zombi-WS endi 1 daqiqadan
+// kechikmay topiladi — bu qatlam boshqa hech qachon «jonli ko'rinuvchi o'lik» holatga qaytmaydi.
+let wsRetry = 1000, pingT = 0, lastWsRecv = 0
 function wsConnect() {
   if (!S.token) return
   try {
     const ws = new WebSocket(API.replace(/^http/, 'ws') + '/ws?token=' + encodeURIComponent(S.token))
     S.ws = ws
-    ws.onopen = () => { S.wsOk = true; wsRetry = 1000; setConn(); syncAll(); try { window.__50wsOpen && window.__50wsOpen() } catch {} }
-    ws.onmessage = (e) => { let ev; try { ev = JSON.parse(e.data) } catch { return } if (ev.type !== 'pong') dispatch(ev) }
-    ws.onclose = () => { S.wsOk = false; setConn(); if (S.token) setTimeout(wsConnect, wsRetry); wsRetry = Math.min(wsRetry * 2, 20000) }
+    ws.onopen = () => { S.wsOk = true; wsRetry = 1000; lastWsRecv = Date.now(); setConn(); syncAll(); try { window.__50wsOpen && window.__50wsOpen() } catch {} }
+    ws.onmessage = (e) => { lastWsRecv = Date.now(); let ev; try { ev = JSON.parse(e.data) } catch { return } if (ev.type !== 'pong') dispatch(ev) }
+    ws.onclose = () => { S.wsOk = false; setConn(); if (S.ws === ws) S.ws = null; if (S.token) setTimeout(wsConnect, wsRetry); wsRetry = Math.min(wsRetry * 2, 20000) }
     ws.onerror = () => {}
-    clearInterval(pingT); pingT = setInterval(() => { try { ws.readyState === 1 && ws.send('ping') } catch {} }, 25000)
+    clearInterval(pingT); pingT = setInterval(() => {
+      try {
+        if (ws.readyState !== 1) return
+        ws.send('ping')
+        // PONG QOROVUSI: 2 ta ping'ga ham javob (yoki istalgan xabar) kelmagan — O'LIK soket.
+        // Majburiy close() → onclose → zudlik bilan qayta ulanish + __50wsOpen pending-call tortadi.
+        if (lastWsRecv && Date.now() - lastWsRecv > 55000) { try { ws.close() } catch {} }
+      } catch {}
+    }, 25000)
   } catch { setTimeout(wsConnect, 5000) }
 }
 function setConn() { $('conn').textContent = S.wsOk ? '' : navigator.onLine ? 'ulanmoqda…' : 'internet yo‘q' }
@@ -856,6 +873,12 @@ async function startApp() {
   setInterval(() => { if (!document.hidden) post('/ping').catch(() => {}) }, 45000)
   setInterval(() => { if (!document.hidden) { loadStories().catch(() => {}); loadLives() } }, 60000)
   setInterval(() => { for (const [k, t] of S.typing) if (t.until < Date.now()) { S.typing.delete(k); scheduleChats(); if (S.cur === k) renderHeader() } }, 1500)
+  // BUILD QOROVUSI: har 90s server versiyasini tekshirish (mos kelmasa — o'zi yangilanadi).
+  // Qo'ng'iroq oynasida kutiladi — endCall'dan keyin zudlik bilan tekshiriladi.
+  setInterval(() => { if (!document.hidden) checkBuildSafe() }, 90000)
+  // Service Worker'ni ham tezlashtiramiz: yangi versiya navbatda turib qolmasin
+  if ('serviceWorker' in navigator) setInterval(() => { try { navigator.serviceWorker.getRegistration().then((r) => r && r.update && r.update().catch(() => {})) } catch {} }, 300000)
+  checkBuildSafe()
   handleHash()
   // Trend videolari fonda tayyorlanadi — Reels bo'limi ochilganda DARHOL qiziq videolar chiqadi
   setTimeout(() => { try { window.warmTrend && window.warmTrend() } catch {} }, 1800)
@@ -874,7 +897,7 @@ async function startApp() {
 }
 window.addEventListener('online', () => { setConn(); if (!S.wsOk) wsConnect() })
 window.addEventListener('offline', setConn)
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.token) { g50SoftUpdate(); poll(); if (S.cur) markRead(S.cur) } })
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.token) { g50SoftUpdate(); checkBuildSafe(); poll(); if (S.cur) markRead(S.cur) } })
 // Task 39: APK/brauzer ESKI sahifani xotirada saqlab qolmasin — 5 soatdan eski ochiq sahifa
 // qayta yuklanadi (yangi versiya + TEST rejimi banneri darhol ko'rinadi). Faol qo'ng'iroq/efir
 // yoki ochiq oyna paytida hech qachon uzilmaydi — keyingi qaytishda yangilanadi.
@@ -889,7 +912,49 @@ function g50SoftUpdate() {
   } catch {}
 }
 // APK ilovadan qaytganda: darhol sinxronlash va uzilgan WS'ni tiklash (MainActivity.onResume chaqiradi)
-window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); poll(); if (S.cur) markRead(S.cur); if (!S.ws || S.ws.readyState === 3) wsConnect() } catch {} }
+window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkBuildSafe(); poll(); if (S.cur) markRead(S.cur); if (!S.ws || S.ws.readyState === 3) wsConnect() } catch {} }
+
+// ---------------- BUILD QOROVUSI (qo'ng'iroq qo'riqxonasi — 2-QALQON: «o'zgarmas qotirish») ----------------
+// ILDIZ («avval ishlar, keyin o'zi buzilardi» — 2-sabab): har tuzatish serverga yetardi,
+// LEKIN ochiq turgan sahifa/APK WebView kunlab ESKI JS bilan ishlayverardi (service worker
+// yangilansa ham ishlayotgan sahifa o'zi qayta yuklanmaydi) — foydalanuvchiga tuzatish
+// YETMASDI. Endi: serverdagi BUILD_V bilan klientdagi __50BUILD solishtiriladi — mos
+// kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
+// Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
+// mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
+window.__50BUILD = 'v64'
+let buildMismatch = 0, buildBusy = false, buildConfT = 0
+window.__50buildCheck = async () => {
+  if (buildBusy) return
+  buildBusy = true
+  try {
+    const r = await fetch(API + '/build', { cache: 'no-store' }).catch(() => null)
+    if (!r || !r.ok) return
+    const j = await r.json().catch(() => null)
+    const v = String((j && j.v) || '')
+    if (!v) return
+    if (v === window.__50BUILD) { buildMismatch = 0; clearTimeout(buildConfT); buildConfT = 0; return }
+    // Mos kelmadi: 1-marta — 25s'dan keyin tasdiqlash so'rovi; 2-marta — yangilanish
+    buildMismatch++
+    if (buildMismatch >= 2) g50ReloadNew()
+    else if (!buildConfT) buildConfT = setTimeout(() => { buildConfT = 0; window.__50buildCheck() }, 25000)
+  } finally { buildBusy = false } // EARLY RETURN'da ham bayroq ochiladi — qorovul abadiy o'lmaydi
+}
+function checkBuildSafe() { try { window.__50buildCheck && window.__50buildCheck() } catch {} }
+function g50ReloadNew() {
+  try {
+    if (document.hidden) return // yashirin holatda emas — ko'rinishda tekshiriladi
+    if (typeof CALL !== 'undefined' && CALL) return // QO'NG'IROQ paytida hech qachon
+    if (typeof LIVE !== 'undefined' && LIVE) return // jonli efir paytida hech qachon
+    if (qs('.shbg')) return // ochiq oyna/paneld paytida
+    const t = +(localStorage.getItem('g50_breload') || 0)
+    if (Date.now() - t < 120000) return // LOOP-HIMOYA: so'nggi 2 daqiqada yangilangan bo'lsa kutamiz
+    localStorage.setItem('g50_breload', String(Date.now()))
+    buildMismatch = 0
+    toast('Ilova yangilanmoqda…')
+    setTimeout(() => location.reload(), 700)
+  } catch {}
+}
 window.addEventListener('hashchange', handleHash)
 async function handleHash() {
   const h = decodeURIComponent(location.hash.slice(1))

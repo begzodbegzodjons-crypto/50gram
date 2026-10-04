@@ -153,7 +153,8 @@ async function callUser(uid, video) {
   if (uid === S.me.id) return
   let peer = S.users.get(uid)
   if (!peer) try { peer = await api('/users/' + uid); S.users.set(uid, peer) } catch (e) { return toast('⚠️ ' + e.message) }
-  CALL = { peer, video: !!video, outgoing: true, ice: [], el: callUI(peer, video, 'Ulanmoqda…') }
+  // t0 — qorovul uchun; ringMode — qorovul jiringlashni to'g'ri rejimda qayta yoqadi
+  CALL = { peer, video: !!video, outgoing: true, ice: [], el: callUI(peer, video, 'Ulanmoqda…'), t0: Date.now(), ringMode: '' }
   startSigPoll() // qo'ng'iroq davomida navbat-polling: WS zombi bo'lsa ham signallar yetadi
   callButtons('active')
   ringTone(true) // JIRINGLASH DARHOL: tarmoq javobini kutmasdan — bosgan paytdanoq eshitiladi
@@ -210,6 +211,19 @@ document.addEventListener('visibilitychange', () => {
   // APK/PWA fonga kirib-chiqqanda WebView mediani to'xtatishi mumkin — qo'ng'iroq ovozini
   // va rasmni qayta ishga tushiramiz (aks holda qo'ng'iroq «qotib qoldi»day tuyuladi)
   if (!document.hidden && CALL) { try { playRemote(CALL) } catch {} }
+  // QO'NG'IROQ QO'RIQHONASI — 4-QALQON: fonga kirganda brauzer taymerlarni 1 daqiqagacha
+  // sekinlashtirishi mumkin. Qaytganda: (a) jiringlash davom etsin, (b) qo'ng'iroq YO'Q
+  // bo'lsa DARHOL pending tekshiruv — fon'da kechikkanning o'rnini bir zumda to'laydi.
+  if (!document.hidden && S.token) {
+    if (CALL) {
+      if (!CALL.started && CALL.ringMode && !ringTimer) ringTone(true, CALL.ringMode || undefined)
+      try { if (ringCtx && ringCtx.state === 'suspended') ringCtx.resume().catch(() => {}) } catch {}
+    } else {
+      api('/calls/pending').then((r) => {
+        if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, started_at: r.call.started_at, from: r.call.from })
+      }).catch(() => {})
+    }
+  }
 })
 function incomingCall(ev) {
   if (CALL) { sig(ev.from.id, { k: 'busy', call_id: ev.call_id }); return }
@@ -227,7 +241,7 @@ function incomingCall(ev) {
   }
   S.users.set(ev.from.id, { ...(S.users.get(ev.from.id) || {}), ...ev.from })
   const peer = S.users.get(ev.from.id)
-  CALL = { id: ev.call_id, peer, video: !!ev.video, outgoing: false, ice: [], el: callUI(peer, ev.video, ev.video ? 'Video qo‘ng‘iroq…' : 'Qo‘ng‘iroq…') }
+  CALL = { id: ev.call_id, peer, video: !!ev.video, outgoing: false, ice: [], el: callUI(peer, ev.video, ev.video ? 'Video qo‘ng‘iroq…' : 'Qo‘ng‘iroq…'), t0: Date.now(), ringMode: 'in' }
   startSigPoll() // qo'ng'iroq davomida navbat-polling: WS zombi bo'lsa ham signallar yetadi
   CALL.el.classList.add('incoming')
   callButtons('incoming')
@@ -252,6 +266,44 @@ setInterval(() => {
     if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, started_at: r.call.started_at, from: r.call.from })
   }).catch(() => {})
 }, 6000)
+// ---------------- QO'NG'IROQ QO'RIQHONASI — 3-QALQON: UMUMJON QOROVUL (muzlash mumkin emas) ----------------
+// ILDIZ: qo'ng'iroq holati 6 xil taymerga tayanardi (timeout, connWatch, connWatch2, dropT,
+// sigPoll, ringTimer). OS ularni fonda sekinlashtirsa/uxlatib qo'ysa — hech kim holatni
+// qayta tiklamasdi va oyna ABADIY «Ulanmoqda…»/jiringlashda osilib qolardi. Endi har 5s
+// BITTA mustaqil qorovul holatni TEKSHIRIB TO'G'RILAYDI: har qanday uzilishdan keyin
+// qo'ng'iroq 5s ichida «ulangan» yoki «toza yopilgan» holatga keladi — bu kafolat.
+setInterval(() => {
+  const C = CALL
+  if (!C) return
+  try {
+    // 1) DOM BUTUNLIGI: oyna tasodifan DOM'dan o'chgan bo'lsa — holatni toza bo'shatamiz
+    if (!document.body.contains(C.el)) { endCall('ended', false); return }
+    // 2) VAQT BUDJETI: hali ulanmagan qo'ng'iroq — taymerlar muzlagan bo'lsa ham oyna aniq
+    //    yopiladi. Jiringlash: t0+75s (taymer 65s'da o'zi yopadi — bu zaxira). Javob
+    //    berilgach ulanish: acceptAt+30s (getMedia 12s + signal ~6s — 30s graziya yetarli).
+    if (!C.started) {
+      const deadline = C.acceptAt ? C.acceptAt + 30000 : (C.t0 || 0) + 75000
+      if (Date.now() > deadline) { endCall('missed', true, C.acceptAt ? 'Ulanib bo‘lmadi' : 'Javob berilmadi'); return }
+    }
+    // 3) PC SALOMATLIGI: faol qo'ng'iroqda ulanish 'failed' — 3 martagacha yangi ICE bilan
+    //    tiklash, 25s davom etmasa aniq xato bilan yopish (abadiy «Qayta ulanmoqda…» yo'q)
+    const pcs = C.pc ? C.pc.connectionState : ''
+    if (C.started && C.pc && pcs === 'failed') {
+      if (!C.failAt) C.failAt = Date.now()
+      C.failTries = (C.failTries || 0) + 1
+      if (C.failTries <= 3 && !C.restaring) {
+        C.restaring = true
+        setCallState('Qayta ulanmoqda…')
+        Promise.resolve(restartIce(C, true)).catch(() => {}).finally(() => { C.restaring = false })
+      } else if (Date.now() - C.failAt > 25000) { endCall('missed', true, 'Aloqa yo‘q — internetni tekshirib, qayta urinib ko‘ring'); return }
+    } else if (pcs === 'connected') { C.failAt = 0; C.failTries = 0 }
+    // 4) JIRINGLASH QOROVUSI: kirish qo'ng'irog'i ko'rinib turganda ovoz JIM bo'lib qolsa
+    //    (OS AudioContext'ni uxlatgan / boshqa oqim o'chirgan) — o'z-o'zidan jonlanadi.
+    //    Faqat JAVOB BERILMAGAN holatda (ringMode saqlangan) — javob berilgach hech qachon.
+    if (!C.started && C.ringMode && !ringTimer) ringTone(true, C.ringMode || undefined)
+    try { if (ringCtx && ringCtx.state === 'suspended') ringCtx.resume().catch(() => {}) } catch {}
+  } catch {}
+}, 5000)
 // WS qayta ulanganda: WS uzilgan paytda kelgan qo'ng'iroq bo'lsa — darhol qo'ng'iroq oynasi
 window.__50wsOpen = async () => {
   // MUHIM: qo'ng'iroq davomida (CALL bor) HAM davom etish kerak — avvalgi `if (CALL) return`
@@ -274,6 +326,8 @@ window.__50wsOpen = async () => {
 }
 async function acceptCall() {
   const C = CALL; if (!C) return
+  C.ringMode = '' // javob berildi — qorovul endi jiringlamaydi (faqat javob berilmaganida qayta yoqadi)
+  C.acceptAt = Date.now() // qorovul: javob berilgach ulanishga alohida 30s graziya
   ringTone(false); clearTimeout(C.timeout)
   setCallState('Ulanmoqda…')
   callButtons('active')
@@ -386,6 +440,7 @@ async function flushIce(C) { for (const c of C.ice.splice(0)) try { await C.pc.a
 function endCall(status = 'ended', report = true, msg) {
   const C = CALL; if (!C) return
   CALL = null
+  C.ringMode = '' // qorovul endi jiringlamaydi
   stopSigPoll() // navbat-polling to'xtasin
   ringTone(false)
   nativeCallCancel() // APK: qo'ng'iroq bildirishnomasini yopish
@@ -404,6 +459,9 @@ function endCall(status = 'ended', report = true, msg) {
   qs('.cbar', C.el).innerHTML = ''
   // Xato sababi ko‘rinib tursin — darhol yo‘qolmasin (oddiy yopilish 1.2s, xato 3.2s)
   setTimeout(() => C.el.remove(), msg ? 3200 : 1200)
+  // BUILD QOROVUSI: qo'ng'iroq tugagach versiyani tekshirish — navbatdagi yangilanish
+  // keyingi 90s kutishsiz DARHOL qo'llanadi (qo'ng'iroq paytida hech qachon yuklanmaydi)
+  try { window.__50buildCheck && window.__50buildCheck() } catch {}
 }
 
 // ---------------- SIGNAL NAVBAT-POLLING (hal qiluvchi zaxira yo'l) ----------------
@@ -484,6 +542,18 @@ async function handleSignalEv(ev) {
   } catch (e) { console.warn('signal', e) }
 }
 on('signal', handleSignalEv)
+// SERVERDAN PROAKTIV YOPISH (qo'ng'iroq qo'riqxonasi — 5-QALQON): qarshi tomon javob
+// bermadi/bekor qildi — server yakuniy status yozganda IKKALA tomonga 'call_closed'
+// yuboradi. Jiringlash ekrani ~1s ichida yopiladi (avval o'z 65s taymerigacha qolardi;
+// WS zombi bo'lsa 'hangup' signali umuman yetmasdi — bu endi muhim emas, chunki zombi
+// WS 1 daqiqada topiladi va jiringlash qorovuli server ma'lumotiga tayanadi).
+on('call_closed', (ev) => {
+  const C = CALL
+  if (!C || !ev || !ev.call_id) return
+  if (String(C.id) !== String(ev.call_id)) return
+  if (C.started) return // faol qo'ng'iroq odatdagi 'hangup' orqali yopiladi
+  endCall('missed', false, ev.status === 'declined' ? 'Rad etildi' : 'Javob berilmadi')
+})
 
 // Qo'ng'iroq ohangi (fayl kerak emas — WebAudio, 0 KB)
 // RINGTON 2.0 (foydalanuvchi: «chiroyliroq rington, ovozi BALAND bo'lsin»):
