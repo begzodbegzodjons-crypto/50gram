@@ -13,7 +13,7 @@ async function openChatInfo(id) {
   S.chats.set(id, { ...S.chats.get(id), ...c })
   const adm = isAdmC(c), owner = c.role === 'owner', ch = c.type === 'channel'
   const joined = c.joined !== false
-  const sh = sheet(`<div class="prof">${bigAvatar(c, 110, { chat: true, cam: adm })}<h2>${ch ? '📢' : '👥'} ${esc(c.title)}</h2><div class="mut">${c.member_count || 0} ${ch ? 'obunachi' : 'a‘zo'} · ${c.is_public ? 'ochiq' : 'yopiq'}</div></div>
+  const sh = sheet(`<div class="prof">${bigAvatar(c, 110, { chat: true, cam: adm })}<h2>${ch ? '📢' : '👥'} ${esc(c.title)}</h2><div class="mut">${c.member_count || 0} ${ch ? 'obunachi' : 'a‘zo'} · ${c.is_public ? 'ochiq' : 'yopiq'}</div>${c.avatar_ver ? '<small class="mut" style="opacity:.75">🖼 Rasmni katta ko‘rish uchun ustiga bosing</small>' : ''}</div>
     ${c.description ? `<div class="hint">${linkify(c.description)}</div>` : ''}
     ${rowsHTML([
       c.username || c.invite_hash ? row('link', '🔗', esc(inviteLink(c)), 'Havola — bosib nusxa oling') : '',
@@ -23,7 +23,7 @@ async function openChatInfo(id) {
       adm && c.join_approval ? row('requests', '📬', 'Qo‘shilish so‘rovlari', c.requests ? String(c.requests.length || c.requests) : '') : '',
       (adm || (!ch && c.permissions?.invite)) && joined ? row('add', '➕', 'A‘zo qo‘shish') : '',
     ])}
-    ${adm ? rowsHTML([row('edit', '✏️', 'Tahrirlash', 'Nom, tavsif, rasm, username'), row('announce', '📣', ch ? 'E’lon yuborish' : 'Xabar yozish', ch ? 'Obunachilarga darhol yetkaziladi' : 'Guruhga yangilik joylash'), row('stats', '📊', 'Statistika', 'A’zolar, xabarlar, ko‘rishlar'), row('type', c.is_public ? '🌐' : '🔒', ch ? 'Kanal turi' : 'Guruh turi', c.is_public ? 'Ochiq — qidiruvda ko‘rinadi' : 'Yopiq — faqat havola orqali'), !ch ? row('perms', '🛡', 'Ruxsatlar', 'A‘zolar nima qila oladi') : '', row('settings', '⚙️', 'Sozlamalar', ch ? 'Imzo, reaksiyalar, himoya' : 'Sekin rejim, reaksiyalar, himoya'), row('revoke', '♻️', 'Havolani yangilash', 'Eski havola ishlamay qoladi')]) : ''}
+    ${adm ? rowsHTML([row('grow', '📣', ch ? 'Obunachi yig‘ish' : 'A‘zo yig‘ish', 'Havolani ulashib odamlarni taklif qiling'), row('edit', '✏️', 'Tahrirlash', 'Nom, tavsif, rasm, username'), row('announce', '📣', ch ? 'E’lon yuborish' : 'Xabar yozish', ch ? 'Obunachilarga darhol yetkaziladi' : 'Guruhga yangilik joylash'), row('stats', '📊', 'Statistika', 'A’zolar, xabarlar, ko‘rishlar'), row('type', c.is_public ? '🌐' : '🔒', ch ? 'Kanal turi' : 'Guruh turi', c.is_public ? 'Ochiq — qidiruvda ko‘rinadi' : 'Yopiq — faqat havola orqali'), !ch ? row('perms', '🛡', 'Ruxsatlar', 'A‘zolar nima qila oladi') : '', row('settings', '⚙️', 'Sozlamalar', ch ? 'Imzo, reaksiyalar, himoya' : 'Sekin rejim, reaksiyalar, himoya'), row('revoke', '♻️', 'Havolani yangilash', 'Eski havola ishlamay qoladi')]) : ''}
     ${rowsHTML([joined ? row('export', '📥', 'Tarixni zaxiralash', 'Chat tarixini .txt faylga yuklab olish') : '', joined && adm ? row('clear', '🧹', 'Suhbatni tozalash', 'Barcha xabarlar hamma uchun o‘chiriladi', 'red') : ''])}
     ${rowsHTML([
       !joined ? row('join', '✅', ch ? 'Obuna bo‘lish' : 'Qo‘shilish') : '',
@@ -32,10 +32,14 @@ async function openChatInfo(id) {
     ])}`)
   const cam = qs('[data-cam]', sh)
   if (cam) cam.onclick = (e) => { e.stopPropagation(); setChatAvatar(c, sh) }
+  // Rasm ustiga bosilsa (kamera belgisiga emas) — Telegramdagi kabi TO‘LIQ EKRAN katta ko‘rish
+  const pav = qs('.bigav', sh)
+  if (pav) pav.onclick = (e) => { if (!e.target.closest('[data-cam]') && c.avatar_ver) { e.stopPropagation(); viewPhoto(avSrc(c, true), c.title, `${c.member_count || 0} ${ch ? 'obunachi' : 'a‘zo'} · ${c.is_public ? 'ochiq' : 'yopiq'}`) } }
   sh.onclick = async (e) => {
     const it = e.target.closest('[data-a]'); if (!it) return
     const a = it.dataset.a
     if (a === 'link') { copy(inviteLink(c)); share(c.title, inviteLink(c)) }
+    if (a === 'grow') { copy(inviteLink(c)); share(`${c.title} — 50 Gram'dagi ${ch ? 'kanalimizga obuna bo‘ling' : 'guruhimizga qo‘shiling'}!`, inviteLink(c)); toast('📋 Havola nusxalandi — ulashing va obunachi yig‘ing!') }
     if (a === 'mute') { closeSheet(sh); toggleMute(S.chats.get(id) || c) }
     if (a === 'pinchat') tryDo(async () => { const r2 = await post(`/chats/${id}/pin`, { on: !c.pinned }); S.chats.set(id, { ...S.chats.get(id), pinned: r2.pinned }); closeSheet(sh); renderChats(); toast(r2.pinned ? '📌 Qadaldi — endi ro‘yxat boshida' : 'Qadash olindi') })
     if (a === 'members') membersSheet(c)
@@ -275,21 +279,33 @@ $('b-create').onclick = () => {
 }
 
 // ---------------- Kanallar bo'limi ----------------
+// REYTING MANTIQI (foydalanuvchi talabi):
+//  • «Mening kanal va guruhlarim» — O'ZI OCHGAN KANAL 1-O'RINDA (egasi → admin → a'zo), so'ng obunachilar soni bo'yicha;
+//  • «Trend kanallar» — BARCHA ochiq kanallar obunachilar soni KAMAYISH tartibida: eng trendlisi 1-chi (🥇), pastroqlari kamroq obunachi;
+//  • Ro'yxat raqamlangan bo'ladi va «Yana ko'rsatish» bilan to'liq ochiladi (serverda 200 tagacha).
 let discoverCache = null
+let discShow = 30
+let chanDrawRef = null
 async function renderChannels() {
   const box = $('chanlist')
-  const mine = [...S.chats.values()].filter((c) => c.type !== 'direct' && c.joined !== false).sort((a, b) => (b.last_msg_at || 0) - (a.last_msg_at || 0))
-  const item = (c) => `<div class="item" data-ch="${c.id}">${avHTML(c, 50, { chat: true })}<div class="mid"><div class="t1"><b>${c.type === 'channel' ? '📢' : '👥'} ${esc(c.title)}</b>${c.role === 'owner' ? '<span class="tagc">egasi</span>' : c.role === 'admin' ? '<span class="tagc">admin</span>' : ''}</div><div class="t2"><span>${c.member_count || 0} ${c.type === 'channel' ? 'obunachi' : 'a‘zo'}${c.username ? ' · @' + esc(c.username) : ''}</span>${c.unread ? `<span class="cnt">${c.unread}</span>` : ''}</div></div></div>`
+  const roleW = (c) => (c.role === 'owner' ? 0 : c.role === 'admin' ? 1 : 2)
+  const mine = [...S.chats.values()].filter((c) => c.type !== 'direct' && c.joined !== false)
+    .sort((a, b) => roleW(a) - roleW(b) || (b.member_count || 0) - (a.member_count || 0) || (b.last_msg_at || 0) - (a.last_msg_at || 0))
+  const item = (c, rank) => `<div class="item" data-ch="${c.id}">${rank ? `<span class="rankb p${rank <= 3 ? rank : 'n'}">${rank}</span>` : ''}${avHTML(c, 50, { chat: true })}<div class="mid"><div class="t1"><b>${c.type === 'channel' ? '📢' : '👥'} ${esc(c.title)}</b>${c.role === 'owner' ? '<span class="tagc">👑 egasi</span>' : c.role === 'admin' ? '<span class="tagc">⭐ admin</span>' : ''}</div><div class="t2"><span>${c.member_count || 0} ${c.type === 'channel' ? 'obunachi' : 'a‘zo'}${c.username ? ' · @' + esc(c.username) : ''}</span>${c.unread ? `<span class="cnt">${c.unread}</span>` : ''}</div></div></div>`
   const draw = () => {
-    const disc = (discoverCache || []).filter((c) => !S.chats.get(c.id) || S.chats.get(c.id).joined === false)
-    box.innerHTML = (mine.length ? `<div class="sec">Mening kanal va guruhlarim</div>${mine.map(item).join('')}` : `<div class="empty"><span class="big">📢</span>Kanal yoki guruh yarating — yuqoridagi ➕ tugmasi</div>`) +
-      (disc.length ? `<div class="sec">Ommabop ochiq kanallar</div>${disc.map(item).join('')}` : discoverCache ? '' : '<div class="spin"></div>')
+    chanDrawRef = draw
+    const all = discoverCache || []
+    const disc = all.filter((c) => !S.chats.get(c.id) || S.chats.get(c.id).joined === false)
+    const shown = disc.slice(0, discShow)
+    box.innerHTML = (mine.length ? `<div class="sec">Mening kanal va guruhlarim</div>${mine.map((c) => item(c, 0)).join('')}` : `<div class="empty"><span class="big">📢</span>Kanal yoki guruh yarating — yuqoridagi ➕ tugmasi. Siz ochgan kanal doim birinchi turadi!</div>`) +
+      (all.length ? `<div class="sec">🔥 Trend kanallar — reyting (obunachilar soni bo‘yicha)</div>${shown.map((c) => item(c, all.indexOf(c) + 1)).join('')}${disc.length > shown.length ? `<button class="btn gh big" data-more>⬇️ Yana ko‘rsatish (${disc.length - shown.length} ta)</button>` : ''}` : discoverCache ? '' : '<div class="spin"></div>')
   }
   draw()
   try { discoverCache = await api('/discover') } catch { discoverCache = [] }
   draw()
 }
 $('chanlist').addEventListener('click', (e) => {
+  if (e.target.closest('[data-more]')) { discShow += 30; if (chanDrawRef) chanDrawRef(); return }
   const it = e.target.closest('[data-ch]'); if (!it) return
   const id = +it.dataset.ch
   const c = S.chats.get(id)
@@ -347,6 +363,8 @@ async function refreshMeBadges() {
 }
 $('melist').addEventListener('click', async (e) => {
   if (e.target.closest('[data-cam]')) { e.stopPropagation(); return changeMyAvatar() }
+  // O'z rasmingiz ustiga bosilsa — to'liq ekran katta ko'rish (kamera belgisiga emas)
+  if (e.target.closest('.bigav') && S.me && S.me.avatar_ver) { e.stopPropagation(); return viewPhoto(avSrc(S.me, false), uname(S.me), S.me.username ? '@' + S.me.username : esc(S.me.phone || '')) }
   const it = e.target.closest('[data-a],[data-pg]'); if (!it) return
   const a = it.dataset.a || it.dataset.pg
   if (a === 'acc') pgAccount()
@@ -379,6 +397,7 @@ function pgAccount() {
     <button class="btn big" id="ac-s">Saqlash</button>${u.avatar_ver ? '<button class="btn gh big" id="ac-x">Profil rasmini o‘chirish</button>' : ''}`,
   (p) => {
     const cam = qs('[data-cam]', p); if (cam) cam.onclick = (e) => { e.stopPropagation(); changeMyAvatar() }
+    const pav = qs('.bigav', p); if (pav) pav.onclick = (e) => { if (!e.target.closest('[data-cam]') && u.avatar_ver) { e.stopPropagation(); viewPhoto(avSrc(u, false), uname(u), u.username ? '@' + u.username : '') } }
     qs('#ac-s', p).onclick = () => tryDo(async () => { setMe(await patch('/me', { first_name: qs('#ac-f', p).value, last_name: qs('#ac-l', p).value, bio: qs('#ac-b', p).value, username: qs('#ac-u', p).value.trim() })); renderMe(); toast('✅ Profil saqlandi') }, '✅ Saqlandi')
     const x = qs('#ac-x', p); if (x) x.onclick = () => tryDo(async () => { setMe(await patch('/me', { avatar: null })); renderMe(); renderChats(); closePage(p) }, 'Rasm o‘chirildi')
   })
@@ -588,6 +607,7 @@ function editMeSheet() {
     <div class="hint">Username orqali sizni raqamsiz topishadi: 50gram…/#@username</div>
     <button class="btn big" id="em-s">Saqlash</button>${u.avatar_ver ? '<button class="btn gh big" id="em-x">Profil rasmini o‘chirish</button>' : ''}`)
   const cam = qs('[data-cam]', sh); if (cam) cam.onclick = (e) => { e.stopPropagation(); closeSheet(sh); changeMyAvatar() }
+  const pav = qs('.bigav', sh); if (pav) pav.onclick = (e) => { if (!e.target.closest('[data-cam]') && u.avatar_ver) { e.stopPropagation(); viewPhoto(avSrc(u, false), uname(u), u.username ? '@' + u.username : '') } }
   qs('#em-s', sh).onclick = () => tryDo(async () => { setMe(await patch('/me', { first_name: qs('#em-f', sh).value, last_name: qs('#em-l', sh).value, bio: qs('#em-b', sh).value, username: qs('#em-u', sh).value.trim() })); closeSheet(sh); renderMe() }, '✅ Saqlandi')
   const x = qs('#em-x', sh); if (x) x.onclick = () => tryDo(async () => { setMe(await patch('/me', { avatar: null })); closeSheet(sh); renderMe(); renderChats() }, 'Rasm o‘chirildi')
 }

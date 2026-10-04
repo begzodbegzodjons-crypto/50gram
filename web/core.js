@@ -436,6 +436,21 @@ function bigAvatar(u, size = 120, opt = {}) {
   } else inner = avHTML(u, size, { ...opt, noStory: true })
   return `<div class="bigav" style="width:${size}px;height:${size}px">${inner}${opt.cam ? '<span class="cam" data-cam="1">📷</span>' : ''}</div>`
 }
+// Avatar to'liq manzili (katta ko'rish uchun) — chat: true bo'lsa kanal/guruh rasmi
+function avSrc(o, chat) {
+  return o && o.avatar_ver ? `${API}/avatar/${chat ? 'c' : 'u'}/${o.id}?v=${o.avatar_ver}` : ''
+}
+// Telegram-uslubidagi to'liq ekran rasm ko'rish: profil/kanal rasmini ustiga bosganda
+// qora fon, markazda KATTA rasm, tepada ism va yopish tugmasi. Bosilsa yoki ✕ bosilsa yopiladi.
+function viewPhoto(src, title = '', sub = '') {
+  if (!src) return
+  const o = document.createElement('div')
+  o.className = 'over imgview pav'
+  o.innerHTML = `<div class="pav-top"><div class="pav-n"><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</div><button class="xb">✕</button></div><img src="${src}" alt="">`
+  o.onclick = (e) => { if (!e.target.closest('.pav-top') && e.target.tagName !== 'IMG') o.remove() }
+  qs('.xb', o).onclick = () => o.remove()
+  document.body.appendChild(o)
+}
 document.addEventListener('click', (e) => {
   // Efirdagi foydalanuvchi avatariga bosilsa — efirga ulanish (chat/istoriya/kontakt qayerida bo'lsa ham)
   const la = e.target.closest('[data-liveav]')

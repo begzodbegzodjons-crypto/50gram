@@ -946,7 +946,7 @@ async function openUser(uid, opt = {}) {
   try { u = await api('/users/' + uid) } catch (e) { return toast('⚠️ ' + e.message) }
   S.users.set(u.id, u)
   const isC = (S.contacts || []).some((k) => k.user && k.user.id === u.id)
-  const sh = sheet(`<div class="prof">${bigAvatar(u, 116, { live: !!u.live_id, liveId: u.live_id })}<h2>${esc(uname(u))}</h2><div class="mut">${esc(lastSeen(u))}${u.live_id ? ' · 🔴 hozir efirda' : ''}</div></div>
+  const sh = sheet(`<div class="prof">${bigAvatar(u, 116, { live: !!u.live_id, liveId: u.live_id })}<h2>${esc(uname(u))}</h2><div class="mut">${u.lvl ? `<span class="lvlbadge" style="display:inline-flex;margin-right:6px">${u.lvl.emoji} ${esc(u.lvl.name)}</span>` : ''}${esc(lastSeen(u))}${u.live_id ? ' · 🔴 hozir efirda' : ''}</div>${u.avatar_ver ? '<small class="mut" style="opacity:.75;display:block;margin-top:4px">🖼 Rasmini katta ko‘rish uchun ustiga bosing</small>' : ''}</div>
     <div class="pbtns" style="display:flex;gap:8px;margin-bottom:12px">
       <button class="btn" style="flex:1" data-a="msg">💬 Xabar</button>
       <button class="btn gh" style="flex:1" data-a="call">📞</button>
@@ -954,7 +954,7 @@ async function openUser(uid, opt = {}) {
       ${u.live_id ? '<button class="btn red" style="flex:1" data-a="live">🔴 Efir</button>' : ''}
     </div>
     <div class="rows">
-      ${u.phone ? `<div data-a="phone"><span class="ri">📱</span><div class="rt">${esc(u.phone)}<small>Telefon</small></div></div>` : ''}
+      ${u.phone ? `<div data-a="phone"><span class="ri">📱</span><div class="rt">${esc(u.phone)}<small>Telefon — bosib nusxa oling</small></div></div>` : ''}
       ${u.username ? `<div data-a="un"><span class="ri">@</span><div class="rt">@${esc(u.username)}<small>Username — nusxa olish</small></div></div>` : ''}
       ${u.bio ? `<div><span class="ri">ℹ️</span><div class="rt">${esc(u.bio)}<small>Bio</small></div></div>` : ''}
     </div>
@@ -964,6 +964,9 @@ async function openUser(uid, opt = {}) {
       ${opt.inChat ? '<div data-a="clear"><span class="ri">🧹</span><div class="rt red">Suhbatni tozalash</div></div>' : ''}
       <div data-a="block"><span class="ri">🚫</span><div class="rt red">${u.i_blocked ? 'Blokdan chiqarish' : 'Bloklash'}</div></div>
     </div>`)
+  // Profil rasmi ustiga bosilsa (istoriya halqasiga emas) — Telegramdagi kabi TO'LIQ EKRAN katta ko'rish
+  const pav = qs('.bigav', sh)
+  if (pav) pav.onclick = (e) => { if (!e.target.closest('[data-cam],[data-story]') && u.avatar_ver) { e.stopPropagation(); viewPhoto(avSrc(u, false), uname(u), u.username ? '@' + u.username : lastSeen(u)) } }
   sh.onclick = async (e) => {
     const it = e.target.closest('[data-a]'); if (!it) return
     const a = it.dataset.a

@@ -1050,3 +1050,29 @@ body.dark .stile{box-shadow:inset 0 1.5px 0 rgba(255,255,255,.15),inset 0 -2px 0
 /* statgrid .st — istoriyalar qoidasidan (width:66px) himoya */
 .statgrid .st{width:auto}
 .statgrid .st small{max-width:none;white-space:normal;overflow:visible}
+
+/* ============================================================
+   Task 6 — Kanallar TREND REYTINGI + Telegram-uslubidagi
+   profil rasm ko'rish (to'liq ekran) + obunachi yig'ish
+   ============================================================ */
+
+/* Trend reyting o'rin belgisi: 1 🥇 oltin, 2 kumush, 3 bronza, qolganlari neytral */
+.rankb{width:26px;height:26px;border-radius:50%;background:var(--sirt2);color:var(--xira);font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:inset 0 1.5px 0 rgba(255,255,255,.35),0 1px 3px rgba(18,28,68,.10)}
+.rankb.p1{background:linear-gradient(135deg,#FFD54F,#FF9F0A);color:#5b3a00}
+.rankb.p2{background:linear-gradient(135deg,#E8ECF4,#9AA7BD);color:#2a3448}
+.rankb.p3{background:linear-gradient(135deg,#FFAB91,#E52550);color:#fff}
+
+/* To'liq ekran profil rasmi ko'rish — Telegramdagi kabi: qora fon, tepada ism,
+   markazda katta rasm, istalgan joyga bosilsa yopiladi */
+.pav{gap:12px;padding:0}
+.pav .pav-top{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:12px;padding:calc(10px + env(safe-area-inset-top)) 14px 26px;background:linear-gradient(180deg,rgba(0,0,0,.72),rgba(0,0,0,0));z-index:2}
+.pav .pav-n{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.pav .pav-n b{font-size:15.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff}
+.pav .pav-n small{color:rgba(255,255,255,.72);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pav .xb{position:absolute;top:calc(10px + env(safe-area-inset-top));right:12px;border:0;background:rgba(255,255,255,.16);color:#fff;width:38px;height:38px;border-radius:50%;font-size:16px;z-index:3}
+.pav img{max-width:100vw;max-height:100vh;width:auto;height:auto;border-radius:6px;animation:pavin .24s ease}
+.pav img:active{transform:scale(.985)}
+@keyframes pavin{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}
+
+/* Obunachilar soni kanal ma'lumotida sal ko'rkamlashtirildi */
+.prof small.mut{display:block;margin-top:3px}

@@ -968,7 +968,9 @@ $('contactlist').addEventListener('click', (e) => {
   if (e.target.closest('[data-story]')) return
   const it = e.target.closest('[data-k]'); if (!it) return
   const k = S.contacts.find((x) => x.phone === it.dataset.k); if (!k) return
-  if (k.user) return openDirectWith(k.user.id)
+  // Foydalanuvchi akkaunti ustiga bosilsa — TO'LIQ PROFIL ochiladi (telefon, ism, username, rasm;
+  // profile ichida «💬 Xabar» tugmasi bor — chat bir bosishda ochiladi)
+  if (k.user) return openUser(k.user.id)
   const sh = sheet(h3(((k.first_name || '') + ' ' + (k.last_name || '')).trim()) + `<div class="hint">${esc(k.phone)} hali 50 Gram’dan foydalanmaydi.</div><div class="rows"><div data-a="inv"><span class="ri">📨</span><div class="rt">Taklif yuborish</div></div><div data-a="edit"><span class="ri">✏️</span><div class="rt">Tahrirlash</div></div><div data-a="del"><span class="ri">🗑</span><div class="rt red">O‘chirish</div></div></div>`)
   sh.onclick = async (ev) => {
     const a = ev.target.closest('[data-a]')?.dataset.a; if (!a) return

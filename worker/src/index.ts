@@ -292,7 +292,9 @@ function pubUser(u: any, viewer: number, contactName?: { first_name: string; las
     username: u.username || null,
     bio: u.bio || "",
     avatar_ver: u.avatar_ver || 0,
-    phone: self || u.privacy_phone === 0 ? u.phone : null,
+    // Telefon maxfiyligi to'g'ri ishlaydi: 0=Hamma, 1=Kontaktlarim (kontakt ko'radi — ilgari yashirin edi, tuzatildi), 2=Hech kim.
+    // Shu tufayli profil ochilganda raqam «Kontaktlarim» rejimida ham ko'rinadi (Telegram mantiqi).
+    phone: self || u.privacy_phone === 0 || (u.privacy_phone === 1 && !!contactName) ? u.phone : null,
     online: u.privacy_last_seen === 2 && !self ? null : t - (u.last_seen || 0) < 70000,
     last_seen: u.privacy_last_seen === 2 && !self ? null : u.last_seen || 0,
     is_contact: !!contactName,
@@ -550,9 +552,11 @@ async function search(c: C) {
   return json({ users: [...um.values()], chats: chats.map(chatOut) })
 }
 async function discover(c: C) {
+  // Trend REYTING: obunachilar soni bo'yicha kamayish tartibida — 1-o'rin eng trend kanal.
+  // LIMIT 200 (avval 40 edi) — klient "yana ko'rsatish" bilan to'liq ro'yxatni aylantiradi.
   const rows = await c.db.q(
     `SELECT ${CHAT_COLS.split(",").map((x) => "c." + x).join(",")}, m.role FROM chats c LEFT JOIN chat_members m ON m.chat_id=c.id AND m.user_id=? AND m.status='active'
-     WHERE c.type<>'direct' AND c.is_public=1 ORDER BY c.member_count DESC, c.last_msg_at DESC LIMIT 40`,
+     WHERE c.type<>'direct' AND c.is_public=1 ORDER BY c.member_count DESC, c.last_msg_at DESC LIMIT 200`,
     [c.uid],
   )
   return json(rows.map(chatOut))
