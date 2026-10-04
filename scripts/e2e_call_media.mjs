@@ -73,27 +73,37 @@ async function newPage(browser, label) {
 async function login(page, u, who = 'A') {
   await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
   await page.evaluate(HOOK)
-  const r = await page.evaluate(async ({ phone, full, who }) => {
-    const j = async (path, body) => {
-      const h = { 'content-type': 'application/json' }
-      if (localStorage.g50_token) h.authorization = 'Bearer ' + localStorage.g50_token
-      return fetch('/api' + path, { method: body ? 'POST' : 'GET', headers: h, body: body ? JSON.stringify(body) : undefined }).then((x) => x.json())
-    }
-    const o = await j('/auth/otp', { phone })
-    if (!o.ok) return { err: 'otp: ' + JSON.stringify(o) }
-    const v = await j('/auth/verify', { phone: full, code: o.dev_code })
-    if (!v.token) return { err: 'verify: ' + JSON.stringify(v) }
-    localStorage.setItem('g50_token', v.token)
-    localStorage.setItem('g50_me', JSON.stringify(v.user))
-    // HAQIQIY FOYDALANUVCHI OQIMI: profil to'liq bo'lsin (startApp to'liq o'tib WS ochilsin).
-    // Yangi akkauntlarda first_name bo'sh — app profil bosqichida to'xtaydi va (tuzatilmagan
-    // bo'lsa) WS ochilmasdi. Test haqiqiy holatni ko'rishi uchun profilni to'ldiramiz.
-    if (!v.user.first_name) {
-      const p = await j('/me', 'PATCH', { first_name: who === 'A' ? 'E2E-A' : 'E2E-B' })
-      if (p && p.id) localStorage.setItem('g50_me', JSON.stringify(p))
-    }
-    return { uid: v.user.id, name: v.user.first_name }
-  }, { ...u, who })
+  let r = null
+  for (let i = 0; i < 4; i++) {
+    r = await page.evaluate(async ({ phone, full, who }) => {
+      const j = async (path, body) => {
+        const h = { 'content-type': 'application/json' }
+        if (localStorage.g50_token) h.authorization = 'Bearer ' + localStorage.g50_token
+        const res = await fetch('/api' + path, { method: body ? 'POST' : 'GET', headers: h, body: body ? JSON.stringify(body) : undefined })
+        const txt = await res.text()
+        try { return JSON.parse(txt) } catch (e) { throw new Error('HTTP ' + res.status + ' ' + path + ': ' + txt.slice(0, 60)) }
+      }
+      try {
+        const o = await j('/auth/otp', { phone })
+        if (!o.ok) return { err: 'otp: ' + JSON.stringify(o) }
+        const v = await j('/auth/verify', { phone: full, code: o.dev_code })
+        if (!v.token) return { err: 'verify: ' + JSON.stringify(v) }
+        localStorage.setItem('g50_token', v.token)
+        localStorage.setItem('g50_me', JSON.stringify(v.user))
+        // HAQIQIY FOYDALANUVCHI OQIMI: profil to'liq bo'lsin (startApp to'liq o'tib WS ochilsin).
+        // Yangi akkauntlarda first_name bo'sh — app profil bosqichida to'xtaydi va (tuzatilmagan
+        // bo'lsa) WS ochilmasdi. Test haqiqiy holatni ko'rishi uchun profilni to'ldiramiz.
+        if (!v.user.first_name) {
+          const p = await j('/me', 'PATCH', { first_name: who === 'A' ? 'E2E-A' : 'E2E-B' })
+          if (p && p.id) localStorage.setItem('g50_me', JSON.stringify(p))
+        }
+        return { uid: v.user.id, name: v.user.first_name }
+      } catch (e) { return { err: String(e.message || e) } }
+    }, { ...u, who })
+    if (!r.err) break
+    log('login urinish ' + (i + 1) + ' xato: ' + r.err + ' — 25s kutib qayta urinamiz')
+    await page.waitForTimeout(25000) // IP-ga asoslangan firewall/cooldown oynasidan o'tish
+  }
   if (r.err) throw new Error(page.__label + ' login: ' + r.err)
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.evaluate(HOOK)

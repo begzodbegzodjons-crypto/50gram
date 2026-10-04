@@ -61,14 +61,14 @@ jobs:
           AUTH2="authorization: Bearer $TOK2"
           echo "verify2: OK (user $UID2)"
           # VERSION LOCK: build qorovuli (BUILD_V == __50BUILD == sw V) — 3 martagacha kutamiz
-          BV=""
+          BV=""; BV_EXP=$(grep -o "50gram-v[0-9]*" web/sw.js | head -1 | grep -o "[0-9]*")
           for i in 1 2 3 4 5 6; do
             BV=$(curl -s -A "$UA" "$BASE/api/build" | python3 -c "import sys,json;print(json.load(sys.stdin).get('v',''))" 2>/dev/null || true)
-            [ "$BV" = "v65" ] && break
+            [ "$BV" = "$BV_EXP" ] && break
             sleep 20
           done
-          [ "$BV" = "v65" ] || { echo "FAIL build v65 (olindi: '$BV')"; exit 1; }
-          echo "build: v65 OK"
+          [ "$BV" = "$BV_EXP" ] || { echo "FAIL build (kutildi: $BV_EXP, olindi: '$BV')"; exit 1; }
+          echo "build: $BV_EXP OK"
           # 1) QO'NG'IROQ YARATISH
           C1=$(curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/calls" -H 'content-type: application/json' -d "{\"to\":$UID2,\"video\":true}")
           CID1=$(echo "$C1" | python3 -c "import sys,json;print(json.load(sys.stdin)['call_id'])")
