@@ -62,10 +62,7 @@ async function newPage(browser, label) {
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errs.push(m.type() + ': ' + m.text().slice(0, 300)) })
   page.on('response', (r) => {
     const u = r.url()
-    if (u.includes('/api/signal')) {
-      const isPost = r.request().method() === 'POST'
-      if (isPost || r.status() >= 400) errs.push('HTTP ' + r.status() + ' ' + r.request().method() + ' ' + u.replace(/^.*\/api\//, ''))
-    }
+    if (u.includes('/api/signal') && r.status() >= 400) errs.push('HTTP ' + r.status() + ' ' + r.request().method() + ' ' + u.replace(/^.*\/api\//, ''))
   })
   page.__errs = errs
   page.__label = label
@@ -225,8 +222,9 @@ try {
   ok(diagA.wsStates && diagA.wsStates.some((s) => s === 1), 'A WebSocket OPEN (readyState=1)', JSON.stringify(diagA.wsStates))
   ok(diagB.wsStates && diagB.wsStates.some((s) => s === 1), 'B WebSocket OPEN (readyState=1)', JSON.stringify(diagB.wsStates))
   const qRaw = diagA.queueRaw && diagA.queueRaw.signals
-  ok(!!(qRaw && qRaw.length), 'A navbatida B test signali KO\'RINADI (server yetkazishi)', JSON.stringify(diagA.queueRaw || diagA.err))
-  if (qRaw && qRaw.length) log('navbatdan signal TURLARI: sid=' + typeof qRaw[0].sid + ' from=' + typeof qRaw[0].from + ' data=' + JSON.stringify(qRaw[0].data))
+  // INFO: navbat asserti YO'Q — A'appning o'zi polling bilan signalni 1.8s ichida olib
+  // yuboradi (bu TO'G'RI xulq) — yetkazish esa quydagi MEDIA natijalari bilan isbotlanadi.
+  if (qRaw && qRaw.length) log('navbatda hali ko\'rinayotgan signal (poyga natijasi):', JSON.stringify(qRaw[0]))
 
   const accepted = await B_.page.evaluate(() => {
     const el = document.querySelector('.over.call.incoming')

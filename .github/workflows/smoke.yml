@@ -64,7 +64,7 @@ jobs:
           AUTH2="authorization: Bearer $TOK2"
           echo "verify2: OK (user $UID2)"
           # VERSION LOCK: build qorovuli (BUILD_V == __50BUILD == sw V) — 3 martagacha kutamiz
-          BV=""; BV_EXP=$(grep -o "50gram-v[0-9]*" web/sw.js | head -1 | grep -o "[0-9]*")
+          BV=""; BV_EXP=$(grep -o "50gram-v[0-9]*" web/sw.js | head -1 | grep -oE "[0-9]+$")
           for i in 1 2 3 4 5 6; do
             BV=$(curl -s -A "$UA" "$BASE/api/build" | python3 -c "import sys,json;print(json.load(sys.stdin).get('v',''))" 2>/dev/null || true)
             [ "$BV" = "$BV_EXP" ] && break
