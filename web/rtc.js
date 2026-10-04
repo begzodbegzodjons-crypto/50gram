@@ -453,13 +453,26 @@ function ringTone(on) {
 // yana 3 ta tomoshabinga uzatadi. Shu sababli tomoshabinlar soni cheklanmaydi (10 000 ta ~8 bosqich).
 // Izohlar, yuraklar, SOVG'ALAR va tomoshabinlar soni ham shu daraxt bo‘ylab (DataChannel) tarqaladi.
 let LIVE = null
-// Task 29: sovg'alar — coin iqtisodiyoti (serverdagi GIFTS narxlari bilan bir xil)
+// Task 40: 26 xil sovg'a — coin iqtisodiyoti (serverdagi GIFTS narxlari bilan bir xil).
+// cat: pop = Mashhur, ani = Kuchli hayvonlar, mul = Multfilm qahramonlari.
+// fx: 'sm' kichik uchish, 'md' o'rta (jarangli), 'lg' katta (ekran silkinadi), 'tk' TO'LIQ EKRAN takeover
 const LIVE_GIFTS = [
-  { id: 'star', name: 'Yulduz', p: 5 }, { id: 'heart', name: 'Yurak', p: 10 },
-  { id: 'rose', name: 'Gul', p: 25 }, { id: 'fire', name: 'Olov', p: 49 },
-  { id: 'cake', name: 'Tort', p: 149 }, { id: 'crown', name: 'Toj', p: 199 },
-  { id: 'diamond', name: 'Olmos', p: 499 }, { id: 'rocket', name: 'Raketa', p: 999 },
+  { id: 'star', name: 'Yulduz', p: 5, cat: 'pop' }, { id: 'heart', name: 'Yurak', p: 10, cat: 'pop' },
+  { id: 'rose', name: 'Gul', p: 25, cat: 'pop' }, { id: 'mushuk', name: 'Mushuk', p: 15, cat: 'ani' },
+  { id: 'kuchuk', name: 'Kuchukcha', p: 20, cat: 'ani' }, { id: 'kapibara', name: 'Kapibara', p: 39, cat: 'ani' },
+  { id: 'fire', name: 'Olov', p: 49, cat: 'pop' }, { id: 'robot', name: 'Robot', p: 99, cat: 'mul' },
+  { id: 'panda', name: 'Panda', p: 129, cat: 'ani' }, { id: 'bori', name: 'Bo‘ri', p: 159, cat: 'ani' },
+  { id: 'alien', name: 'Alien', p: 179, cat: 'mul' }, { id: 'cake', name: 'Tort', p: 149, cat: 'pop' },
+  { id: 'crown', name: 'Toj', p: 199, cat: 'pop' }, { id: 'burgut', name: 'Burgut', p: 219, cat: 'ani' },
+  { id: 'fil', name: 'Fil', p: 259, cat: 'ani' }, { id: 'yolbars', name: 'Yo‘lbars', p: 299, cat: 'ani' },
+  { id: 'akula', name: 'Akula', p: 349, cat: 'ani' }, { id: 'sher', name: 'Sher', p: 399, cat: 'ani' },
+  { id: 'superqahramon', name: 'Superqahramon', p: 449, cat: 'mul' }, { id: 'diamond', name: 'Olmos', p: 499, cat: 'pop' },
+  { id: 'dinozavr', name: 'Dinozavr', p: 599, cat: 'ani' }, { id: 'kit', name: 'Kit', p: 649, cat: 'ani' },
+  { id: 'feniks', name: 'Feniks', p: 749, cat: 'ani' }, { id: 'rocket', name: 'Raketa', p: 999, cat: 'pop' },
+  { id: 'ajdar', name: 'Ajdar', p: 1299, cat: 'ani' }, { id: 'galaktika', name: 'Galaktika', p: 1999, cat: 'mul' },
 ]
+const giftFx = (p) => (p >= 499 ? 'tk' : p >= 349 ? 'lg' : p >= 129 ? 'md' : 'sm')
+const giftById = (id) => LIVE_GIFTS.find((x) => x.id === id)
 const giftImg = (id) => 'stickers/gifts/' + id + '.svg'
 let WALLET = null
 async function refreshWallet() { try { WALLET = await api('/wallet') } catch {} return WALLET }
@@ -478,20 +491,71 @@ function ballFloat(el, txt) {
   el.appendChild(f); setTimeout(() => f.remove(), 1500)
 }
 function heartBurst(el) {
-  for (let i = 0; i < 5; i++) {
+  // TEZLIK: 3 ta yurak — tez-tez bosilganda ham DOM engil qoladi
+  for (let i = 0; i < 3; i++) {
     const f = document.createElement('div'); f.className = 'fly'
     f.textContent = '❤️'; f.style.left = (74 + Math.random() * 16) + '%'
     f.style.animationDelay = (i * 0.12) + 's'
     el.appendChild(f); setTimeout(() => f.remove(), 1900)
   }
 }
-function flyGift(el, gid, name, from) {
+function flyGift(el, gid, name, from, cost) {
   if (!el) return
+  const fx = giftFx(cost || giftById(gid)?.p || 0)
+  // Task 40: qimmat sovg'a (Olmos, Raketa, Feniks, Ajdar, Galaktika…) — TO'LIQ EKRAN TAKEOVER
+  if (fx === 'tk') return giftTakeover(el, gid, name, from, cost)
+  // Katta sovg'a (Akula, Sher, Superqahramon) — ekran silkinadi
+  if (fx === 'lg') { el.classList.remove('lshake'); void el.offsetWidth; el.classList.add('lshake'); setTimeout(() => el.classList.remove('lshake'), 700) }
+  // TEZLIK: bir vaqtda ko'pi bilan 3 ta uchuvchi sovg'a — sovg'a to'lqinida DOM to'lib, efir qotib qolmasin
+  const fgs = el.querySelectorAll('.flygift')
+  if (fgs.length >= 3) fgs[0].remove()
   const f = document.createElement('div')
-  f.className = 'flygift'
+  f.className = 'flygift' + (fx === 'lg' ? ' fg-l' : fx === 'md' ? ' fg-m' : '')
   f.innerHTML = `<img src="${giftImg(gid)}" alt=""><span><b>${esc(from || '')}</b>${esc(name || '')}</span>`
   el.appendChild(f)
-  setTimeout(() => f.remove(), 3400)
+  setTimeout(() => f.remove(), fx === 'sm' ? 3400 : 3800)
+}
+// TO'LIQ EKRAN TAKEOVER — nur nurlari aylanadi, sovg'a kattalashib chiqadi, ism va coin ko'rinadi
+function giftTakeover(el, gid, name, from, cost) {
+  if (!el) return
+  const g = giftById(gid)
+  const t = document.createElement('div')
+  t.className = 'gtake'
+  t.innerHTML = `<div class="gt-rays"></div><div class="gt-body"><img src="${giftImg(gid)}" alt=""><div class="gt-name">${esc(g?.name || gid)}${name && String(name).indexOf('×') === 0 ? ' ' + esc(name) : ''}</div><div class="gt-from">🎁 ${esc(from || '')} sovg‘a berdi</div><div class="gt-cost">🪙 ${fmtN(cost || g?.p || 0)} coin</div></div>`
+  el.appendChild(t)
+  setTimeout(() => t.remove(), 3000)
+}
+// COMBO — bir xil sovg'a ketma-ket yuborilsa ×2, ×3… ko'payib boradi (TikTok uslubi)
+function giftCombo(el, gid) {
+  const L = LIVE; if (!el || !L) return
+  const t = Date.now()
+  if (L.cb && L.cb.gid === gid && t - L.cb.t < 2600) L.cb.n++
+  else L.cb = { gid, n: 1, t }
+  if (L.cb.n < 2) { if (L.cbT) { clearTimeout(L.cbT); L.cbT = 0 } return }
+  let chip = qs('.lcombo', el)
+  if (!chip) { chip = document.createElement('div'); chip.className = 'lcombo'; el.appendChild(chip) }
+  chip.textContent = '🔥 COMBO ×' + L.cb.n
+  chip.classList.remove('pop'); void chip.offsetWidth; chip.classList.add('pop')
+  if (L.cbT) clearTimeout(L.cbT)
+  L.cbT = setTimeout(() => { const c = qs('.lcombo', el); if (c) c.remove(); if (LIVE === L) L.cb = null }, 2600)
+}
+// Sovg'a jarangi — WebAudio (muvaffaqiyatsizlik JIM o'tadi, efirga xalaqit bermaydi)
+let gGiftCtx = 0
+function giftChime(big) {
+  try {
+    gGiftCtx = gGiftCtx || new (window.AudioContext || window.webkitAudioContext)()
+    if (gGiftCtx.state === 'suspended') gGiftCtx.resume().catch(() => {})
+    const t = gGiftCtx.currentTime + 0.02
+    const o = gGiftCtx.createOscillator(), g = gGiftCtx.createGain()
+    o.type = 'triangle'
+    o.frequency.setValueAtTime(big ? 740 : 590, t)
+    o.frequency.exponentialRampToValueAtTime(big ? 1180 : 880, t + 0.14)
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(big ? 0.2 : 0.1, t + 0.04)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55)
+    o.connect(g).connect(gGiftCtx.destination)
+    o.start(t); o.stop(t + 0.6)
+  } catch {}
 }
 async function updateGiftPanel(el) {
   const bal = qs('#lg-bal', el), daily = qs('#lg-daily', el)
@@ -521,9 +585,10 @@ function liveUI(user, title, host) {
     <div class="lbot"><input class="inp" maxlength="300" placeholder="Izoh yozing… +2 ball"><button class="cb" data-ls>➤</button>${host ? '<button class="cb" data-lf>🔄</button><button class="cb end" data-le>Tugatish</button>' : ''}</div>
     <div class="lgift hide" id="l-gift">
       <div class="lg-h"><b>🎁 Sovg‘a yuborish</b><span class="lg-bal" id="lg-bal">…</span><button class="ic" data-lgx>✕</button></div>
+      <div class="gtabs"><button class="gt on" data-gt="pop">🔥 Mashhur</button><button class="gt" data-gt="ani">🐾 Hayvonlar</button><button class="gt" data-gt="mul">🎬 Multfilm</button></div>
       <div class="lg-daily" id="lg-daily"></div>
-      <div class="lg-grid">${LIVE_GIFTS.map((g) => `<button class="gcard" data-g="${g.id}"><img src="${giftImg(g.id)}" alt="" loading="lazy"><b>${g.name}</b><span>🪙 ${g.p}</span></button>`).join('')}</div>
-      <div class="hint">Sovg‘a coin bilan olinadi — efirchining balli va coin’i oshadi, ekraningizda chiroyli animatsiya uchadi!</div>
+      <div class="lg-grid" id="lg-grid"></div>
+      <div class="hint">Sovg‘a coin bilan olinadi — ketma-ket yuborsangiz COMBO 🔥, katta sovg‘a butun ekranni nur bilan to‘ldiradi!</div>
     </div>`
   document.body.appendChild(el)
   const inp = qs('.lbot input', el)
@@ -536,12 +601,17 @@ function liveUI(user, title, host) {
   }
   inp.onkeydown = (e) => { if (e.key === 'Enter' && inp.value.trim()) { send(inp.value.trim(), false); inp.value = '' } }
   qs('[data-ls]', el).onclick = () => { if (inp.value.trim()) { send(inp.value.trim(), false); inp.value = '' } }
-  qs('[data-lh]', el).onclick = () => { send('', true); heartBurst(el) }
+  // TEZLIK: yurak spam'i DOM va serverni yuklamasin — 350ms'da bir marta so'rov, bosishlar ko'rinishi saqlanadi
+  let lastHeartAt = 0
+  qs('[data-lh]', el).onclick = () => { const t = Date.now(); if (t - lastHeartAt < 350) return; lastHeartAt = t; send('', true); heartBurst(el) }
   qs('[data-lx]', el).onclick = () => (host ? endLive() : leaveLive())
   const le = qs('[data-le]', el); if (le) le.onclick = endLive
   const lf = qs('[data-lf]', el); if (lf) lf.onclick = liveFlip
-  // Sovg‘a paneli (TikTok-uslubi)
-  const gp = qs('#l-gift', el)
+  // Sovg‘a paneli (TikTok-uslubi) — 26 sovg‘a 3 ta katrgoria tab’ida
+  const gp = qs('#l-gift', el), grid = qs('#lg-grid', el)
+  const renderGrid = (cat) => { grid.innerHTML = LIVE_GIFTS.filter((g) => g.cat === cat).map((g) => `<button class="gcard" data-g="${g.id}"><img src="${giftImg(g.id)}" alt="" loading="lazy"><b>${g.name}</b><span>🪙 ${g.p}</span></button>`).join('') }
+  renderGrid('pop')
+  qsa('.gt', el).forEach((b) => { b.onclick = () => { qsa('.gt', el).forEach((x) => x.classList.remove('on')); b.classList.add('on'); renderGrid(b.dataset.gt) } })
   qs('[data-lg]', el).onclick = () => { gp.classList.toggle('hide'); if (!gp.classList.contains('hide')) updateGiftPanel(el) }
   qs('[data-lgx]', el).onclick = () => gp.classList.add('hide')
   gp.onclick = async (e) => {
@@ -550,7 +620,9 @@ function liveUI(user, title, host) {
     try {
       const r = await post(`/lives/${LIVE.id}/gift`, { gift: gi.id, n: 1 })
       gp.classList.add('hide')
-      flyGift(el, gi.id, gi.name, S.me.first_name)
+      flyGift(el, gi.id, gi.name, S.me.first_name, gi.p)
+      giftCombo(el, gi.id)
+      giftChime(gi.p >= 349)
       if (WALLET) WALLET.coins = r.coins
       toast(`🎁 ${gi.name} yuborildi — efirchi +${r.cost} ball oldi`)
     } catch (e2) { toast('⚠️ ' + e2.message) }
@@ -584,7 +656,7 @@ function liveMsg(m) {
   if (!LIVE || !m) return
   if (m.t === 'c') liveComment(m.n, m.x, m.h)
   if (m.t === 'n') liveSetCount(m.v)
-  if (m.t === 'g') { flyGift(LIVE.el, m.g, '×' + (m.gn || 1), m.n); liveTopAdd(m.n, m.cost || 0) }
+  if (m.t === 'g') { flyGift(LIVE.el, m.g, '×' + (m.gn || 1), m.n, m.cost); giftCombo(LIVE.el, m.g); giftChime((m.cost || giftById(m.g)?.p || 0) >= 349); liveTopAdd(m.n, m.cost || 0) }
   liveRelay(m)
   if (m.t === 'end') liveEnded()
 }
@@ -849,7 +921,9 @@ on('live_comment', (ev) => {
 })
 on('live_gift', (ev) => {
   const L = LIVE; if (!L || !L.host || L.id !== ev.live_id) return
-  flyGift(L.el, ev.gift, '×' + (ev.n || 1), ev.from?.first_name)
+  flyGift(L.el, ev.gift, '×' + (ev.n || 1), ev.from?.first_name, ev.cost)
+  giftCombo(L.el, ev.gift)
+  giftChime(ev.cost >= 349)
   liveTopAdd(ev.from?.first_name, ev.cost || 0)
   const c = qs('#l-coins', L.el); if (c) c.textContent = fmtN(ev.host_coins || 0)
   // Barcha tomoshabinlarga ham ko‘rinsin — daraxt bo‘ylab

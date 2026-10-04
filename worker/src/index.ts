@@ -203,7 +203,13 @@ const NOTIFY_CAP = 40
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
-const GIFTS: Record<string, number> = { star: 5, heart: 10, rose: 25, fire: 49, cake: 149, crown: 199, diamond: 499, rocket: 999 }
+// Task 40: 26 xil sovg'a — klient (web/rtc.js LIVE_GIFTS) narxlari bilan BIR XIL bo'lishi shart
+const GIFTS: Record<string, number> = {
+  star: 5, heart: 10, rose: 25, fire: 49, cake: 149, crown: 199, diamond: 499, rocket: 999,
+  mushuk: 15, kuchuk: 20, kapibara: 39, robot: 99, panda: 129, bori: 159, alien: 179,
+  burgut: 219, fil: 259, yolbars: 299, akula: 349, sher: 399, superqahramon: 449,
+  dinozavr: 599, kit: 649, feniks: 749, ajdar: 1299, galaktika: 1999,
+}
 const LEVELS = [
   { n: "Yangi a'zo", e: "🌱", min: 0 },
   { n: "Yulduz", e: "⭐", min: 500 },
