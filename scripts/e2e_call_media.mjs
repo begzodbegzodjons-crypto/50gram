@@ -70,10 +70,10 @@ async function newPage(browser, label) {
   return { ctx, page }
 }
 
-async function login(page, u) {
+async function login(page, u, who = 'A') {
   await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
   await page.evaluate(HOOK)
-  const r = await page.evaluate(async ({ phone, full }) => {
+  const r = await page.evaluate(async ({ phone, full, who }) => {
     const j = async (path, body) => {
       const h = { 'content-type': 'application/json' }
       if (localStorage.g50_token) h.authorization = 'Bearer ' + localStorage.g50_token
@@ -85,8 +85,15 @@ async function login(page, u) {
     if (!v.token) return { err: 'verify: ' + JSON.stringify(v) }
     localStorage.setItem('g50_token', v.token)
     localStorage.setItem('g50_me', JSON.stringify(v.user))
+    // HAQIQIY FOYDALANUVCHI OQIMI: profil to'liq bo'lsin (startApp to'liq o'tib WS ochilsin).
+    // Yangi akkauntlarda first_name bo'sh — app profil bosqichida to'xtaydi va (tuzatilmagan
+    // bo'lsa) WS ochilmasdi. Test haqiqiy holatni ko'rishi uchun profilni to'ldiramiz.
+    if (!v.user.first_name) {
+      const p = await j('/me', 'PATCH', { first_name: who === 'A' ? 'E2E-A' : 'E2E-B' })
+      if (p && p.id) localStorage.setItem('g50_me', JSON.stringify(p))
+    }
     return { uid: v.user.id, name: v.user.first_name }
-  }, u)
+  }, { ...u, who })
   if (r.err) throw new Error(page.__label + ' login: ' + r.err)
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.evaluate(HOOK)
@@ -152,10 +159,10 @@ try {
   const A_ = await newPage(browser, 'A(005)')
   const B_ = await newPage(browser, 'B(006)')
   log('login A …')
-  const ua = await login(A_.page, A)
+  const ua = await login(A_.page, A, 'A')
   ok(!!ua.uid, 'A login', 'uid=' + ua.uid)
   log('login B …')
-  const ub = await login(B_.page, B)
+  const ub = await login(B_.page, B, 'B')
   ok(!!ub.uid, 'B login', 'uid=' + ub.uid)
   if (!ua.uid || !ub.uid) throw new Error('login ishlamadi')
 
@@ -243,7 +250,7 @@ try {
     log('POST-DIAG A (javobdan keyin):', JSON.stringify(postDiag))
     // Tozalash: A tugatadi
     await hangupByButton(A_.page)
-    await A_.page.waitForTimeout(1500)
+    await A_.page.waitForTimeout(4500) // endCall xato-matn bilan elementni 3.2s'da o'chiradi
     const goneA = await A_.page.evaluate(() => !document.querySelector('.over.call'))
     const goneB = await B_.page.evaluate(() => !document.querySelector('.over.call'))
     ok(goneA, 'A tugatgach o\'z oynasi yopildi')
@@ -266,7 +273,7 @@ try {
     log('B ekrani holati 15s da:', JSON.stringify(stB))
     // B rad etadi → A «Rad etildi» ko\'radi
     await B_.page.evaluate(() => { const e = document.querySelector('.over.call'); const b = e && e.querySelector('.cb.end'); if (b) b.click() })
-    await B_.page.waitForTimeout(3000)
+    await B_.page.waitForTimeout(4500) // endCall(matn bilan) elementni 3.2s'da o'chiradi
     const goneA2 = await A_.page.evaluate(() => !document.querySelector('.over.call'))
     ok(goneA2, 'B rad etgach A oynasi yopildi (holat yetdi)')
   }

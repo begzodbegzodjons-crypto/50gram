@@ -5,6 +5,11 @@ import { connect } from "@tidbcloud/serverless"
 const NUM = new Set([
   "id", "chat_id", "sender_id", "user_id", "owner_id", "author_id", "post_id", "story_id", "viewer_id",
   "message_id", "caller_id", "callee_id", "blocked_id", "live_id", "peer_id", "created_at", "updated_at",
+  // to_uid/from_uid: qo'ng'iroq signal navbati — BU IKKISI YO'Q BO'LSA, navbatdan qaytgan signal
+  // `from`si STRING bo'lib qoladi va klientdagi C.peer.id !== from taqqoslamasi (number!==string)
+  // HAR BIR signalni (accept/offer/answer/ice/hangup) jim o'tkazib yuboradi — WS uzilgan
+  // har bir qurilmada qo'ng'iroq hal bo'lishining asosiy ildizi shu edi (v63-v65 zaxira yo'li o'lik edi)
+  "to_uid", "from_uid", "foreign_uid",
   "expires_at", "joined_at", "last_read", "peer_last_read", "last_seen", "last_msg_at", "started_at",
   "ended_at", "viewed_at", "sent_at", "avatar_ver", "size", "chunks", "idx", "member_count", "unread",
   "like_count", "comment_count", "viewers", "cnt", "unseen", "liked", "video", "edited", "deleted",

@@ -603,8 +603,9 @@ async function drainSigQueue() {
   try {
     const r = await api('/signal/queue?since=' + lastSid)
     for (const s of r.signals || []) {
-      if (s.sid > lastSid) lastSid = s.sid
-      try { handleSignalEv({ type: 'signal', sid: s.sid, from: s.from, data: s.data }) } catch {}
+      const sid = +s.sid || 0 // sid string kelishi mumkin (DB BIGINT) — songa majburlash
+      if (sid > lastSid) lastSid = sid
+      try { handleSignalEv({ type: 'signal', sid, from: s.from, data: s.data }) } catch {}
     }
   } catch {}
   sigPollBusy = false
@@ -631,7 +632,10 @@ async function handleSignalEv(ev) {
   if (sigDedup(ev.sid)) return // WS + navbat ikki marta yetkazishi mumkin (jonli efir ham)
   if (d.k && d.k[0] === 'l') return liveSignal(from, d)
   const C = CALL
-  if (!C || C.peer.id !== from) return
+  // TAQQOSLASH String() BILAN: navbatdan kelgan from string bo'lishi mumkin (DB BIGINT),
+  // WS'dan esa number — qat'iy !== ikkisini MOS KELMAS deb DROPP qilardi. Bitta tur
+  // mos kelmasligi ham BARCHA signallarni (accept/offer/answer/ice/hangup) yo'qotardi.
+  if (!C || String(C.peer.id) !== String(from)) return
   // POYG'A TUZATISH: sekin tarmoqda POST /calls javobi kechiksa, qarshi tomonning 'accept'i
   // CALL.id hali tayinlanmasidan turib kelardi va JIM drop qilinardi — qabul qiluvchi abadiy
   // «Ulanmoqda…» da qolardi. Endi: call_id hali bo'lmasa qabul qilinadi (adopt), bor bo'lsa

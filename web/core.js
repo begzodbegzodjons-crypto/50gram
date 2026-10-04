@@ -696,6 +696,10 @@ function logout(silent) {
 let wsRetry = 1000, pingT = 0, lastWsRecv = 0
 function wsConnect() {
   if (!S.token) return
+  // IKKILANCHA ULANISH GUARDI: startApp har holatda wsConnect()ni chaqiradi (profil
+  // bosqichidan ham o'tadi) — ochiq/ochilayotgan soket bo'lsa qayta OCHMAYMIZ (aks holda
+  // ikkita WS: signallar ikki marta yetardi, dedup/pong adashardi)
+  if (S.ws && (S.ws.readyState === 0 || S.ws.readyState === 1)) return
   try {
     const ws = new WebSocket(API.replace(/^http/, 'ws') + '/ws?token=' + encodeURIComponent(S.token))
     S.ws = ws
@@ -861,6 +865,11 @@ async function startApp() {
   $('auth').classList.add('hide'); $('main').classList.remove('hide'); $('dialog').classList.remove('hide')
   renderChats()
   try { setMe(await api('/me')) } catch (e) { if (!S.token) return }
+  // WS HAR QANDAY HOLATDA OCHILADI (profil to'liq bo'lmasa ham): avvalgi kod profil
+  // to'liq emas yoki /me sekin bo'lsa ERTA qaytardi va WS UMUMAN ochilmasdi — ilova
+  // «ochiq ko'rinib» turgan holda HAMMA real-vaqt hodisasi (qo'ng'iroq, signal, xabar)
+  // yo'qolardi. Bu «avval ishlar, keyin o'zi buzilar edi»ning yashirin ildizi.
+  wsConnect()
   if (!S.me.first_name) { $('auth').classList.remove('hide'); $('main').classList.add('hide'); step('a-prof'); return }
   post('/ping').catch(() => {})
   // APK: token'ni native tomonga beramiz — fon xizmati qo'ng'iroqlarni polling bilan oladi (v2.5)
@@ -869,7 +878,8 @@ async function startApp() {
   // shundan keyin qo'ng'iroqlar va ovozli xabarlar oynasiz ishlaydi (rtc.js)
   try { window.__50warmup && window.__50warmup() } catch {}
   await Promise.all([loadChats().catch((e) => toast(e.message)), loadStories().catch(() => {}), loadContactsQuiet(), loadLives()])
-  wsConnect()
+  // wsConnect() yuqorida chaqirildi (profil tekshiruvidan oldin) — bu yerda ikki marta
+  // chaqirilishi IKKITA WebSocket ochardi (signallar ikki marta yetardi, 'pong' adashardi)
   setInterval(poll, 4000)
   setInterval(() => { if (!document.hidden) post('/ping').catch(() => {}) }, 45000)
   setInterval(() => { if (!document.hidden) { loadStories().catch(() => {}); loadLives() } }, 60000)
@@ -925,7 +935,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v65'
+window.__50BUILD = 'v66'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
