@@ -15,7 +15,12 @@ import android.os.Build;
  */
 public class CallAlert {
 
+  /** Fon rejimi: OVOZLI kanal — ilova fonda bo'lsa in-app rington eshitilmasligi mumkin,
+   *  bildirishnoma ovozi yagona kafolat (har qayta joylashda qayta o'ynaydi). */
   static final String CH_ID = "50gram_calls";
+  /** Ekranda (foreground): JIMSIZ kanal — in-app WebAudio ringtoni allaqachon eshitilyapti,
+   *  ikki ovoz bir vaqtda chiqmasin. Oyna va tugmalar baribir ko'rinadi. */
+  static final String CH_ID_FG = "50gram_calls_fg";
   static final int NOTIF_ID = 2001;
   /** Qo'ng'iroq oynasi ko'rinayotgani (MainActivity kabi oqimlar uchun — reload buzmasin) */
   public static volatile boolean showing = false;
@@ -23,13 +28,30 @@ public class CallAlert {
   static void show(Context ctx, String name, boolean video, String callId) {
     NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
     if (nm == null) return;
+    boolean fg = MainActivity.visible;
+    String chId = fg ? CH_ID_FG : CH_ID;
     if (Build.VERSION.SDK_INT >= 26) {
-      NotificationChannel ch = new NotificationChannel(CH_ID, "Qo'ng'iroqlar", NotificationManager.IMPORTANCE_HIGH);
+      // FON kanali: baland qo'ng'iroq ovozi + tebranish (jiringlash javob berungacha qaytalinadi)
+      NotificationChannel ch = new NotificationChannel(CH_ID, "Qo'ng'iroqlar (fon)", NotificationManager.IMPORTANCE_HIGH);
       ch.setDescription("Kirayotgan qo'ng'iroqlar");
       ch.enableVibration(true);
       ch.setVibrationPattern(new long[]{0, 400, 200, 400, 200, 400});
       ch.setBypassDnd(false);
+      try {
+        android.media.AudioAttributes at = new android.media.AudioAttributes.Builder()
+            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build();
+        ch.setSound(android.provider.Settings.System.DEFAULT_RINGTONE_URI, at);
+      } catch (Exception ignored) { }
       nm.createNotificationChannel(ch);
+      // FOREGROUND kanali: jimsiz (in-app rington eshitilyapti) — oyna/tugmalar uchun
+      NotificationChannel chFg = new NotificationChannel(CH_ID_FG, "Qo'ng'iroqlar", NotificationManager.IMPORTANCE_HIGH);
+      chFg.setDescription("Kirayotgan qo'ng'iroqlar (ekranda)");
+      chFg.setSound(null, null);
+      chFg.enableVibration(false);
+      chFg.setBypassDnd(false);
+      nm.createNotificationChannel(chFg);
     }
 
     // Barcha tugmalar ilovani ochadi (singleTask) — JS __50call oqimi davom etadi
@@ -55,7 +77,7 @@ public class CallAlert {
         PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
     Notification.Builder b = Build.VERSION.SDK_INT >= 26
-        ? new Notification.Builder(ctx, CH_ID)
+        ? new Notification.Builder(ctx, chId)
         : new Notification.Builder(ctx);
     b.setSmallIcon(R.mipmap.ic_launcher)
         .setContentTitle((video ? "📹 " : "📞 ") + name)

@@ -14,7 +14,11 @@ jobs:
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
           BASE="https://50gram.begzodbegzodjons.workers.dev"
           TOK=""
-          cleanup() { if [ -n "$TOK" ]; then curl -s -A "$UA" -H "authorization: Bearer $TOK" -X POST "$BASE/api/auth/logout" -H 'content-type: application/json' -d '{}' >/dev/null || true; fi; }
+          TOK2=""
+          cleanup() {
+            if [ -n "$TOK" ]; then curl -s -A "$UA" -H "authorization: Bearer $TOK" -X POST "$BASE/api/auth/logout" -H 'content-type: application/json' -d '{}' >/dev/null || true; fi
+            if [ -n "$TOK2" ]; then curl -s -A "$UA" -H "authorization: Bearer $TOK2" -X POST "$BASE/api/auth/logout" -H 'content-type: application/json' -d '{}' >/dev/null || true; fi
+          }
           trap cleanup EXIT
           H=$(curl -s -A "$UA" "$BASE/api/health"); echo "health: $H"
           echo "$H" | grep -q '"ok":true' || { echo "FAIL health"; exit 1; }
@@ -44,3 +48,40 @@ jobs:
           curl -s -A "$UA" -H "$AUTH" "$BASE/api/wallet" | grep -q '"coins"' || { echo "FAIL wallet"; exit 1; }
           curl -s -A "$UA" -H "$AUTH" "$BASE/api/users/$MYUID" | grep -q '"id"' || { echo "FAIL user"; exit 1; }
           echo "messages/chats/me/stories/lives/search/discover/wallet/user: OK"
+          # ============ QO'NG'IROQ SIGNALING E2E (LOCK — qayta buzilmasin) ============
+          # Ikki akkaunt bilan to'liq signalizatsiya zanjiri: yaratish → yetkazish (pending)
+          # → offer (navbat orqali — WS o'lsa ham KAFOLAT) → statuslar. Qo'ng'iroq qatlami
+          # regressiyaga uchrasa bu test QIZIL yonadi (deploy'dan keyin avtomatik).
+          O2=$(curl -s -A "$UA" -X POST "$BASE/api/auth/otp" -H 'content-type: application/json' -d '{"phone":"998900000004"}')
+          echo "$O2" | grep -q '"ok":true' || { echo "FAIL otp2: $O2"; exit 1; }
+          CODE2=$(echo "$O2" | python3 -c "import sys,json;print(json.load(sys.stdin)['dev_code'])")
+          V2=$(curl -s -A "$UA" -X POST "$BASE/api/auth/verify" -H 'content-type: application/json' -d "{\"phone\":\"+998900000004\",\"code\":\"$CODE2\"}")
+          TOK2=$(echo "$V2" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+          UID2=$(echo "$V2" | python3 -c "import sys,json;print(json.load(sys.stdin)['user']['id'])")
+          AUTH2="authorization: Bearer $TOK2"
+          echo "verify2: OK (user $UID2)"
+          # VERSION LOCK: build qorovuli (BUILD_V == __50BUILD == sw V)
+          curl -s -A "$UA" "$BASE/api/build" | grep -q '"v":"v65"' || { echo "FAIL build v65"; exit 1; }
+          echo "build: v65 OK"
+          # 1) QO'NG'IROQ YARATISH
+          C1=$(curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/calls" -H 'content-type: application/json' -d "{\"to\":$UID2,\"video\":true}")
+          CID1=$(echo "$C1" | python3 -c "import sys,json;print(json.load(sys.stdin)['call_id'])")
+          [ -n "$CID1" ] && [ "$CID1" != "None" ] || { echo "FAIL call create: $C1"; exit 1; }
+          echo "call create: OK ($CID1)"
+          # 2) YETKAZISH: qabul qiluvchining pending'ida ko'rinadi (bir marta qilinganda yetadi)
+          P=$(curl -s -A "$UA" -H "$AUTH2" "$BASE/api/calls/pending")
+          echo "$P" | grep -q "\"call_id\":$CID1" || { echo "FAIL pending: $P"; exit 1; }
+          echo "call pending: OK"
+          # 3) SIGNAL NAVBATI: offer yuboriladi va qabul qiluvchi navbat orqali ALBATTA oladi
+          curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/signal" -H 'content-type: application/json' -d "{\"to\":$UID2,\"data\":{\"k\":\"offer\",\"call_id\":$CID1,\"sdp\":{\"type\":\"offer\",\"sdp\":\"v=0\"}}}" | grep -q '"ok":true' || { echo "FAIL signal post"; exit 1; }
+          Q=$(curl -s -A "$UA" -H "$AUTH2" "$BASE/api/signal/queue?since=0")
+          echo "$Q" | grep -q '"k":"offer"' || { echo "FAIL signal queue: $Q"; exit 1; }
+          echo "signal queue: OK"
+          # 4) STATUSLAR: active → yakuniy status (call_closed bildirishnomasi manbasi)
+          curl -s -A "$UA" -H "$AUTH2" -X POST "$BASE/api/calls/$CID1/status" -H 'content-type: application/json' -d '{"status":"active"}' | grep -q '"ok":true' || { echo "FAIL call active"; exit 1; }
+          curl -s -A "$UA" -H "$AUTH2" -X POST "$BASE/api/calls/$CID1/status" -H 'content-type: application/json' -d '{"status":"ended"}' | grep -q '"ok":true' || { echo "FAIL call ended"; exit 1; }
+          # 5) TOZALANGANLIK: yakunlangan qo'ng'iroq pending'da QAYTMASLIGI kerak (ghost yo'q)
+          sleep 1
+          P2=$(curl -s -A "$UA" -H "$AUTH2" "$BASE/api/calls/pending")
+          echo "$P2" | grep -q "\"call_id\":$CID1" && { echo "FAIL ghost: pending qaytardi: $P2"; exit 1; }
+          echo "call status + no-ghost: OK"

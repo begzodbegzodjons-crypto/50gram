@@ -182,17 +182,23 @@ const nativeCall = () => (window.Android50 && typeof window.Android50.callIncomi
 const nativeCallCancel = () => { try { window.Android50 && window.Android50.callStarted && window.Android50.callStarted() } catch {} }
 let pendingNativeCall = null
 window.__50call = (act, id) => {
-  const ev = pendingNativeCall
   if (act === 'answer') {
     pendingNativeCall = null
-    if (ev && !CALL) { incomingCall(ev); acceptCall(); return } // UI hali yaratilmagan (fon rejimi) — yaratamiz
-    if (CALL && String(CALL.id) === String(id)) { nativeCallCancel(); acceptCall(); return }
-    // Bildirishnoma orqali javob, lekin JS hodisani olmagan (WS o'lgan/fon) — qo'ng'iroqni serverdan olamiz
     nativeCallCancel()
-    // Qo'ng'iroqni serverdan olamiz (started_at bilan — ghost tekshiruvi uchun)
+    if (CALL) {
+      if (String(CALL.id) === String(id)) acceptCall()
+      else post(`/calls/${id}/status`, { status: 'declined' }).catch(() => {})
+      return
+    }
+    // SERVER-HAQIQAT BILAN JAVOB: bildirishnoma eski bo'lishi mumkin (foydalanuvchi 50-70s'da
+    // bossa, chaqiruvchi allaqachon ketgan bo'lishi mumkin). /calls/pending — serverda HOZIR
+    // HAM jiringlayotgan qo'ng'iroqni qaytaradi: aynan shu asosda javob beriladi. Bu «javob
+    // bosdim, lekin hech narsa bo'lmadi» va «o'lik qo'ng'iroqni javob berish» poygalarini yo'q qiladi.
     api('/calls/pending').then((r) => {
-      if (r && r.call && !CALL) { incomingCall({ call_id: r.call.call_id, video: r.call.video, started_at: r.call.started_at, from: r.call.from }); acceptCall() }
-      else if (!CALL) post(`/calls/${id}/status`, { status: 'declined' }).catch(() => {})
+      if (CALL) return
+      const c = r && r.call
+      if (c) { incomingCall({ call_id: c.call_id, video: c.video, started_at: c.started_at, from: c.from }, true); acceptCall() }
+      else { toast('Qo‘ng‘iroq vaqti o‘tgan'); post(`/calls/${id}/status`, { status: 'declined' }).catch(() => {}) }
     }).catch(() => { toast('Qo‘ng‘iroqqa ulanolmadik — internetni tekshiring') })
   } else if (act === 'decline') {
     pendingNativeCall = null
@@ -201,6 +207,15 @@ window.__50call = (act, id) => {
     else post(`/calls/${id}/status`, { status: 'declined' }).catch(() => {})
   }
 }
+// SW PUSH qo'ng'iroq tugmalari (PWA): bildirishnomadagi «Javob berish»/«Rad etish» — xuddi
+// native oqim kabi ishlaydi (avval push tugmasi ilovani ochardi, lekin javob bermasdi)
+try {
+  navigator.serviceWorker?.addEventListener('message', (e) => {
+    const d = e.data || {}
+    if (d.type === 'callanswer' && d.call_id) window.__50call('answer', d.call_id)
+    if (d.type === 'calldecline' && d.call_id) window.__50call('decline', d.call_id)
+  })
+} catch {}
 document.addEventListener('visibilitychange', () => {
   // Foydalanuvchi bildirishnomani emas, ilovani o'zi ochgan bo'lsa — qo'ng'iroq oynasini ko'rsatamiz
   if (!document.hidden && pendingNativeCall && !CALL) {
@@ -225,16 +240,31 @@ document.addEventListener('visibilitychange', () => {
     }
   }
 })
-function incomingCall(ev) {
-  if (CALL) { sig(ev.from.id, { k: 'busy', call_id: ev.call_id }); return }
-  // GHOST HIMOYASI («band bo'lib qo'ng'iroq ketmayapti» ildizi): 65s+ eski "ringing" — hech kim
-  // javob bermagan O'LIK qo'ng'iroq (server ham 90s'da yakunlaydi). JIM rad etiladi — jiringlamaydi,
-  // foydalanuvchini aldamaydi, CALL holatini band qilmaydi — keyingi HAQIQIY qo'ng'iroq erkin kiradi.
-  const age = ev.started_at ? Date.now() - +ev.started_at : 0
-  if (age > 65000) { post(`/calls/${ev.call_id}/status`, { status: 'declined' }).catch(() => {}); return }
-  // FON REJIMIDA (APK): sahifa yashirin bo'lsa — native to'liq ekran qo'ng'iroq oynasi (tugmalar bilan)
+function incomingCall(ev, force) {
+  // DEDUP: xuddi SHU qo'ng'iroq uchun UI allaqachon ochiq bo'lsa — JIM o'tkazib yuboramiz.
+  // AVVALGI KOD bu yerda 'busy' yuborardi: WS hodisa ikki marta yetkazilsa (qayta ulanish
+  // poygasi) chaqiruvchi «Band» xatosi bilan o'chardi — aynan «bitta sigan berib o'chib qoldi».
+  if (CALL) { if (String(CALL.id) === String(ev.call_id)) return; sig(ev.from.id, { k: 'busy', call_id: ev.call_id }); return }
+  // GHOST HIMOYASI: 45s+ eski ko'ringan "ringing" — darhol rad ETMAYMIZ: klient soati
+  // noto'g'ri bo'lishi (skew) mumkin — SERVERDAN tasdiqlaymiz: hozir ham 'ringing' bo'lsa
+  // HAQIQIY qo'ng'iroq (jiringlaymiz), bo'lmasa o'lik — jim rad. AVVALGI KOD klient soatiga
+  // tayanib yangi qo'ng'iroqni ham JIM rad etardi («qo'ng'iroq umuman kelmayapti» ildizi).
+  const age = ev.started_at ? (Date.now() - (S.tSkew || 0)) - +ev.started_at : 0
+  if (!force && age > 45000) {
+    api('/calls/pending').then((r) => {
+      const c = r && r.call
+      if (c && String(c.call_id) === String(ev.call_id) && !CALL) incomingCall({ call_id: c.call_id, video: c.video, started_at: c.started_at, from: c.from }, true)
+      else if (!CALL) post(`/calls/${ev.call_id}/status`, { status: 'declined' }).catch(() => {})
+    }).catch(() => {})
+    return
+  }
+  if (force && age > 78000) { post(`/calls/${ev.call_id}/status`, { status: 'declined' }).catch(() => {}); return }
+  // FON REJIMIDA (APK): sahifa yashirin bo'lsa — native to'liq ekran qo'ng'iroq oynasi (tugmalar bilan).
+  // ⚠️ force (foydalanuvchi O'ZI «Javob berish» bosdi) — native branchga QAYTMAYMIZ: aks
+  // holda document.hidden true qolgan WebView'larda (quirk) CALL umuman yaratilmasdi va
+  // javob JIM ishlamasdi. Force bilan in-app UI DARHOL ochiladi va acceptCall ishlaydi.
   const nb = nativeCall()
-  if (nb && document.hidden) {
+  if (nb && document.hidden && !force) {
     pendingNativeCall = ev
     try { nb.callIncoming(JSON.stringify({ id: ev.call_id, name: uname(ev.from), video: !!ev.video })) } catch {}
     return
@@ -248,7 +278,18 @@ function incomingCall(ev) {
   ringTone(true, 'in') // BALAND chiroyli «ding-ding-dooong» — qabul qiluvchi aniq eshitadi
   vibrate([400, 200, 400, 200, 400])
   notifyLocal('📞 ' + uname(peer), ev.video ? 'Video qo‘ng‘iroq' : 'Ovozli qo‘ng‘iroq')
-  nativeCallCancel() // APK: agar native bildirishnoma chiqqan bo'lsa — endi UI bor, yopamiz
+  // APK FON MUAMMOSI («bitta sigan berib o'chib qoldi» ildizi): WebView sahifa yashirin
+  // bo'lsa ham document.hidden YANGILANMASLIGI MUMKIN — ilova fonda bo'lsa in-app WebAudio
+  // ringtoni ESHTILMAYDI. AVVALGI KOD bu yerda nativeCallCancel() chaqirardi — push
+  // ko'rsatgan native qo'ng'iroq oynasi O'CHIB, fon rejimida faqat BITTA ovoz qolardi!
+  // Endi: APK'da native oyna ZAXIRA sifatida HAM ko'rsatiladi va har 6s qayta jonlanadi
+  // (ovoz qayta o'ynaydi) — ilova fonda bo'lsa ham jiringlash JAVOB BERUNGACHA davom etadi.
+  // Foreground'da ikki ovoz chiqmasligi uchun native oyna CallAlert'da jimsiz kanalga chiqadi.
+  if (nb) {
+    const nbShow = () => { try { nb.callIncoming(JSON.stringify({ id: ev.call_id, name: uname(peer), video: !!ev.video })) } catch {} }
+    nbShow()
+    CALL.nbT = setInterval(nbShow, 6000)
+  }
   // 65s (chaqiruvchi 60s'da o'zi yopadi) — MUHIM report=true: status serverga yoziladi, aks
   // holda o'lik "ringing" bazada qolib, har 6s QAYTA jiringlar edi («band bo'lib» ildizi)
   CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', true), 65000)
@@ -297,7 +338,62 @@ setInterval(() => {
         Promise.resolve(restartIce(C, true)).catch(() => {}).finally(() => { C.restaring = false })
       } else if (Date.now() - C.failAt > 25000) { endCall('missed', true, 'Aloqa yo‘q — internetni tekshirib, qayta urinib ko‘ring'); return }
     } else if (pcs === 'connected') { C.failAt = 0; C.failTries = 0 }
-    // 4) JIRINGLASH QOROVUSI: kirish qo'ng'irog'i ko'rinib turganda ovoz JIM bo'lib qolsa
+    // 4) MEDIA QOROVULI (getStats — «ulangan, LEKIN ovoz/video kelmayapti» ildizi): ulanish
+    //    'connected' bo'lib turib kiruvchi RTP oqimi to'xtasa, HECH KIM kutmay o'zi tuzatadi:
+    //    ~10s oqim yo'q — elementlarni qayta jonlantirish (srcObject+play); ~15s — ICE restart
+    //    (3 martagacha). Bu birtomonlama ovoz va muzlagan videoni tarmoq darajasida davolaydi.
+    if (C.started && C.pc && pcs === 'connected') {
+      C.pc.getStats().then((st) => {
+        if (CALL !== C || !C.pc || C.pc.connectionState !== 'connected') return
+        let bytes = 0, frames = -1, hasVideo = false
+        st.forEach((r) => {
+          if (r.type === 'inbound-rtp' && !r.isRemote) {
+            bytes += r.bytesReceived || 0
+            if (r.kind === 'video') { hasVideo = true; frames = r.framesDecoded || 0 }
+          }
+        })
+        if (C.mT === undefined) { C.mT = Date.now(); C.mB = bytes; C.mF = frames; return }
+        const t = Date.now()
+        if (t - C.mT < 4500) return // ~5s oynada bir marta baholash
+        const dBytes = bytes - C.mB
+        const dFrames = frames >= 0 && C.mF >= 0 ? frames - C.mF : -1
+        C.mT = t; C.mB = bytes; C.mF = frames
+        if (dBytes > 0) {
+          C.mS = 0; C.mTries = 0 // oqim tirik — hisoblagichlarni nolga tushir
+          // OVOZ kelyapti lekin VIDEO qotgan (5s'da birorta ham yangi kadr yo'q) — elementlarni
+          // qayta jonlantiramiz (WebView video elementi muzlashi — aynan shifokor talab qilingan)
+          if (hasVideo && dFrames === 0) {
+            C.vS = (C.vS || 0) + 1
+            if (C.vS >= 3 && C.mTries < 3 && !C.restaring) {
+              C.vS = 0; C.mTries++
+              C.restaring = true
+              setCallState('Qayta ulanmoqda…')
+              Promise.resolve(restartIce(C, true)).catch(() => {}).finally(() => { C.restaring = false })
+            } else if (C.vS >= 2) {
+              try { const v = qs('.remote', C.el); if (v) { if (C.remoteStream && v.srcObject !== C.remoteStream) v.srcObject = C.remoteStream; if (v.paused) v.play().catch(() => {}) } } catch {}
+            }
+          } else C.vS = 0
+          return
+        }
+        // UMUMAN oqim yo'q (bittomon media)
+        C.mS = (C.mS || 0) + 1
+        if (C.mS >= 2) {
+          try {
+            const v = qs('.remote', C.el), a = qs('.ra', C.el)
+            if (v && C.remoteStream && v.srcObject !== C.remoteStream) v.srcObject = C.remoteStream
+            if (a && C.remoteStream && a.srcObject !== C.remoteStream) a.srcObject = C.remoteStream
+            playRemote(C)
+          } catch {}
+        }
+        if (C.mS >= 3 && C.mTries < 3 && !C.restaring) {
+          C.mS = 0; C.mTries = (C.mTries || 0) + 1
+          setCallState('Qayta ulanmoqda…')
+          C.restaring = true
+          Promise.resolve(restartIce(C, true)).catch(() => {}).finally(() => { C.restaring = false })
+        }
+      }).catch(() => {})
+    }
+    // 5) JIRINGLASH QOROVUSI: kirish qo'ng'irog'i ko'rinib turganda ovoz JIM bo'lib qolsa
     //    (OS AudioContext'ni uxlatgan / boshqa oqim o'chirgan) — o'z-o'zidan jonlanadi.
     //    Faqat JAVOB BERILMAGAN holatda (ringMode saqlangan) — javob berilgach hech qachon.
     if (!C.started && C.ringMode && !ringTimer) ringTone(true, C.ringMode || undefined)
@@ -314,9 +410,21 @@ window.__50wsOpen = async () => {
       if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, started_at: r.call.started_at, from: r.call.from })
     } catch {}
   }
-  // QO'NG'IROQ davomida WS qayta ulandi va hali ulanmagan bo'lsa — offer qayta yuboriladi
-  // (uzilish paytida yo'qolgan offer/answer tufayli «Ulanmoqda…» da osilib qolmaslik uchun)
-  try { if (CALL && !CALL.started && CALL.pc && CALL.pc.localDescription) restartIce(CALL) } catch {}
+  // QO'NG'IROQ davomida WS qayta ulandi va javob HALI kelmasa — XUDDI SHU offerni qayta
+  // yuboramiz (IDEMPOTENT, faqat 5s+ kutgach).
+  // ⚠️ AVVALGI KOD BU YERDA YANGI iceRestart OFFER yaratardi (restartIce) — bu GLARE BOMBA
+  // edi: WS qayta ulanishida ikkala tomonda ham bir vaqtda offer paydo bo'lib, rollback
+  // urinishlaridan keyin 'answer' InvalidStateError bilan YO'QOLARDI → chaqiruvchi javob
+  // bergan tomon mediasini umuman olmasdi (video QOTADI + ovoz YO'Q, qarshi tomon esa
+  // hammasi joyida — aynan foydalanuvchi shikoyati). v64 pong-qorovuli WS'ni tez-tez
+  // qayta ulagani uchun bu poyga HAR QO'NG'IROQDA chiqadigan bo'ldi. Endi: yangi offer
+  // YARATILMAYDI, mavjud offer faqat javob kelmagan taqdirdagina qayta yuboriladi.
+  try {
+    const C = CALL
+    if (C && !C.started && C.pc && C.pc.localDescription && !C.pc.remoteDescription && C.offerAt && Date.now() - C.offerAt > 5000) {
+      sig(C.peer.id, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON() })
+    }
+  } catch {}
   // WS tiklanganda navbatdagi signallarni ham o'qib olamiz (uzilish paytida yig'ilganlari)
   try { drainSigQueue() } catch {}
   // Task 34: WS uzilib-tiklanganda efir signalari (offer/ICE) YO‘QOLGAN bo‘lishi mumkin —
@@ -325,8 +433,15 @@ window.__50wsOpen = async () => {
   if (L && !L.host && !L.rejoining && (!L.pc || L.pc.connectionState !== 'connected')) liveRejoin()
 }
 async function acceptCall() {
-  const C = CALL; if (!C) return
+  const C = CALL
+  // QAYTA KIRISH GUARDI: «Javob berish» UI'da + native bildirishnomada bir vaqtda bosilsa
+  // acceptCall IKKI MARTA ishlagan — ikkinchi getMedia kamera band deb XATO berib, BUTUN
+  // qo'ng'iroqni o'chirib qo'yardi. Endi bir CALL obyekti uchun faqat bitta marta ishlaydi.
+  if (!C || C.accepting) return
+  C.accepting = true
   C.ringMode = '' // javob berildi — qorovul endi jiringlamaydi (faqat javob berilmaganida qayta yoqadi)
+  clearInterval(C.nbT) // APK: native oyna qayta jonlantirish halqasi to'xtasin
+  nativeCallCancel() // APK: native qo'ng'iroq oynasi yopilsin
   C.acceptAt = Date.now() // qorovul: javob berilgach ulanishga alohida 30s graziya
   ringTone(false); clearTimeout(C.timeout)
   setCallState('Ulanmoqda…')
@@ -372,6 +487,7 @@ async function setupPC(C) {
   limitBitrate(C.pc, 1200000)
   C.pc.ontrack = (e) => {
     const st = e.streams[0] || new MediaStream([e.track])
+    C.remoteStream = st // MEDIA QOROVULI: element qayta jonlantirishda aynan shu oqim qayta bog'lanadi
     qs('.remote', C.el).srcObject = st
     qs('.ra', C.el).srcObject = st
     if (e.track.kind === 'audio' && !e.track.onunmute) e.track.onunmute = () => playRemote(C) // ovoz treki jonlanganda ham o'ynatamiz
@@ -420,7 +536,9 @@ async function restartIce(C, fresh) {
     // fresh: tarmoq yo'li ishlamayotgan bo'lsa — yangi TURN creds olib konfiguratsiyani
     // yangilaymiz (Cloudflare TURN cred muddati/kvotasi tugagan bo'lishi mumkin).
     if (fresh) { try { const srv = await iceServers(true); C.pc.setConfiguration?.({ iceServers: srv }) } catch {} }
-    const o = await C.pc.createOffer({ iceRestart: true }); await C.pc.setLocalDescription(o); sig(C.peer.id, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON() })
+    const o = await C.pc.createOffer({ iceRestart: true }); await C.pc.setLocalDescription(o)
+    C.offerAt = Date.now() // watchdog'lar qayta yuborishda xuddi shu offerdan foydalansin
+    sig(C.peer.id, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON() })
   } catch {}
 }
 async function flipCam() {
@@ -441,6 +559,7 @@ function endCall(status = 'ended', report = true, msg) {
   const C = CALL; if (!C) return
   CALL = null
   C.ringMode = '' // qorovul endi jiringlamaydi
+  clearInterval(C.nbT) // APK: native oyna qayta jonlantirish halqasi to'xtasin
   stopSigPoll() // navbat-polling to'xtasin
   ringTone(false)
   nativeCallCancel() // APK: qo'ng'iroq bildirishnomasini yopish
@@ -518,15 +637,23 @@ async function handleSignalEv(ev) {
       await setupPC(C)
       const o = await C.pc.createOffer()
       await C.pc.setLocalDescription(o)
+      C.offerAt = Date.now() // qorovul: WS qayta ulanganda XUDDI SHU offerni qayta yuborish uchun
       // 'offer' yo'qolsa qabul qiluvchi abadiy kutadi — 3 marta qayta urinamiz, yetmasa aniq yopamiz
       const ok = await sigTo(from, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON() })
       if (!ok && !C.started) return endCall('missed', true, 'Signal yetmadi — internetni tekshirib ko‘ring')
       armConnectWatchdog(C)
     }
     if (d.k === 'offer' && C.pc) {
-      // GLARE TUZATISH: ikkala tomon bir vaqtda offer yuborsa (WS qayta ulanishda ikkalasi ham
-      // restartIce qiladi), 'have-local-offer' holatida setRemoteDescription XATO berardi va
-      // ulanish buzilardi — endi rollback qilib javob beramiz (Perfect Negotiation qisqasi).
+      // IDEMPOTENT QAYTA OFFER: xuddi shu SDP qayta keldi (WS + navbat / WS qayta ulanishda
+      // qayta yuborilgan) — MAVJUD javobni qayta yuboramiz, renegotiation QILMAYMIZ (aks
+      // holda ICE qayta sozlanib, media birtomonla uzilardi)
+      const rsdp = d.sdp && d.sdp.sdp
+      if (rsdp && C.pc.remoteDescription && C.pc.remoteDescription.sdp === rsdp && C.pc.localDescription) {
+        sig(from, { k: 'answer', call_id: C.id, sdp: C.pc.localDescription.toJSON() })
+        return
+      }
+      // GLARE TUZATISH: ikkala tomon bir vaqtda offer yuborsa (watchdog tiklanishi), 'have-local-offer'
+      // holatida setRemoteDescription XATO berardi — endi rollback qilib javob beramiz.
       if (C.pc.signalingState === 'have-local-offer') { try { await C.pc.setLocalDescription({ type: 'rollback' }) } catch {} }
       await C.pc.setRemoteDescription(d.sdp)
       await flushIce(C)
@@ -535,7 +662,15 @@ async function handleSignalEv(ev) {
       const ok = await sigTo(from, { k: 'answer', call_id: C.id, sdp: C.pc.localDescription.toJSON() })
       if (!ok && !C.started) endCall('missed', true, 'Signal yetmadi — internetni tekshirib ko‘ring')
     }
-    if (d.k === 'answer' && C.pc) { await C.pc.setRemoteDescription(d.sdp); await flushIce(C) }
+    if (d.k === 'answer' && C.pc) {
+      // JAVOB faqat offer yuborilgach qabul qilinadi. Boshqa holatda kelsa (ikkinchi nusxa /
+      // poyga) — Jim e'tiborsiz: AVVALGI KOD setRemoteDescription InvalidStateError bilan
+      // XATO berardi va shu signal ishlovidagi boshqa signallar ham yo'qolardi.
+      if (C.pc.signalingState !== 'have-local-offer') return
+      if (C.pc.remoteDescription && d.sdp && C.pc.remoteDescription.sdp === d.sdp.sdp) return
+      await C.pc.setRemoteDescription(d.sdp)
+      await flushIce(C)
+    }
     if (d.k === 'ice') { if (C.pc?.remoteDescription) await C.pc.addIceCandidate(d.c).catch(() => {}); else C.ice.push(d.c) }
     if (d.k === 'hangup') endCall('ended', false)
     if (d.k === 'busy') endCall('missed', true, 'Band')

@@ -733,6 +733,7 @@ function syncAll() { loadChats(); if (S.cur) fetchMessages(S.cur); loadStories()
 async function loadChats() {
   const r = await api('/chats')
   lastChatsLoad = Date.now(); S.serverNow = r.now
+  try { S.tSkew = Date.now() - (+r.now || Date.now()) } catch { S.tSkew = 0 } // klient soati skewi — qo'ng'iroq yoshi server vaqti bilan tekshiriladi
   const seen = new Set()
   for (const c of r.chats) { seen.add(c.id); const old = S.chats.get(c.id); S.chats.set(c.id, { ...old, ...c, joined: true }) }
   for (const [id, c] of S.chats) if (!seen.has(id) && c.joined) S.chats.delete(id)
@@ -907,6 +908,8 @@ function g50SoftUpdate() {
     if (Date.now() - G50_BOOT < 5 * 3600e3) return
     if (typeof CALL !== 'undefined' && CALL) return
     if (typeof LIVE !== 'undefined' && LIVE) return
+    // APK fon qo'ng'irog'i kutilayotgan bo'lsa — sahifa qayta yuklanmasin (javob berish oynasi yo'qolmasin)
+    if (typeof pendingNativeCall !== 'undefined' && pendingNativeCall) return
     if (qs('.shbg')) return // ochiq oyna bor — keyingi qaytishda
     location.replace(location.href)
   } catch {}
@@ -922,7 +925,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v64'
+window.__50BUILD = 'v65'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
@@ -946,6 +949,10 @@ function g50ReloadNew() {
     if (document.hidden) return // yashirin holatda emas — ko'rinishda tekshiriladi
     if (typeof CALL !== 'undefined' && CALL) return // QO'NG'IROQ paytida hech qachon
     if (typeof LIVE !== 'undefined' && LIVE) return // jonli efir paytida hech qachon
+    // ⚠️ POYGA HIMoyasi: native/push qo'ng'iroq oynasi ko'rinayotgan bo'lsa (CALL hali
+    // yaratilmagan holatda ham) reload qo'ng'iroq oynasini O'CHIRIB qo'yardi — «bitta
+    // sigan berib o'chib qoldi» ildizlaridan biri. Endi kutamiz — keyingi qaytishda yangilanadi.
+    if (typeof pendingNativeCall !== 'undefined' && pendingNativeCall) return
     if (qs('.shbg')) return // ochiq oyna/paneld paytida
     const t = +(localStorage.getItem('g50_breload') || 0)
     if (Date.now() - t < 120000) return // LOOP-HIMOYA: so'nggi 2 daqiqada yangilangan bo'lsa kutamiz

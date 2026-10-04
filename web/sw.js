@@ -1,5 +1,5 @@
 // 50 Gram service worker: ilova qobig'ini keshlaydi (oflayn ochiladi) + Telegram-uslubidagi Web Push.
-const V = '50gram-v64'
+const V = '50gram-v65'
 const SHELL = ['./', 'index.html', 'style.css', 'config.js', 'core.js', 'p2p.js', 'storage.js', 'chat.js', 'manage.js', 'social.js', 'rtc.js', 'logo.png', 'icon-192.png', 'icon-512.png', 'maskable-192.png', 'maskable-512.png', 'apple-touch-icon.png', 'favicon.png', 'manifest.json',
   // Task 29: Manrope shrifti + animatsiyali stiker paketlari + sovg'alar
   'fonts/manrope-latin.woff2', 'fonts/manrope-latin-ext.woff2',
@@ -114,7 +114,9 @@ self.addEventListener('notificationclick', (e) => {
   e.notification.close()
   const nd = e.notification.data || {}
   e.waitUntil((async () => {
-    // Qo'ng'iroq bildirishnomasi: "Rad etish" — serverga yuboriladi; "Javob berish"/ochish — ilova ochiladi
+    // Qo'ng'iroq bildirishnomasi: "Rad etish" — serverga yuboriladi; "Javob berish" —
+    // ilovaga callanswer xabari yuboriladi (avval faqat ilova ochilardi, javob BERMASDI);
+    // ochish/tap — ilova ochiladi (ochilgach /calls/pending qo'ng'iroqni ko'rsatadi)
     if (nd.call && e.action === 'decline' && nd.call_id) {
       const prefs = (await idbGet('prefs')) || {}
       if (prefs.token) {
@@ -127,6 +129,14 @@ self.addEventListener('notificationclick', (e) => {
           })
         } catch {}
       }
+      return
+    }
+    if (nd.call && e.action === 'answer' && nd.call_id) {
+      const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      for (const c of all) {
+        try { await c.focus(); c.postMessage({ type: 'callanswer', call_id: nd.call_id }); return } catch {}
+      }
+      await self.clients.openWindow('./')
       return
     }
     const chat = nd.chat_id || 0
