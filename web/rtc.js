@@ -114,7 +114,12 @@ const IC = {
 function callUI(peer, video, state) {
   const el = document.createElement('div')
   el.className = 'over call' + (video ? ' vid' : '')
-  el.innerHTML = `<video class="remote" autoplay playsinline></video><video class="local" autoplay playsinline muted></video><audio class="ra" autoplay></audio>
+  // OVOZ (tuzatildi — «qarshi tomon ovozi kelmayapti»): ovoz FAQAT .ra audio elementdan
+  // chiqadi, .remote video esa TILLANGAN (faqat rasm). Sabablar: 1) ikkala element ham
+  // ovoz chiqarsa — takrorlangan/echo ovoz; 2) ayrim qurilmalarda (WebView) video element
+  // WebRTC ovozini o'zi o'ynatmaydi — aynan shu «ovoz kelmaydi» ildizi. .ra har qurilmada
+  // ishonchli, «Dinamik» tugmasi ham endi rostan ovozni boshqaradi.
+  el.innerHTML = `<video class="remote" autoplay playsinline muted></video><video class="local" autoplay playsinline muted></video><audio class="ra" autoplay></audio>
     <div class="cinfo">${avHTML(peer, 120, { noStory: true })}<h2>${esc(uname(peer))}</h2><div class="cst">${state}</div></div>
     <div class="cbar"></div>`
   document.body.appendChild(el)
@@ -200,6 +205,9 @@ document.addEventListener('visibilitychange', () => {
     pendingNativeCall = null
     incomingCall(ev)
   }
+  // APK/PWA fonga kirib-chiqqanda WebView mediani to'xtatishi mumkin — qo'ng'iroq ovozini
+  // va rasmni qayta ishga tushiramiz (aks holda qo'ng'iroq «qotib qoldi»day tuyuladi)
+  if (!document.hidden && CALL) { try { playRemote(CALL) } catch {} }
 })
 function incomingCall(ev) {
   if (CALL) { sig(ev.from.id, { k: 'busy', call_id: ev.call_id }); return }
@@ -263,24 +271,62 @@ async function acceptCall() {
     endCall('declined', true, '⚠️ ' + e.message)
   }
 }
+// QARSHI TOMON MEDIASINI O'YNATISH — «ovoz kelmayapti» tuzatuvi (jonli efirdagi livePlay bilan
+// bir xil isbotlangan yondashuv). autoplay atributi yolg'iz yetarli emas: srcObject ontrack
+// ichida KEYINROQ o'rnatiladi — ba'zi brauzer/WebView'lar play()ni bloklaydi va jim qoladi.
+// Bloklansa — tillangan holda o'ynatamiz va birinchi bosishda ovozni qaytaramiz.
+function playRemote(C) {
+  if (!C?.el || CALL !== C) return
+  const v = qs('.remote', C.el), a = qs('.ra', C.el)
+  if (!a) return
+  try { a.muted = false; a.volume = 1 } catch {}
+  let p; try { p = a.play() } catch (e) { p = null }
+  if (p && p.catch) p.catch(() => {
+    if (a.muted) return
+    a.muted = true
+    try { const q = a.play(); if (q && q.catch) q.catch(() => {}) } catch {}
+    document.addEventListener('pointerdown', () => { if (CALL === C) { try { a.muted = false; a.play().catch(() => {}) } catch {} } }, { once: true })
+  })
+  try { if (v && v.paused) v.play().catch(() => {}) } catch {}
+}
 async function setupPC(C) {
   C.pc = await newPC((c) => sig(C.peer.id, { k: 'ice', call_id: C.id, c }))
   for (const t of C.local.getTracks()) C.pc.addTrack(t, C.local)
+  // TEZLIK/SIFAT: video yuborish 900 kbit bilan cheklanadi (jonli efirdagi bilan bir xil) —
+  // cheksiz 720p kuchsiz tarmoqda tarmoqni to'ldi: video QOTARDI, ovoz bo'linardi.
+  limitBitrate(C.pc)
   C.pc.ontrack = (e) => {
-    const st = e.streams[0]
+    const st = e.streams[0] || new MediaStream([e.track])
     qs('.remote', C.el).srcObject = st
     qs('.ra', C.el).srcObject = st
+    if (e.track.kind === 'audio' && !e.track.onunmute) e.track.onunmute = () => playRemote(C) // ovoz treki jonlanganda ham o'ynatamiz
     if (C.video) C.el.classList.add('live')
+    playRemote(C)
   }
   C.pc.onconnectionstatechange = () => {
     const s = C.pc.connectionState
-    if (s === 'connected' && !C.started) {
-      C.started = Date.now()
-      clearTimeout(C.timeout); clearTimeout(C.connWatch); clearTimeout(C.connWatch2)
-      C.tick = setInterval(() => setCallState(fmtDur((Date.now() - C.started) / 1000)), 1000)
-      if (C.video) qs('.cinfo', C.el).classList.add('mini')
+    if (s === 'connected') {
+      clearTimeout(C.dropT) // qayta ulandi — qotish qorovulini to'xtat
+      playRemote(C)
+      if (!C.started) {
+        C.started = Date.now()
+        clearTimeout(C.timeout); clearTimeout(C.connWatch); clearTimeout(C.connWatch2)
+        C.tick = setInterval(() => setCallState(fmtDur((Date.now() - C.started) / 1000)), 1000)
+        if (C.video) qs('.cinfo', C.el).classList.add('mini')
+      }
     }
-    if (s === 'disconnected') setCallState('Aloqa uzildi, qayta ulanmoqda…')
+    if (s === 'disconnected') {
+      // QOTISHNING ILDIZI: avval faqat MATN chiqarilardi — hech narsa qayta ulamasdi va
+      // qo'ng'iroq ABADIY muzlab qolardi (aynan foydalanuvchi shikoyati). Endi 3s ichida
+      // o'zi tiklanmasa — ICE restart (yangi yo'l + yangi TURN creds), ikkala tomonda ham.
+      setCallState('Aloqa uzildi, qayta ulanmoqda…')
+      clearTimeout(C.dropT)
+      C.dropT = setTimeout(() => {
+        if (CALL !== C || !C.pc || C.pc.connectionState === 'connected' || C.restaring) return
+        C.restaring = true
+        Promise.resolve(restartIce(C, true)).catch(() => {}).finally(() => { C.restaring = false })
+      }, 3000)
+    }
     if (s === 'failed') {
       // ULANMADI: ikkala tomonda ham qayta urinish — avval YANGI ICE konfiguratsiyasi (TURN
       // creds tiklanadi), keyin ICE restart (2 martagacha), bo'lmasa aniq xato.
@@ -323,7 +369,7 @@ function endCall(status = 'ended', report = true, msg) {
   ringTone(false)
   nativeCallCancel() // APK: qo'ng'iroq bildirishnomasini yopish
   clearTimeout(C.timeout); clearInterval(C.tick)
-  clearTimeout(C.connWatch); clearTimeout(C.connWatch2)
+  clearTimeout(C.connWatch); clearTimeout(C.connWatch2); clearTimeout(C.dropT)
   const dur = C.started ? Math.round((Date.now() - C.started) / 1000) : 0
   if (report && C.id) {
     sig(C.peer.id, { k: 'hangup', call_id: C.id })
