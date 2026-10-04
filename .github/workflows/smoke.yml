@@ -10,7 +10,7 @@ jobs:
       - name: To'liq E2E tekshiruv (deploy'dan keyin avtomatik, o'zini tozalaydi)
         run: |
           set -e
-          sleep 45  # deploy tugashini kutish
+          sleep 90  # deploy tugashini kutish (npm ci + wrangler deploy ~1-2 daqiqa)
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
           BASE="https://50gram.begzodbegzodjons.workers.dev"
           TOK=""
@@ -60,8 +60,14 @@ jobs:
           UID2=$(echo "$V2" | python3 -c "import sys,json;print(json.load(sys.stdin)['user']['id'])")
           AUTH2="authorization: Bearer $TOK2"
           echo "verify2: OK (user $UID2)"
-          # VERSION LOCK: build qorovuli (BUILD_V == __50BUILD == sw V)
-          curl -s -A "$UA" "$BASE/api/build" | grep -q '"v":"v65"' || { echo "FAIL build v65"; exit 1; }
+          # VERSION LOCK: build qorovuli (BUILD_V == __50BUILD == sw V) — 3 martagacha kutamiz
+          BV=""
+          for i in 1 2 3 4 5 6; do
+            BV=$(curl -s -A "$UA" "$BASE/api/build" | python3 -c "import sys,json;print(json.load(sys.stdin).get('v',''))" 2>/dev/null || true)
+            [ "$BV" = "v65" ] && break
+            sleep 20
+          done
+          [ "$BV" = "v65" ] || { echo "FAIL build v65 (olindi: '$BV')"; exit 1; }
           echo "build: v65 OK"
           # 1) QO'NG'IROQ YARATISH
           C1=$(curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/calls" -H 'content-type: application/json' -d "{\"to\":$UID2,\"video\":true}")
