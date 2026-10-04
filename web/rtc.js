@@ -151,6 +151,7 @@ async function callUser(uid, video) {
   CALL = { peer, video: !!video, outgoing: true, ice: [], el: callUI(peer, video, 'Ulanmoqda…') }
   startSigPoll() // qo'ng'iroq davomida navbat-polling: WS zombi bo'lsa ham signallar yetadi
   callButtons('active')
+  ringTone(true) // JIRINGLASH DARHOL: tarmoq javobini kutmasdan — bosgan paytdanoq eshitiladi
   try {
     CALL.local = await getMedia(video)
     qs('.local', CALL.el).srcObject = CALL.local
@@ -158,7 +159,6 @@ async function callUser(uid, video) {
     if (!CALL) return
     CALL.id = r.call_id
     setCallState('Chaqirilmoqda…')
-    ringTone(true)
     CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', true, 'Javob bermadi'), 75000)
   } catch (e) {
     // XATO KO‘RINADIGAN bo‘lsin: nima uchun kamera ochilmaganini qo‘ng‘iroq oynasida ham ko‘rsatamiz
@@ -417,20 +417,34 @@ async function handleSignalEv(ev) {
 on('signal', handleSignalEv)
 
 // Qo'ng'iroq ohangi (fayl kerak emas — WebAudio)
+// TUZATILDI (foydalanuvchi: «jiringlash ovozi yo'q, jim»): 1) AudioContext await'lardan
+// keyin yaratilardi — brauzer uni SUSPEND holatda qoldirardi = umuman OVOZ CHIQMASDI;
+// endi har safar resume() chaqiriladi. 2) Ovoz juda past edi (0.06) — endi haqiqiy
+// ringback kabi ikki qisqa jiringlash, aniq eshitiladigan darajada (0.14).
 let ringCtx = null, ringTimer = 0
 function ringTone(on) {
   clearInterval(ringTimer)
   if (!on) { try { ringCtx?.close() } catch {} ringCtx = null; return }
   try {
-    ringCtx = new (window.AudioContext || window.webkitAudioContext)()
+    if (!ringCtx) ringCtx = new (window.AudioContext || window.webkitAudioContext)()
+    if (ringCtx.state === 'suspended') ringCtx.resume().catch(() => {})
+    const beepAt = (t, f, d) => {
+      const o = ringCtx.createOscillator(), g = ringCtx.createGain()
+      o.frequency.value = f
+      g.gain.setValueAtTime(0.0001, t)
+      g.gain.linearRampToValueAtTime(0.14, t + 0.03) // yumshoq boshlanish
+      g.gain.setValueAtTime(0.14, t + d - 0.06)
+      g.gain.linearRampToValueAtTime(0.0001, t + d) // yumshoq tugash
+      o.connect(g); g.connect(ringCtx.destination)
+      o.start(t); o.stop(t + d)
+    }
     const beepOnce = () => {
       if (!ringCtx) return
-      const o = ringCtx.createOscillator(), g = ringCtx.createGain()
-      o.frequency.value = 440; g.gain.value = 0.06
-      o.connect(g); g.connect(ringCtx.destination)
-      o.start(); o.stop(ringCtx.currentTime + 0.9)
+      if (ringCtx.state === 'suspended') { ringCtx.resume().catch(() => {}); return } // jiringlash yo'qolmasin
+      const t = ringCtx.currentTime + 0.02
+      beepAt(t, 425, 0.42); beepAt(t + 0.62, 425, 0.42) // «dirin-dirin» — haqiqiy qo'ng'iroq ohangi
     }
-    beepOnce(); ringTimer = setInterval(beepOnce, 3000)
+    beepOnce(); ringTimer = setInterval(beepOnce, 2400)
   } catch {}
 }
 

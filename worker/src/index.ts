@@ -524,18 +524,42 @@ async function avatar(c: C, table: "users" | "chats") {
 }
 async function getUser(c: C) {
   const id = +c.p.id
-  // TEZLIK: 5 ta so'rov oldin ketma-ket edi (5 ta HTTP davra yurishi = sekundlab kutish).
-  // Barchasi bir-biridan bog'liq emas — PARALLEL yuboriladi, javob ~3-5 baravar tez qaytadi.
-  const [m, iBlocked, live, direct, w] = await Promise.all([
-    usersByIds(c, [id]),
-    c.db.one("SELECT 1 AS x FROM blocks WHERE user_id=? AND blocked_id=?", [c.uid, id]),
-    c.db.one("SELECT id FROM lives WHERE user_id=? AND ended_at=0 AND started_at>?", [id, now() - 12 * 3600000]),
-    c.db.one("SELECT id FROM chats WHERE direct_key=?", [[c.uid, id].sort((a: number, b: number) => a - b).join(":")]),
-    c.db.one("SELECT earned FROM wallets WHERE user_id=?", [id]).catch(() => null) as any,
+  // TEZLIK 3-4x (foydalanuvchi shikoyati: profil «juda sekin» ochilyapti): avval 7 ta TiDB
+  // HTTP so'rov yuborilardi (usersByIds=3 + blok/efir/direct/wallet=4). Har biri HTTP davra —
+  // shu asosiy kechikish manbasi. Endi FAQAT 2 ta PARALLEL so'rov:
+  //   A) foydalanuvchi + kontakt-nomi — bitta LEFT JOIN,
+  //   B) blok/efir/direct-chat/coin/istoriya — bitta UNION.
+  const uk = USER_COLS.split(",").map((x) => "u." + x.trim()).join(",")
+  const dk = [c.uid, id].sort((a: number, b: number) => a - b).join(":")
+  const [rows, extras] = await Promise.all([
+    c.db.q(
+      `SELECT ${uk}, k.first_name AS k_first, k.last_name AS k_last
+       FROM users u LEFT JOIN contacts k ON k.owner_id=? AND k.phone=u.phone WHERE u.id=?`,
+      [c.uid, id],
+    ),
+    c.db.q(
+      `SELECT 'ib' AS k, 0 AS v1, 0 AS v2 FROM blocks WHERE user_id=? AND blocked_id=?
+       UNION ALL SELECT 'live', id, 0 FROM lives WHERE user_id=? AND ended_at=0 AND started_at>?
+       UNION ALL SELECT 'direct', id, 0 FROM chats WHERE direct_key=?
+       UNION ALL SELECT 'earn', earned, 0 FROM wallets WHERE user_id=?
+       UNION ALL SELECT 'story', COUNT(*), SUM(CASE WHEN v.viewer_id IS NULL THEN 1 ELSE 0 END)
+         FROM stories s LEFT JOIN story_views v ON v.story_id=s.id AND v.viewer_id=?
+         WHERE s.user_id=? AND s.expires_at>?`,
+      [c.uid, id, id, now() - 12 * 3600000, dk, id, c.uid, id, now()],
+    ).catch(() => [] as any[]),
   ])
-  const u = m.get(id)
+  const u = rows[0]
   if (!u) fail("Foydalanuvchi topilmadi", 404)
-  return json({ ...u, lvl: levelOf(Number(w?.earned || 0)), i_blocked: !!iBlocked, live_id: live?.id || null, chat_id: direct?.id || null })
+  let iBlocked = false, liveId = 0, directId = 0, earned = 0, story: any = null
+  for (const r of extras) {
+    if (r.k === "ib") iBlocked = true
+    else if (r.k === "live") liveId = Number(r.v1) || liveId
+    else if (r.k === "direct") directId = Number(r.v1) || directId
+    else if (r.k === "earn") earned = Number(r.v1) || 0
+    else if (r.k === "story") story = { count: Number(r.v1) || 0, unseen: Number(r.v2) || 0 }
+  }
+  const kn = u.k_first != null ? { first_name: u.k_first, last_name: u.k_last } : undefined
+  return json({ ...pubUser(u, c.uid, kn), story, lvl: levelOf(earned), i_blocked: iBlocked, live_id: liveId || null, chat_id: directId || null })
 }
 
 // ------------------------- Qidiruv -------------------------

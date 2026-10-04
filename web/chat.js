@@ -945,10 +945,13 @@ async function openDirectWith(uid) {
 function profBodyHTML(u, opt = {}) {
   const isC = (S.contacts || []).some((k) => k.user && k.user.id === u.id)
   const loading = !u.first_name && !u.username && !u.avatar_ver
+  // pend: server ma'lumoti hali kelmagan (birinchi chizish) — funksiyalar BARIBIR ko'rinadi,
+  // faqat qo'shimcha ma'lumot qatorlari o'rnida «yuklanmoqda» ko'rsatiladi
+  const pend = !!opt.pend && !u.phone && !u.username && !u.bio
   return `<div class="prof upage-prof">
     <div class="bigav" style="width:124px;height:124px">${avHTML(u, 124, { live: !!u.live_id, liveId: u.live_id })}</div>
     <h2>${loading ? '<span class="mut">…</span>' : esc(uname(u))}</h2>
-    <div class="mut">${u.lvl ? `<span class="lvlbadge" style="display:inline-flex;margin-right:6px">${u.lvl.emoji} ${esc(u.lvl.name)}</span>` : ''}${loading ? '' : esc(lastSeen(u))}${u.live_id ? ' · 🔴 hozir efirda' : ''}</div>
+    <div class="mut">${u.lvl ? `<span class="lvlbadge" style="display:inline-flex;margin-right:6px">${u.lvl.emoji} ${esc(u.lvl.name)}</span>` : ''}${loading ? '<span class="mut">yuklanmoqda…</span>' : esc(lastSeen(u))}${u.live_id ? ' · 🔴 hozir efirda' : ''}</div>
     ${u.avatar_ver && !loading ? '<small class="mut pf-hint">🖼 Rasmini katta ko‘rish uchun ustiga bosing</small>' : ''}
   </div>
   <div class="pbtns" style="display:flex;gap:8px;margin:6px 0 12px">
@@ -961,24 +964,65 @@ function profBodyHTML(u, opt = {}) {
     ${u.phone ? `<div data-a="phone"><span class="ri">📱</span><div class="rt">${esc(u.phone)}<small>Telefon — bosib nusxa oling</small></div></div>` : ''}
     ${u.username ? `<div data-a="un"><span class="ri">@</span><div class="rt">@${esc(u.username)}<small>Username — nusxa olish</small></div></div>` : ''}
     ${u.bio ? `<div><span class="ri">ℹ️</span><div class="rt">${esc(u.bio)}<small>Bio</small></div></div>` : ''}
-    ${!u.phone && !u.username && !u.bio && loading ? '<div><span class="ri">⏳</span><div class="rt">Ma’lumotlar yuklanmoqda…<small>Bir necha soniya kuting</small></div></div>' : ''}
+    ${pend ? '<div><span class="ri">⏳</span><div class="rt">Qo‘shimcha ma’lumotlar yuklanmoqda…<small>Telefon, @username va bio bir necha soniyada ko‘rinadi</small></div></div>' : ''}
   </div>
   <div class="rows">
-    ${!loading && !isC ? '<div data-a="add"><span class="ri">➕</span><div class="rt">Kontaktlarga qo‘shish</div></div>' : ''}
+    ${!isC ? '<div data-a="add"><span class="ri">➕</span><div class="rt">Kontaktlarga qo‘shish</div></div>' : ''}
     ${u.username ? '<div data-a="share"><span class="ri">🔗</span><div class="rt">Profilni ulashish</div></div>' : ''}
     ${opt.inChat ? '<div data-a="clear"><span class="ri">🧹</span><div class="rt">Suhbatni tozalash</div></div>' : ''}
-    ${!loading ? `<div data-a="block"><span class="ri">🚫</span><div class="rt red">${u.i_blocked ? 'Blokdan chiqarish' : 'Bloklash'}</div></div>` : ''}
+    <div data-a="block"><span class="ri">🚫</span><div class="rt red">${u.i_blocked ? 'Blokdan chiqarish' : 'Bloklash'}</div></div>
   </div>`
+}
+// ---------------- PROFIL KESHI (qurilmada) + SO'ROV BIRLASHTIRISH ----------------
+// TEZLIK (foydalanuvchi shikoyati «profil juda sekin ochilyapti, qayta-qayta bosilyapti»):
+// 1) Shu foydalanuvchi profili allaqachon OCHIQ bo'lsa — yangi sahifa QOSHILMAYDI. Avval har
+//    bosish yangi sahifa yig'ardi (ustma-ust to'planib, animatsiyalar ketma-ket chiqardi =
+//    «sekin/buzilgan» his qilinishi).
+// 2) Bir foydalanuvchi uchun ketayotgan so'rov TAKORLANMAYDI — barcha bosishlar bitta javobni oladi.
+// 3) Oxirgi 150 profil localStorage'da saqlanadi — keyingi ochilish umuman KUTMAYDI (0 ms).
+const profLS = 'g50_prof'
+let profCache = null
+function profLSGet(uid) {
+  try {
+    if (!profCache) profCache = JSON.parse(localStorage.getItem(profLS) || '{}')
+    return profCache[uid] || null
+  } catch { return null }
+}
+function profLSSet(u) {
+  try {
+    if (!profCache) profCache = JSON.parse(localStorage.getItem(profLS) || '{}')
+    profCache[u.id] = u
+    const ks = Object.keys(profCache)
+    if (ks.length > 150) ks.sort((a, b) => (profCache[a]._at || 0) - (profCache[b]._at || 0)).slice(0, ks.length - 150).forEach((k) => delete profCache[k])
+    localStorage.setItem(profLS, JSON.stringify(profCache))
+  } catch {}
+}
+const profF = new Map()
+function profFetch(uid) {
+  if (!profF.has(uid)) {
+    const pr = api('/users/' + uid).then((fresh) => {
+      const u = { id: uid, ...fresh, _at: Date.now() }
+      S.users.set(uid, u); profLSSet(u); profF.delete(uid)
+      return u
+    }).catch((e) => { profF.delete(uid); throw e })
+    profF.set(uid, pr)
+  }
+  return profF.get(uid)
 }
 async function openUser(uid, opt = {}) {
   if (!uid) return
   if (uid === S.me?.id) return tabGo('t-me')
+  // MUHIM: shu profil allaqachon ochiq — ikkinchi marta bosish hech narsa qo'shmaydi
+  if (qsa('.page').some((x) => x._profUid === String(uid))) return
   // Profil eng ustdagi to'liq oyna bo'ladi — ostidagi eski pastki oynalarni yopamiz
   closeAllSheets()
-  let u = S.users.get(uid) || { id: uid }
+  let u = S.users.get(uid) || profLSGet(uid) || { id: uid }
+  if (!S.users.get(uid) && u.first_name) S.users.set(uid, u) // qurilma keshi darhol ishlaydi
   const p = openPage('Profil', '')
+  p._profUid = String(uid)
   const body = qs('.pbody', p)
-  const draw = () => { body.innerHTML = profBodyHTML(u, opt) }
+  // pend: server ma'lumoti hali yo'q — funksiyalar ko'rinadi, faqat qatorlar «yuklanmoqda»
+  const draw = () => { body.innerHTML = profBodyHTML(u, Object.assign({}, opt, { pend: !u._at })) }
   draw() // MUDDATSIZ: keshdagi ma'lumot bilan chizildi — foydalanuvchi kutmaydi
   p.onclick = async (e) => {
     if (e.target.closest('[data-pback]')) return // orqaga tugmasini openPage o'zi boshqaradi
@@ -1009,13 +1053,12 @@ async function openUser(uid, opt = {}) {
   }
   // Fonda yangilash — sahifa allaqachon ochiq; javob kelgach maydonlar joyida yangilanadi
   try {
-    const fresh = await api('/users/' + uid)
-    u = { id: uid, ...fresh }
-    S.users.set(u.id, u)
+    u = await profFetch(uid)
     draw()
   } catch (e) {
     // Keshda hech narsa bo'lmasa xabar beramiz; aks holda sahifa kesh bilan ishlashda davom etadi
     if (!S.users.get(uid)) { closePage(p); toast('⚠️ ' + e.message) }
+    else { u._at = u._at || 1; draw() } // qisman kesh bor — «yuklanmoqda» qatorini olib tashlaymiz
   }
 }
 // Ochiq kanal/guruhni ko'rib chiqish (qo'shilmasdan oldin)
