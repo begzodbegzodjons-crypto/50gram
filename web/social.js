@@ -1250,12 +1250,25 @@ function shTap(slide, v) {
   }, 260)
 }
 // Tez trend Shorts: xotira-kesh → qurilma-kesh → tarmoq (zudlik uchun)
-async function trendShortsFast() {
-  let tr = shNormTrend(trendItems.filter((x) => x.kind === 'short'))
-  if (!tr.length) { const c = trendCacheGet(); if (c) tr = shNormTrend(c.filter((x) => x.kind === 'short')) }
-  if (!tr.length) {
-    try { const r = await api('/trend?cat=video&page=1'); tr = shNormTrend((r && r.items) || r || []) } catch {}
-  }
+// HAR SAFAR YANGI SHORTS (foydalanuvchi talabi: "har safar kirganda boshqa shortslar ko'rsatsin —
+// bir videoni takror ko'rish zerikarli"): rb-bucket 0..29 — server hovuzning HAR XIL qismidan qaytaradi.
+const rndRB = () => Math.floor(Math.random() * 30)
+let shRB = 0 // sessiya bucketi — openShorts'da tanlanadi (sahifa yurish barqaror bo'lishi uchun)
+async function trendShortsFast(force) {
+  // 1) KESHdagi KO'RILMAGANlar yetarli (8+) bo'lsa — zudlik bilan ular (ochilish tez);
+  //    KO'RILGANLAR HECH QACHON qaytarilmaydi (eski xato: hovuz tugasa ko'rilganlar boshidan edi).
+  const unseenFrom = (arr) => shNormTrend(arr).filter((it) => !shSeen.has(shKey(it)))
+  let tr = unseenFrom(trendItems.filter((x) => x.kind === 'short'))
+  if (tr.length < 8) { const c = trendCacheGet(); if (c) { const ks = new Set(tr.map(shKey)); for (const it of unseenFrom(c.filter((x) => x.kind === 'short'))) if (!ks.has(shKey(it))) { tr.push(it); ks.add(shKey(it)) } } }
+  if (tr.length >= 8 && !force) return tr
+  // 2) FRESH: serverdan TASODIFIY bucket — har kirishda boshqa shortslar (ko'rilmaganlar bilan birlashadi)
+  const rb = rndRB()
+  try {
+    const [a, b] = await Promise.all([api('/trend?cat=video&page=1&rb=' + rb), api('/trend?cat=video&page=2&rb=' + rb).catch(() => null)])
+    const la = (a && (a.items || a)) || [], lb = (b && (b.items || b)) || []
+    const ks = new Set(tr.map(shKey))
+    for (const it of unseenFrom(la.concat(lb))) if (!ks.has(shKey(it))) { tr.push(it); ks.add(shKey(it)) }
+  } catch {}
   return tr
 }
 // Ilova ochilishida trend videolari fonda tayyorlanadi — Reels/Shorts DARHOL qiziq kontent bilan ochiladi.
@@ -1264,10 +1277,11 @@ window.warmTrend = () => {
   try {
     if (!trendItems.length) { const c = trendCacheGet(); if (c) trendItems = c.slice() }
     if (trendCacheAge() > 30 * 60e3) {
-      // 2 sahifa PARALLEL: boyiroq hovuz (24 xil video) — har kirishda har hil ko'rinish
+      // 2 sahifa PARALLEL + tasodifiy rb-bucket: boyiroq hovuz — har kirishda har hil ko'rinish
+      const rbw = rndRB()
       Promise.all([
-        api('/trend?cat=video&page=1').catch(() => null),
-        api('/trend?cat=video&page=2').catch(() => null),
+        api('/trend?cat=video&page=1&rb=' + rbw).catch(() => null),
+        api('/trend?cat=video&page=2&rb=' + rbw).catch(() => null),
       ]).then(([a, b]) => {
         const la = (a && (a.items || a)) || [], lb = (b && (b.items || b)) || []
         const list = [...la, ...lb]
@@ -1538,14 +1552,14 @@ async function shMore() {
       }
       if (shPostsEnd && shWrap && shDry < 2) {
         shTrPage++
-        const r = await api('/trend?cat=video&page=' + shTrPage)
+        const r = await api('/trend?cat=video&page=' + shTrPage + '&rb=' + shRB)
         const items = shNormTrend(Array.isArray(r) ? r : (r && r.items) || [])
         if (!items.length) shTrPage = 0 // cheksiz lenta
         shDry = shAppend(items, f) ? 0 : shDry + 1
       }
     } else {
       shTrPage++
-      const r = await api('/trend?cat=video&page=' + shTrPage)
+      const r = await api('/trend?cat=video&page=' + shTrPage + '&rb=' + shRB)
       const items = shNormTrend(Array.isArray(r) ? r : (r && r.items) || [])
       if (!items.length) shTrPage = 0 // cheksiz lenta: qaytadan boshlaydi
       shDry = shAppend(items, f) ? 0 : shDry + 1
@@ -1580,16 +1594,31 @@ async function shortsStart(opt = {}) {
       // birinchi bo'ladi, mavzular ham server tomonda doimiy yangilanib turadi.
       let posts = shNormPosts(reelPosts)
       if (!posts.length) { try { posts = shNormPosts(await api('/reels')) } catch {} }
-      // NO-REPEAT: avvalgi sessiyada KO'RILGAN videolar chizib tashlanadi; hammasi
-      // ko'rilgan bo'lsa hovuz yangi tsiklga qaytadi. Aniq bosilgan video (opt.post)
-      // ko'rilgan bo'lsa ham HAR DOIM ko'rsatiladi — foydalanuvchi o'zi tanladi.
-      const fp = posts.filter((x) => !shSeen.has(shKey(x)))
+      // NO-REPEAT v2 (foydalanuvchi talabi: "har safar kirib chiqgandan keyin BOSHQA yangi
+      // shortslar ko'rsatadigan qil"): avvalgi sessiyada KO'RILGAN videolar chizib tashlanadi.
+      // KO'RILMASLAR kam qolganda (5dan) — SERVERDAN tasodifiy bucket bilan yangilari tortiladi;
+      // hovuz tugagan deb eski ko'rilganlarni BOSHIDAN ko'rsatish BATAMOM BEKOR (zeriktirar edi).
+      // Aniq bosilgan video (opt.post) ko'rilgan bo'lsa ham HAR DOIM ko'rsatiladi — o'zi tanladi.
+      let fp = posts.filter((x) => !shSeen.has(shKey(x)))
       if (fp.length) posts = fp
+      else if (posts.length) {
+        // hammasi ko'rilgan — ESKIROQ postlar ichidan ko'rilmaganlari qidiriladi (1 chuqur sahifa)
+        try {
+          const minId = Math.min(...posts.map((x) => x.p.id))
+          const r = await api('/reels?before=' + minId)
+          const more = shNormPosts((Array.isArray(r) ? r : (r && r.posts) || [])).filter((x) => !shSeen.has(shKey(x)))
+          if (more.length) posts = more
+        } catch {}
+      }
       if (opt.post && !posts.some((x) => x.p.id === opt.post.id)) posts.unshift({ t: 'post', p: opt.post })
-      // Trendni KESHDAN olamiz (xotira → qurilma) — tarmoq kutmaymiz, viewer zudlik bilan ochiladi
+      // Trendni KESHDAN olamiz (xotira → qurilma) — tarmoq kutmaymiz, viewer zudlik bilan ochiladi;
+      // ko'rilmaganlar kam bo'lsa trendShortsFast(force) serverdan YANGILARINI oladi
       let tr = shNormTrend((trendItems.length ? trendItems : (trendCacheGet() || [])).filter((x) => x.kind === 'short'))
-      const ft = tr.filter((x) => !shSeen.has(shKey(x)))
-      tr = ft.length ? ft : tr
+      let ft = tr.filter((x) => !shSeen.has(shKey(x)))
+      if (ft.length < 5) {
+        try { const fresh = await trendShortsFast(true); const ks = new Set(ft.map(shKey)); for (const it of fresh) if (!ks.has(shKey(it))) { ft.push(it); ks.add(shKey(it)) } } catch {}
+      }
+      tr = ft.length ? ft : tr // tarmoq ham yordam bermasa — eski ro'yxat (bo'sh ekrandan yaxshi)
       shShuffle(posts) // HAR SAFAR RANDOM tartib — boshidagi bir xil slaydlar yo'q
       // MINE BIRINCHI: foydalanuvchining o'z kanali shortslari lentaSning ENG BOSHIDA chiqadi
       // (hamma foydalanuvchi ko'radi — server 'mine' belgisini beradi, manba nomi baribir SIR).
@@ -1614,7 +1643,7 @@ async function shortsStart(opt = {}) {
         shMode = 'trend'
         shTrPage = 1
         openShorts(tr, 0)
-        if (tr.length < 4) { api('/trend?cat=video&page=2').then((r) => { const more = shNormTrend((r && r.items) || r || []); if (more.length && shWrap && shMode === 'trend') shAppend(more) }).catch(() => {}) }
+        if (tr.length < 4) { api('/trend?cat=video&page=2&rb=' + shRB).then((r) => { const more = shNormTrend((r && r.items) || r || []); if (more.length && shWrap && shMode === 'trend') shAppend(more) }).catch(() => {}) }
         return true
       }
       // Trend hali keshlanmagan (birinchi ochilish): postlar DARHOL, Shorts fonda qo'shiladi
@@ -1626,8 +1655,12 @@ async function shortsStart(opt = {}) {
       return true
     }
     // SHORTS rejim: internetdan trend videolar — HAR SAFAR RANDOM tartibda (bir xillik yo'q)
+    // NO-REPEAT v2: ko'rilganlar tashlanadi; kam qolsa serverdan tasodifiy bucket bilan yangilari
     const tr0 = await trendShortsFast()
-    const ft = tr0.filter((x) => !shSeen.has(shKey(x)))
+    let ft = tr0.filter((x) => !shSeen.has(shKey(x)))
+    if (ft.length < 5) {
+      try { const fresh = await trendShortsFast(true); const ks = new Set(ft.map(shKey)); for (const it of fresh) if (!ks.has(shKey(it))) { ft.push(it); ks.add(shKey(it)) } } catch {}
+    }
     const tr = ft.length ? ft : tr0 // hammasi ko'rilgan bo'lsa — yangi tsikl
     shShuffle(tr)
     if (opt.trend && !tr.some((x) => x.x.id === opt.trend.id)) tr.unshift({ t: 'trend', x: opt.trend })
@@ -1636,12 +1669,13 @@ async function shortsStart(opt = {}) {
     const idx = opt.trend ? tr.findIndex((x) => x.x.id === opt.trend.id) : 0
     openShorts(tr, Math.max(0, idx))
     // Yosh lenta: kam bo'lsa fonda yana bir sahifa tortamiz
-    if (tr.length < 4) { api('/trend?cat=video&page=2').then((r) => { const more = shNormTrend((r && r.items) || r || []); if (more.length && shWrap && shMode === 'trend') shAppend(more) }).catch(() => {}) }
+    if (tr.length < 4) { api('/trend?cat=video&page=2&rb=' + shRB).then((r) => { const more = shNormTrend((r && r.items) || r || []); if (more.length && shWrap && shMode === 'trend') shAppend(more) }).catch(() => {}) }
     return true
   } catch (e) { toast('⚠️ ' + e.message) }
 }
 function openShorts(list, startIdx = 0) {
   shClose()
+  shRB = rndRB() // sessiya bucketi: har ochilishda hovuzning boshqa qismi (bir xillik yo'q)
   shList = list
   shPostsEnd = false; shTrPage = 1; shDry = 0
   const isReels = shMode !== 'trend'

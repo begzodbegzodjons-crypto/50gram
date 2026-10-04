@@ -2175,8 +2175,11 @@ async function trend(c: C) {
   const page = Math.max(1, Math.min(40, +(c.url.searchParams.get("page") || 1)))
   const onlyCat = str(c.url.searchParams.get("cat") || "", 20)
   const catsW = str(c.url.searchParams.get("cats") || "", 200) // foydalanuvchi qiziqishlari: "sport:5,tech:3"
-  // t16: hovuz v17 (global trend asosiy) — eski t15 CDN-keshlari darhol yo'qolsin
-  const cacheKey = "https://trend.50gram.internal/t16?p=" + page + "&cat=" + onlyCat
+  // t17: HAR KIRISHDA BOSHQA SHORTSLAR (foydalanuvchi talabi: "har safar kirganda boshqa shortslar
+  // ko'rsatsin — takror zerikarli"): klient tasodifiy rb-bucket (0..29) yuboradi, server hovuzning
+  // HAR XIL qismidan qaytaradi. Eski t16 keshlari (bir xil pool[0..12] har kirishda) bekor.
+  const rb = Math.max(0, Math.min(29, +(c.url.searchParams.get("rb") || 0) || 0))
+  const cacheKey = "https://trend.50gram.internal/t17?p=" + page + "&cat=" + onlyCat + (onlyCat === "video" ? "&rb=" + rb : "")
   try {
     const hit = await caches.default.match(cacheKey)
     if (hit) return new Response(hit.body, hit)
@@ -2186,9 +2189,13 @@ async function trend(c: C) {
     // Video: FAQAT haqiqiy Shorts (uzun videolar va jonli efirlar sekin/qotadi — foydalanuvchi talabi)
     const vp = await videoPool(c)
     const all = vp.shorts
-    const s0 = ((page - 1) * 12) % Math.max(1, all.length)
+    // RB-BUCKET (foydalanuvchi talabi: "har safar kirganda boshqa shortslar"): rb*37 ofset
+    // hovuzning boshqa-boshqa qismini oladi + sahifa ichida Fisher-Yates — har kirishda boshqa
+    // 12 ta short, boshqa tartib. rb=0 (Trend bo'limi) eski tartibda qoladi.
+    const s0 = (((page - 1) * 12) + rb * 37) % Math.max(1, all.length)
     items = all.slice(s0, s0 + 12)
     if (items.length < 12 && all.length) items.push(...all.slice(0, 12 - items.length))
+    for (let i = items.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[items[i], items[j]] = [items[j], items[i]] }
   } else {
     const pool = await newsPool(c)
     if (onlyCat && CAT_KEYS.includes(onlyCat)) {
