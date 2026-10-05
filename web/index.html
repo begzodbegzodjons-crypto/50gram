@@ -50,6 +50,13 @@
         <p class="mut">Raqamni kiriting — tasdiqlash kodi oling</p>
         <div class="phone-in"><span>+998</span><input id="phone" inputmode="tel" autocomplete="tel-national" placeholder="90 123 45 67" maxlength="12"></div>
         <button class="btn big" id="b-otp">Kod olish</button>
+        <!-- v73: raqam boshqa qurilmada faol bo'lsa — «mavjud» xabari + eganing yo'li.
+             Raqam HECH QACHON qotib qolmaydi: egasi kod bilan davom etadi, eski qurilma chiqadi. -->
+        <div id="band-note" class="hide" style="margin-top:14px;padding:12px 14px;border:1.5px solid var(--qizil);border-radius:12px;background:rgba(220,38,38,.07)">
+          <div id="band-msg" style="color:var(--qizil);font-weight:600;font-size:13px;line-height:1.45"></div>
+          <button class="btn big" id="b-band-yes" style="margin-top:10px">Bu mening raqamim — kod bilan davom etish</button>
+          <button class="btn big" id="b-band-no" style="margin-top:8px;background:transparent;color:var(--matn);border:1.5px solid var(--chiziq)">Bekor qilish</button>
+        </div>
       </div>
       <div id="a-code" class="step hide">
         <h2>Kodni kiriting</h2>

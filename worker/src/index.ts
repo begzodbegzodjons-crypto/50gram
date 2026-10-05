@@ -60,7 +60,8 @@ type C = {
 
 const CORS = {
   "access-control-allow-origin": "*",
-  "access-control-allow-headers": "authorization,content-type",
+  // x-dev (v73): qurilma guvohnomasi — raqam qurilmaga bog'lanadi, egasi hech qachon bloklanmaydi
+  "access-control-allow-headers": "authorization,content-type,x-dev",
   "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 }
 const json = (d: unknown, status = 200) =>
@@ -230,7 +231,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v72"
+const BUILD_V = "v73"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -285,6 +286,10 @@ async function ensureSchema(db: Db) {
     "CREATE INDEX IF NOT EXISTS idx_creacts_c ON comment_reacts (comment_id)",
     // Task 57: yagona faol sessiya — logout barcha tokenlarni o'ldiradi, yangi kirish eskisini
     "ALTER TABLE users ADD COLUMN sess VARCHAR(24) NULL",
+    // v73: QURILMA GUVOHNOMASI — har qurilma o'z g50_dev kalitini yuboradi (x-dev), raqam shu
+    // kalitga bog'lanadi. EGASI o'z qurilmasidan qayta kirsa HECH QACHON «mavjud» blokini olmaydi
+    // (938607999 kabi qotib qolgan holatlar ildizi: blok qurilmani farqlamasdi).
+    "ALTER TABLE users ADD COLUMN dev VARCHAR(40) NULL",
     // Task 56: paralel-kirish himoyasi — logout bayrog'i va sessiya muddati (ms)
     "ALTER TABLE users ADD COLUMN logout_at BIGINT NULL",
     "ALTER TABLE users ADD COLUMN token_exp BIGINT NULL",
@@ -459,22 +464,26 @@ async function authOtp(c: C) {
   const devPhones = (c.env.DEV_PHONES || "").split(",").map((x) => x.trim()).filter(Boolean)
   const smsOn = smsConfigured(c.env)
   const test = (c.env.TEST_PHONES || "").split(",").map((x) => x.trim().split(":")).find(([p]) => p === phone)
-  // «BITTA RAQAM — BITTA FAOL DASTUR» HIMOYASI (muallif tizimi, v72):
+  // «BITTA RAQAM — BITTA FAOL DASTUR» HIMOYASI (muallif tizimi, v73 — qurilma-mos):
   // begona odam boshqa foydalanuvchi FAOL ishlatayotgan raqamiga kira olmaydi —
-  // «Bu raqam tarmoqda mavjud» javobi (409). Logout qilingan yoki yopiq turgan
-  // raqam esa OCHIQ — ega qizil kod bilan qaytadi (quyidagi BAND qoidasiga qarang).
+  // «Bu raqam tarmoqda mavjud» javobi (409). v72 KAMCHILIGI (938607999 tuzog'i): qoida
+  // qurilmani farqlamasdi — brauzer oynasi ochiq turganda last_seen yangilanib bordi va
+  // EGANNING O'ZI ham (shu brauzerdan qayta kirganda) 409 olardi. v73: har qurilma o'z
+  // g50_dev guvohnomasini yuboradi (x-dev sarlavha), raqam shu guvohnomaga bog'lanadi:
+  //  - EGASI o'z qurilmasidan qayta kirsa (dev mos) → DARHOL ochiq, 409 YO'Q;
+  //  - boshqa qurilma + hisob faol (last_seen 15 daqiqadan yangi) → 409 «tarmoqda mavjud»;
+  //  - LEKIN QOTIB QOLISH YO'Q («shunaqa holatlar bo'lmasin»): 409 ekranida «Bu mening
+  //    raqamim» tugmasi bor — force=1 bilan kod beriladi, verify sess aylantiradi va eski
+  //    qurilma 401 bilan avtomatik uchadi (bitta raqam — bitta faol sessiya saqlanadi);
+  //  - logout qilingan / 15+ daqiqa yopiq turgan / eski hisob (dev NULL) → ochiq.
   // Haqiqiy SMS (Eskiz) ulanganda bu qo'riqchi shart emas — kod faqat haqiqiy egasiga boradi.
+  const dev = String(c.req.headers.get("x-dev") || "").slice(0, 40)
   if (!smsOn && !test) {
-    const ex = await c.db.one("SELECT id, logout_at, token_exp, last_seen FROM users WHERE phone=?", [phone])
-    // BAND = «bu raqam TARMOKDA MAVJUD va HOZIR faol ishlatilmoqda» (v72 qayta ko'rib chiqildi):
-    //  - to'g'ri LOGOUT qilingan (logout_at belgilangan) → raqam OCHIQ: ega qizil kod bilan DARHOL qaytadi;
-    //  - ilova HOZIR ochiq turgan (ping har ~45s → last_seen 15 daqiqadan yangi) → BAND: boshqa
-    //    odam bu raqamga kira olmaydi — «bitta raqam — bitta faol dastur», begona akkauntga kirish yo'q;
-    //  - ilova 15+ daqiqadan beri yopiq (yoki logout buzib qolgan) → OCHIQ: ega qayta kiradi,
-    //    sess aylanadi (authVerify) va eskirgan qurilma 401 bilan avtomatik uchiriladi.
-    //  DEV_PHONES (ega raqamlari) — doim ochiq (band qoidasidan tashqari).
-    if (ex && !ex.logout_at && +(ex.token_exp || 0) > t && +(ex.last_seen || 0) > t - 15 * 60_000 && !devPhones.includes(phone))
-      return fail("Bu raqam tarmoqda mavjud — bitta raqam faqat bitta dasturda ishlaydi. Bu raqam sizniki bo'lsa, avvalgi qurilmada Logout qiling yoki biroz kuting", 409)
+    const ex = await c.db.one("SELECT id, logout_at, token_exp, last_seen, dev FROM users WHERE phone=?", [phone])
+    const faol = ex && !ex.logout_at && +(ex.token_exp || 0) > t && +(ex.last_seen || 0) > t - 15 * 60_000
+    const ozQurilma = !!faol && !!dev && ex.dev === dev
+    if (faol && !ozQurilma && !devPhones.includes(phone) && !c.b.force)
+      return fail("Bu raqam tarmoqda mavjud — bitta raqam faqat bitta dasturda ishlaydi. Agar bu raqam sizniki bo'lsa, «Bu mening raqamim» tugmasini bosib kod oling", 409)
   }
   // ILOVA-ICHKI REJIM (SMS_MODE="app", Eskiz O'CHIQ): kod HAR QANDAY raqam uchun ilova
   // ICHIDA qaytadi (QIZIL yozuv) — yangi raqam ro'yxatdan o'tadi, logout qilgan ega qaytadi.
@@ -498,6 +507,9 @@ async function authOtp(c: C) {
   return fail("SMS xizmati sozlanmagan (SMS_MODE=eskiz qiling va ESKIZ secretlarini qo‘ying)", 503)
 }
 async function authVerify(c: C) {
+  // v73: kirish paytida raqam shu qurilma guvohnomasiga bog'lanadi (dev) — keyingi
+  // qayta kirishlarda aynan SHU qurilma «o'z raqami» ekanini bilib, DARHOL ochadi.
+  const dev = String(c.req.headers.get("x-dev") || "").slice(0, 40)
   const phone = normPhone(c.b.phone)
   const code = String(c.b.code || "").replace(/\D/g, "")
   const o = await c.db.one("SELECT * FROM otp WHERE phone=?", [phone])
@@ -521,12 +533,13 @@ async function authVerify(c: C) {
   let u = await c.db.one(`SELECT ${USER_COLS} FROM users WHERE phone=?`, [phone])
   if (!u) {
     const id = newId()
-    await c.db.run("INSERT INTO users(id,phone,created_at,last_seen,token_exp,sess) VALUES(?,?,?,?,?,?)", [id, phone, tnow, tnow, texp, sess])
+    await c.db.run("INSERT INTO users(id,phone,created_at,last_seen,token_exp,sess,dev) VALUES(?,?,?,?,?,?,?)", [id, phone, tnow, tnow, texp, sess, dev || null])
     u = await c.db.one(`SELECT ${USER_COLS} FROM users WHERE id=?`, [id])
   } else {
     // Kirish → hisob yana FAOL bo'ldi + YANGI YAGONA SESSIYA: eskirgan barcha tokenlar
     // o'lik bo'lib qoladi (sess mos kelmadi → 401) — bir raqam, bitta faol qurilma.
-    await c.db.run("UPDATE users SET logout_at=NULL, token_exp=?, last_seen=?, sess=? WHERE id=?", [texp, tnow, sess, u.id])
+    // v73: qurilma guvohnomasi ham yangilanadi (bo'sh bo'lsa — eski saqlanadi, eski mijozlar buzilmasin).
+    await c.db.run("UPDATE users SET logout_at=NULL, token_exp=?, last_seen=?, sess=?, dev=COALESCE(NULLIF(?,''),dev) WHERE id=?", [texp, tnow, sess, dev, u.id])
   }
   const token = await signJwt({ sub: String(u.id), s: sess }, c.env.JWT_SECRET, 180 * 86400)
   return json({ token, user: pubUser(u, u.id), is_new: !u.first_name })

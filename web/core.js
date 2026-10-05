@@ -160,9 +160,25 @@ const linkify = (s) => esc(s).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" tar
 const isEmojiOnly = (s) => s && s.length <= 12 && /^(\p{Extended_Pictographic}|\p{Emoji_Component}|\u200d|\ufe0f|\s)+$/u.test(s) && !/^[\d#*\s]+$/.test(s)
 function vibrate(p = 15) { if (!S.prefs.vibrate) return; try { navigator.vibrate && navigator.vibrate(p) } catch {} }
 
+// ---------------- QURILMA GUVOHNOMASI (v73) ----------------
+// Har qurilma (brauzer/ilova) bir marta g50_dev kalitini yaratadi va DOIMIY saqlaydi
+// (logout bilan O'CHMAYDI — shu tufayli egadan keyin ham shu qurilma tanib olinadi).
+// Raqam kirishda shu kalitga bog'lanadi (server: users.dev) — shu tufayli EGASI o'z
+// qurilmasidan qayta kirganda server uni tanib oladi va HECH QACHON «mavjud» bloki
+// bermaydi (938607999 kabi qotib qolgan holatlar abadiy yo'q). Begona qurilma esa
+// «Bu raqam tarmoqda mavjud» xabarini ko'radi.
+let G50DEV = 'danon'
+try {
+  G50DEV = localStorage.getItem('g50_dev') || ''
+  if (!G50DEV) {
+    G50DEV = 'd' + (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now().toString(36) + Math.random().toString(36).slice(2, 14))
+    localStorage.setItem('g50_dev', G50DEV)
+  }
+} catch {}
+
 // ---------------- API ----------------
 async function api(path, opt = {}) {
-  const h = {}
+  const h = { 'x-dev': G50DEV }
   if (S.token) h.Authorization = 'Bearer ' + S.token
   let body
   if (opt.body !== undefined) { h['content-type'] = 'application/json'; body = JSON.stringify(opt.body) }
@@ -182,7 +198,7 @@ async function api(path, opt = {}) {
   let j = {}
   try { j = await r.json() } catch {}
   if (r.status === 401 && S.token && !path.startsWith('/auth')) { logout(true); throw new Error('Qaytadan kiring') }
-  if (!r.ok) throw new Error(j.error || 'Xatolik (' + r.status + ')')
+  if (!r.ok) { const err = new Error(j.error || 'Xatolik (' + r.status + ')'); err.status = r.status; throw err }
   return j
 }
 const post = (p, b = {}) => api(p, { method: 'POST', body: b })
@@ -619,6 +635,8 @@ function showAuth() {
 }
 function step(id) { qsa('.step').forEach((s) => s.classList.toggle('hide', s.id !== id)) }
 $('phone').addEventListener('input', (e) => {
+  bandForce = false // raqam o'zgarsa — «mavjud» holati yangi raqamga tegishli emas
+  const bn = $('band-note'); if (bn) bn.classList.add('hide')
   let d = e.target.value.replace(/\D/g, '')
   if (d.startsWith('998') && d.length > 9) d = d.slice(3)
   d = d.slice(0, 9)
@@ -627,12 +645,20 @@ $('phone').addEventListener('input', (e) => {
 $('phone').addEventListener('keydown', (e) => e.key === 'Enter' && $('b-otp').click())
 $('code').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6); if (e.target.value.length === 6) $('b-verify').click() })
 $('code').addEventListener('keydown', (e) => e.key === 'Enter' && $('b-verify').click())
+// v73: «Bu raqam tarmoqda mavjud» holati — raqam boshqa qurilmada faol. EGASI hech
+// qachon qotib qolmasin: «Bu mening raqamim» tugmasi force=1 bilan kodni ochadi,
+// kirgach eski qurilma sess aylanishi tufayli avtomatik chiqadi (bitta raqam — bitta faol dastur).
+let bandForce = false
+$('b-band-yes').onclick = () => { bandForce = true; $('band-note').classList.add('hide'); $('b-otp').click() }
+$('b-band-no').onclick = () => { bandForce = false; $('band-note').classList.add('hide') }
 $('b-otp').onclick = async () => {
   const d = $('phone').value.replace(/\D/g, '')
   if (d.length !== 9) return toast('Raqamni to‘liq kiriting: 90 123 45 67')
+  $('band-note').classList.add('hide')
   const b = $('b-otp'); b.disabled = true; b.textContent = 'Yuborilmoqda...'
   try {
-    const r = await post('/auth/otp', { phone: '998' + d })
+    const r = await post('/auth/otp', { phone: '998' + d, ...(bandForce ? { force: 1 } : {}) })
+    bandForce = false
     authPhone = r.phone
     if (r.dev_code) {
       // ILOVA-ICHKI REJIM (SMS_MODE="app", haqiqiy SMS hali yo'q): kod SHU YERDA
@@ -647,7 +673,15 @@ $('b-otp').onclick = async () => {
       const dc = $('devcode')
       if (dc) dc.onclick = () => { $('code').value = r.dev_code; $('b-verify').click() }
     }
-  } catch (e) { toast('⚠️ ' + e.message) }
+  } catch (e) {
+    if (e.status === 409 && !bandForce) {
+      // BOSHQA QURILMADA FAOL («Bu raqam tarmoqda mavjud») — lekin RAQAM QOTIB QOLMAYDI:
+      // egasi «Bu mening raqamim» tugmasi bilan kod olib kira oladi (force=1).
+      $('band-msg').textContent = e.message
+      $('band-note').classList.remove('hide')
+      try { $('band-note').scrollIntoView({ block: 'nearest', behavior: 'smooth' }) } catch {}
+    } else toast('⚠️ ' + e.message)
+  }
   b.disabled = false; b.textContent = 'Kod olish'
 }
 function startResend(sec = 60) {
@@ -960,7 +994,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v72'
+window.__50BUILD = 'v73'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return

@@ -56,9 +56,11 @@ enabled = true
 # =====================================================================
 SMS_MODE = "app"
 # DEV_MODE="1" + SMS_MODE="app": kod HAR QANDAY raqamga ilova ICHIDA qaytadi (dev_code —
-# QIZIL yozuv). Yangi raqam ro'yxatdan o'tadi, logout qilgan ega qaytadi. FAOL hisob
-# qo'riqlanadi: ilova ochiq turganda (last_seen 15 daqiqadan yangi) boshqa odam shu
-# raqamga 409 «tarmoqda mavjud» oladi — «bitta raqam — bitta faol dastur» (v72).
+# QIZIL yozuv). Yangi raqam ro'yxatdan o'tadi, logout qilgan ega qaytadi. v73 QURILMA-MOS
+# qo'riq: raqam qurilma guvohnomasiga (x-dev) bog'lanadi — EGASI o'z qurilmasidan HAR DOIM
+# kiradi (409 YO'Q); boshqa qurilma faol hisobga 409 «tarmoqda mavjud» oladi, lekin
+# «Bu mening raqamim» tugmasi bilan (force) kod olib kira oladi — eski qurilma o'zi chiqadi.
+# Qotib qolgan raqam holati (938607999) abadiy yo'q qilindi.
 # SMS_MODE="eskiz" bo'lganda bu maydon o'zi ishdan chiqadi (kod faqat haqiqiy SMS
 # bilan boradi) — uni "0" qilish SHART EMAS.
 DEV_MODE = "1"

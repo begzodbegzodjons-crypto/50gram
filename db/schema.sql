@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS users (
   privacy_last_seen TINYINT NOT NULL DEFAULT 0,
   last_seen BIGINT NOT NULL DEFAULT 0,
   prefs MEDIUMTEXT NULL,
+  sess VARCHAR(24) NULL,
+  logout_at BIGINT NULL,
+  token_exp BIGINT NULL,
+  dev VARCHAR(40) NULL,
   created_at BIGINT NOT NULL
 );
 
