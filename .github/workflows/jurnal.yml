@@ -1,6 +1,9 @@
 name: Jurnal o'qish (egaga tashxisi)
 on:
   workflow_dispatch:
+concurrency:
+  group: testlar-zanjiri
+  cancel-in-progress: false
 jobs:
   jurnal:
     runs-on: ubuntu-latest
