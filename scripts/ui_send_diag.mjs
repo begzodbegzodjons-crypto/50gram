@@ -48,9 +48,22 @@ try {
   await sleep(3000)
   await page.evaluate(() => { const b = document.querySelector('.dock button[data-t="t-chats"]'); if (b) b.click() })
   await sleep(800)
-  const opened = await page.evaluate((cid) => { const it = document.querySelector('[data-chat="' + cid + '"]'); if (it) { it.click(); return true } return false }, cid)
+  // RO'YXAT YUKLANISHINI KUTISH: item 15s ichida paydo bo'lishi kerak (CI'da SW/WS sekin bo'lishi mumkin)
+  let opened = false
+  for (let i = 0; i < 15 && !opened; i++) {
+    opened = await page.evaluate((cid) => { const it = document.querySelector('[data-chat="' + cid + '"]'); if (it) { it.click(); return true } return false }, cid)
+    if (!opened) await sleep(1000)
+  }
   log('chat item topildi va click:', opened)
   await sleep(1500)
+  if (!opened) {
+    const listState = await page.evaluate(() => ({
+      items: document.querySelectorAll('[data-chat]').length,
+      chatsSize: window.S?.chats?.size,
+      listHtml: (document.getElementById('chatlist')?.innerHTML || '').slice(0, 200),
+    }))
+    log('RO\'YXAT HOLATI (item topilmadi):', JSON.stringify(listState))
+  }
 
   // DIALOG holati
   const st1 = await page.evaluate(() => ({
@@ -69,9 +82,46 @@ try {
   log('holat 2 (fill dan keyin):', JSON.stringify(st2))
 
   // klik — xatoni YUTMASDAN
+  // NIMA TO'SIQ? boundingBox, elementFromPoint, pointer-events — hammasini ko'ramiz
+  const clickDiag = await page.evaluate(() => {
+    const b = document.getElementById('b-send')
+    if (!b) return { found: false }
+    const r = b.getBoundingClientRect()
+    const cx = r.x + r.width / 2, cy = r.y + r.height / 2
+    const at = document.elementFromPoint(cx, cy)
+    const chain = []
+    let e = at
+    while (e && chain.length < 5) { chain.push(e.id ? '#' + e.id : '.' + String(e.className).split(' ')[0]); e = e.parentElement }
+    const cs = getComputedStyle(b)
+    return {
+      found: true,
+      rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+      vp: { w: innerWidth, h: innerHeight },
+      centerInVp: cx >= 0 && cy >= 0 && cx <= innerWidth && cy <= innerHeight,
+      elementAtPoint: chain,
+      pe: cs.pointerEvents, disp: cs.display, vis: cs.visibility, op: cs.opacity,
+      disabled: b.disabled,
+      inpValue: document.getElementById('inp')?.value,
+      sendIcon: b.textContent,
+    }
+  })
+  log('klik-tashxis:', JSON.stringify(clickDiag))
   let clickErr = ''
-  try { await page.click('#b-send', { timeout: 6000 }) } catch (e) { clickErr = String(e).slice(0, 300) }
+  try { await page.click('#b-send', { timeout: 6000 }) } catch (e) { clickErr = String(e).slice(0, 400) }
   log('klik natijasi:', clickErr || 'OK (bosildi)')
+  // Agar Playwright klikolmasa — xuddi shu nuqtada REAL pointer-up hodisasini qo'lda yuborib ko'ramiz
+  if (clickErr) {
+    const sent = await page.evaluate(() => {
+      const b = document.getElementById('b-send')
+      const r = b.getBoundingClientRect()
+      const o = { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2, pointerId: 7, isPrimary: true }
+      b.dispatchEvent(new PointerEvent('pointerdown', o))
+      b.dispatchEvent(new PointerEvent('pointerup', o))
+      return true
+    })
+    log('qo\'lda pointer hodisalari yuborildi:', sent)
+    await sleep(2000)
+  }
 
   await sleep(2500)
   const st3 = await page.evaluate(() => ({ inp: document.getElementById('inp')?.value, cur: window.S?.cur }))
