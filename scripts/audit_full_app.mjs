@@ -48,6 +48,10 @@ async function newPage(browser, label) {
     // URL bilan to'liq nusxasi response-tinglovchida bor (u x-audit-probe'ni HURMAT qiladi);
     // konsol nusxasida URL yo'q va probe'ni ham ajrata olmaydi — shuning uchun shovqin sifatida tashlanadi.
     if (/^Failed to load resource/.test(txt)) return
+    // "Permissions policy violation: compute-pressure" — Chromium'ning O'Z ichki tekshiruvi
+    // (yangi Chromium brauzerlarida paydo bo'ldi): ilova kodida Pressure API UMUMAN YO'Q
+    // (grep isboti: web/da 0 mos). Sahifa xatosi emas — shovqin sifatida tashlanadi.
+    if (/Permissions policy violation: compute-pressure/.test(txt)) return
     errs.push(t + ': ' + txt.slice(0, 240))
   } })
   page.on('response', (r) => {
