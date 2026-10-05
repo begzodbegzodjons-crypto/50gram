@@ -217,7 +217,10 @@ const normPhone = (p: unknown) => {
 const USERNAME_RE = /^[a-zA-Z][a-zA-Z0-9_]{4,31}$/
 const USER_COLS = "id,phone,first_name,last_name,username,bio,avatar_ver,privacy_phone,privacy_last_seen,last_seen,prefs"
 const CHAT_COLS = "id,type,title,description,username,avatar_ver,owner_id,is_public,invite_hash,join_approval,permissions,settings,member_count,last_msg_at,created_at,pinned_id"
-const PREF_KEYS = new Set(["sounds", "vibrate", "preview", "autoload", "stickerauto", "livealerts"])
+// Sozlamalar sinxronizatsiyasi (v71): klient yuboradigan HAMMA kalitlar — aks holda
+// push-filtr (pushChatMsg'dagi prefs.push===0) o'lik kod bo'lib qoladi va tungi
+// ovozsizlik/Reels/animatsiya sozlamalari qurilmalar orasida ko'chmaydi.
+const PREF_KEYS = new Set(["sounds", "vibrate", "preview", "autoload", "stickerauto", "livealerts", "push", "shauto", "shadv", "shdbl", "shq", "nightmute", "noanim"])
 const DEF_PERMS = { send: 1, media: 1, stickers: 1, links: 1, polls: 1, invite: 1 }
 const DEF_SET = { signatures: 0, comments: 1, reactions: 1, protect: 0, slow: 0 }
 const MSG_KINDS = new Set(["text", "sticker", "gif", "photo", "video", "voice", "round", "file", "contact", "poll", "location"])
@@ -227,7 +230,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v70"
+const BUILD_V = "v71"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -297,6 +300,15 @@ async function ensureSchema(db: Db) {
     // Egaga /api/jurnal orqali o'qiladi (o'zbekcha tashxis doktrinasi: log bilan topish).
     "CREATE TABLE IF NOT EXISTS err_jurnal (id BIGINT AUTO_INCREMENT PRIMARY KEY, ts BIGINT NOT NULL, path VARCHAR(120) NOT NULL DEFAULT '', uid BIGINT NOT NULL DEFAULT 0, src VARCHAR(16) NOT NULL DEFAULT '', msg VARCHAR(600) NOT NULL DEFAULT '')",
     "CREATE INDEX IF NOT EXISTS idx_errj_ts ON err_jurnal (ts)",
+    // KOD–SHEMA MOSLIGI (v71): kod ishlatadigan ustunlar ENDI sxemada ham bo'lishi kafolatlanadi —
+    // eski bazada ham (ALTER), toza o'rnatishda ham (schema.sql) bir xil. Aks holda toza o'rnatishda
+    // «Unknown column» → /me, /users, /search, /chats, post/istoriya joylash — deyarli hamma endpoint 500.
+    "ALTER TABLE users ADD COLUMN prefs MEDIUMTEXT NULL",
+    "ALTER TABLE posts ADD COLUMN meta MEDIUMTEXT NULL",
+    "ALTER TABLE posts ADD COLUMN views BIGINT NOT NULL DEFAULT 0",
+    "ALTER TABLE stories ADD COLUMN meta MEDIUMTEXT NULL",
+    // Trend pozitiv-qayta o'rganish statistikasi (trendWeights/trendEv/trendInsights ishlatadi)
+    "CREATE TABLE IF NOT EXISTS trend_stats (cat VARCHAR(20) PRIMARY KEY, imp BIGINT NOT NULL DEFAULT 0, clk BIGINT NOT NULL DEFAULT 0, wt BIGINT NOT NULL DEFAULT 0, upd BIGINT NOT NULL DEFAULT 0)",
   ]
   for (const s of stmts) { try { await db.run(s) } catch {} }
   try {
@@ -461,12 +473,13 @@ async function authOtp(c: C) {
     if (ex && +(ex.token_exp || 0) > t && (!ex.logout_at || +(ex.last_seen || 0) > t - 86_400_000) && !devPhones.includes(phone))
       return fail("Bu raqam band — tizimda mavjud. Kod olish uchun avval ilovadan chiqish (Logout) qiling", 409)
   }
-  // ILOVA-ICHKI REJIM (SMS_MODE="app"): HAR QANDAY raqam kodni ilova ICHIDA oladi —
-  // raqam kiritildi → kod darhol QIZIL yozuvda ko'rinadi (mijoz dev_code bilan chizadi).
-  // Eskizga o'tganda (SMS_MODE="eskiz" + secretlar) smsOn=true bo'ladi — o'sha paytdan
-  // haqiqiy SMS yuboriladi, bu tarmoq o'zi o'chadi (kod o'zgarishi shart emas).
+  // ILOVA-ICHKI REJIM (SMS_MODE="app"): kod faqat DEV_PHONES (ega ro'yxati) raqamlariga
+  // ilova ICHIDA qaytariladi — QIZIL yozuvda ko'rinadi. XAVFSIZLIK (v71): oldin HAR QANDAY
+  // raqam dev_code olardi — boshqa odamning raqamini kiritib, uning hisobiga kirish mumkin
+  // edi (hisob o'g'irlash). Endi ro'yxatdagi raqamlargina «qizil kod» oladi; tashqi foydalanuvchi
+  // uchun haqiqiy SMS (SMS_MODE="eskiz") yoqilguncha 503 — yopiq-beta rejim.
   let devSelf = false
-  if (!smsOn && !test && c.env.DEV_MODE === "1") devSelf = true
+  if (!smsOn && !test && c.env.DEV_MODE === "1" && devPhones.includes(phone)) devSelf = true
   // Kutish muddati: haqiqiy SMS (Eskiz) pullik/pumping-xavfli — 55s; ilova-ichki kod bepul — 20s
   const cd = smsOn ? 55000 : 20000
   const prev = await c.db.one("SELECT sent_at FROM otp WHERE phone=?", [phone])
@@ -3360,7 +3373,9 @@ function match(method: string, path: string) {
     const p: Record<string, string> = {}
     let ok = true
     for (let i = 0; i < pp.length; i++) {
-      if (pp[i].startsWith(":")) p[pp[i].slice(1)] = decodeURIComponent(parts[i])
+      // v71: noto'g'ri % ketma-ketligi (%zz) URIError otib, butun so'rovni 500 qilardi →
+      // endi dekodlash muvaffaqiyatsiz bo'lsa xom qiymat ishlatiladi (so'rov 404/oddiy oqimda davom etadi)
+      if (pp[i].startsWith(":")) { try { p[pp[i].slice(1)] = decodeURIComponent(parts[i]) } catch { p[pp[i].slice(1)] = parts[i] } }
       else if (pp[i] !== parts[i]) { ok = false; break }
     }
     if (ok) return { h, p, open: !!open }
@@ -3525,7 +3540,10 @@ export default {
       }
       // OTP PUMPING: 50 so'rov/1 soat (mobil tarmoq CGNAT — bir IP'da YUZLARGA foydalanuvchi
       // bo'lishi mumkin; avvalgi 25/12soat chegara ODDIY foydalanuvchilarni ham urib yuborardi)
-      if (url.pathname === "/api/auth/otp" && fwLokal(fwip, "otp", 50, 3_600_000)) { fwOchko(env, wait, fwip, "otp"); return FW_404() }
+      // v71: 50→100/soat — mobil operator CGNAT'ida yuzlab halol foydalanuvchi bitta tashqi IP'da
+      // bo'ladi; 50 chegara ularni ham bloklab qo'yardi. Zararli toshqin baribir cheklangan:
+      // har raqamga alohida 20-55s cooldown + auth (kod-urinish) alohida 12/24s firewall.
+      if (url.pathname === "/api/auth/otp" && fwLokal(fwip, "otp", 100, 3_600_000)) { fwOchko(env, wait, fwip, "otp"); return FW_404() }
       // KLIENT QO'NG'IROQ JURNALI: 120 yozuv/1 soat (mijoz so'roviga ≤30/ql, cheklovdan katta —
       // haqiqiy foydalanuvchiga hech qachon yetmaydi, spam'ni to'sadi)
       if (url.pathname === "/api/clog" && fwLokal(fwip, "clog", 120, 3_600_000)) { fwOchko(env, wait, fwip, "clog"); return FW_404() }

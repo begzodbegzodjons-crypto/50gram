@@ -49,8 +49,11 @@ addEventListener('resize', () => {
   }, 180)
 })
 // Sozlamalar: lokal + serverga sinxron (barcha qurilmalarda bir xil)
-function savePrefs(patch, sync = true) {
-  S.prefs = { ...S.prefs, ...patch }
+// v71 TUZATISH: parametr nomi «patch» edi — global patch() HTTP yordamchisini soya qilar,
+// «TypeError: patch is not a function» otardi → sozlamalar serverga HECH QACHON yetmasdi
+// va sendPrefsToSW() ham bajarilmasdi. Parametr «p» deb o'zgartirildi.
+function savePrefs(p, sync = true) {
+  S.prefs = { ...S.prefs, ...p }
   localStorage.setItem('g50_prefs', JSON.stringify(S.prefs))
   if (sync && S.token) patch('/me', { prefs: S.prefs }).catch(() => {})
   sendPrefsToSW()
@@ -272,7 +275,10 @@ async function decryptBlob(cipher, key, iv, mime) {
 // Xabar meta'siga qo'shiladigan ma'lumot (kalit faqat chat a'zolariga xabar bilan boradi)
 const mediaInfo = (id) => ({ media_id: id, ...(S.mk.get(id) || {}) })
 async function upload(plain, name, onProg) {
-  if (plain.size > 30 * 1024 * 1024) throw new Error('Fayl 30 MB dan katta')
+  // v71: chegaradan 1 KB zaxira — server shifrlangan blob hajmini tekshiradi (AES-GCM +16 bayt
+  // teg qo'shadi), aks holda 30 MB − 15 bayt li haqiqiy fayl «Fayl hajmi 30 MB dan oshmasin»
+  // degan yolg'on xato bilan rad etilardi
+  if (plain.size > 30 * 1024 * 1024 - 1024) throw new Error('Fayl 30 MB dan katta')
   const enc = await encryptBlob(plain)
   const blob = enc.blob
   const n = Math.max(1, Math.ceil(blob.size / CHUNK))
@@ -945,7 +951,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v70'
+window.__50BUILD = 'v71'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return

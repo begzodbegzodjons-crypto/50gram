@@ -20,7 +20,7 @@
 //  ext   — sayt/ilova EMAS mijoz (curl, skaner, bot)         → DARHOL 30 kun
 //  inj   — in'ektsiya / traversal belgilari                  → DARHOL 30 kun
 //  data  — bitta hisobdan ma'lumot tortish toshqini          → DARHOL 12 soat
-//  auth  — login/kod brute-force (8 urinish/1 soat)          → 24 soat
+//  auth  — login/kod brute-force (12 urinish/1 soat — index.ts'dagi fwLokal("auth",12) bilan bir xil) → 24 soat
 //  flood — so'rov toshqini (3 ochko)                         → 15 daqiqa
 //  tok   — yaroqsiz token toshqini (60/1 soat)               → 1 soat
 //  scan  — 4xx toshqini (3 ochko)                            → 30 daqiqa
@@ -41,7 +41,7 @@ const TH: Record<string, [number, number]> = {
   ext: [1, 30 * DAY],
   inj: [1, 30 * DAY],
   data: [1, 12 * HOUR],
-  auth: [8, 24 * HOUR],
+  auth: [12, 24 * HOUR],
   flood: [3, 15 * 60_000],
   tok: [60, HOUR],
   scan: [3, 30 * 60_000],

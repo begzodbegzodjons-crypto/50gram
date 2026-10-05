@@ -557,7 +557,9 @@ const newCid = () => 'c' + Date.now().toString(36) + Math.random().toString(36).
 let tempSeq = 0
 function pushTemp(chatId, kind, body, meta) {
   const client_id = newCid()
-  const t = { id: -(Date.now() * 10 + (tempSeq++ % 10)), client_id, pending: true, chat_id: chatId, sender_id: S.me.id, kind, body: body || null, meta: meta || {}, created_at: Date.now() }
+  // v71: temp-ID bir millisekundda 100 tagacha noyob (avval 10 edi — 2 tadan ortiq
+  // vaqtinchalik xabar bir ms'da yaratilsa ID takrorlanib, xabarlar aralashardi)
+  const t = { id: -(Date.now() * 1000 + (tempSeq++ % 1000)), client_id, pending: true, chat_id: chatId, sender_id: S.me.id, kind, body: body || null, meta: meta || {}, created_at: Date.now() }
   const list = S.msgs.get(chatId) || []
   list.push(t); S.msgs.set(chatId, list)
   if (S.cur === chatId) renderMsgs(true)

@@ -53,7 +53,11 @@ public class MainActivity extends Activity {
   static final int MEDIA_REQ = 1002;
 
   /** Xizmat polling o'tkazib yuborishi uchun: ilova ekranda bo'lsa xizmat jim turadi (WS ko'rsatayapti) */
-  public static volatile boolean visible = true;
+  // v2.7 TUZATISH: boshlang'ich qiymat FALSE bo'lishi shart. TRUE turganda — BootReceiver
+  // qayta ishga tushirgan FRESH jarayonda (Activity ochilmagan) polling hech qachon
+  // ishlamasdi: visible=true deb hisoblanib, xizmat har tur jim qaytardi → fon qo'ng'iroqlari
+  // foydalanuvchi ilovani qo'lda ochmaguncha jiringlamasdi. onResume TRUE qiladi, onPause FALSE.
+  public static volatile boolean visible = false;
 
   WebView web;
   FrameLayout root;

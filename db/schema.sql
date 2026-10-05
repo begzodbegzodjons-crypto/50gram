@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
   privacy_phone TINYINT NOT NULL DEFAULT 1,
   privacy_last_seen TINYINT NOT NULL DEFAULT 0,
   last_seen BIGINT NOT NULL DEFAULT 0,
+  prefs MEDIUMTEXT NULL,
   created_at BIGINT NOT NULL
 );
 
@@ -154,6 +155,7 @@ CREATE TABLE IF NOT EXISTS stories (
   media_id VARCHAR(32) NULL,
   text_body VARCHAR(500) NULL,
   bg VARCHAR(200) NULL,
+  meta MEDIUMTEXT NULL,
   created_at BIGINT NOT NULL,
   expires_at BIGINT NOT NULL
 );
@@ -174,11 +176,22 @@ CREATE TABLE IF NOT EXISTS posts (
   text_body TEXT NULL,
   media_id VARCHAR(32) NULL,
   media_kind VARCHAR(10) NULL,
+  meta MEDIUMTEXT NULL,
+  views BIGINT NOT NULL DEFAULT 0,
   like_count INT NOT NULL DEFAULT 0,
   comment_count INT NOT NULL DEFAULT 0,
   created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_posts_time ON posts (created_at);
+
+-- Trend pozitiv-qayta o'rganish statistikasi (trendWeights/trendEv/trendInsights ishlatadi)
+CREATE TABLE IF NOT EXISTS trend_stats (
+  cat VARCHAR(20) PRIMARY KEY,
+  imp BIGINT NOT NULL DEFAULT 0,
+  clk BIGINT NOT NULL DEFAULT 0,
+  wt BIGINT NOT NULL DEFAULT 0,
+  upd BIGINT NOT NULL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS post_likes (
   post_id BIGINT NOT NULL,

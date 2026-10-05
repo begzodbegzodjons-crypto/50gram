@@ -28,7 +28,9 @@ new_sqlite_classes = ["UserSocket"]
 tag = "v2"
 new_sqlite_classes = ["SecFirewall"]
 
-# Har 30 daqiqada eskirgan xabar, fayl va istoriyalarni serverdan o'chiradi
+# Har 30 daqiqada TEXNIK chiqindilarni tozalaydi: eskirgan OTP kodlari, pin-joblar,
+# qo'ng'iroq signal navbati, o'lik qo'ng'iroq yozuvlari. XABARLAR/FAYLLAR/ISTORIYA
+# O'CHMAYDI (o'chmas tarix — cleanup() ichidagi izohga qarang, v71 hujjat-mosligi)
 [triggers]
 crons = ["*/30 * * * *"]
 
@@ -53,9 +55,11 @@ enabled = true
 #             ESKIZ_FROM / SMS_TEXT ixtiyoriy (default: 4546 va standart matn).
 # =====================================================================
 SMS_MODE = "app"
-# DEV_MODE="1" + SMS_MODE="app": kod HAR QANDAY raqamga javobda qaytadi (dev_code)
-# va ilova uni QIZIL yozuvda ko'rsatadi. SMS_MODE="eskiz" bo'lganda bu maydon o'zi
-# ishdan chiqadi (kod faqat haqiqiy SMS bilan boradi) — uni "0" qilish SHART EMAS.
+# DEV_MODE="1" + SMS_MODE="app": kod FAQAT DEV_PHONES ro'yxatidagi raqamlarga javobda
+# qaytadi (dev_code) va ilova uni QIZIL yozuvda ko'rsatadi. Ro'yxatdagi boshqa raqamga
+# 503 (yopiq-beta). SMS_MODE="eskiz" bo'lganda bu maydon o'zi ishdan chiqadi (kod faqat
+# haqiqiy SMS bilan boradi) — uni "0" qilish SHART EMAS. (v71: xavfsizlik — dev_code
+# endi har qanday raqamga emas, FAQAT ro'yxatga cheklangan: hisob-o'g'irlash yopildi)
 DEV_MODE = "1"
 # DEV kod faqat shu raqam(lar)ga: operator hisobi himoyalangan yagona istisno
 DEV_PHONES = "+998907776655,+998900000003,+998900000004,+998900000005,+998900000006"

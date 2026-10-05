@@ -187,9 +187,12 @@ function renderTrendChips() {
   if (!box || feedMode !== 'trend') return
   box.innerHTML = Object.entries(TCATS).map(([k, [e, l]]) => `<span class="tchip ${trendCat === k ? 'on' : ''}" data-tc="${k}">${e} ${l}</span>`).join('')
 }
+// v71: CSS url('...') uchun xavfsiz URL — apostrof/qo'shtirnoq HTML-attr ichida brauzer tomonidan
+// dekodlanib CSS sintaksisini buzardi (tashqi RSS thumbnail URL'i apostrof bilan kelsa stil sindirilardi)
+const cssUrl = (u) => String(u || '').trim().replace(/["'\\]/g, (ch) => '%' + ch.charCodeAt(0).toString(16).toUpperCase())
 function trendCard(x) {
-  if (x.kind === 'short') return `<div class="tcard short vid" data-tv="${x.id}" style="${x.image ? `background-image:url('${esc(x.image)}')` : ''}"><span class="tch">🎬 Shorts</span><div class="pplay">▶</div><div class="tcb"><b>${esc(x.title)}</b><small>${x.views ? '👁 ' + fmtN(x.views) : ''}${x.duration ? ' · ' + fmtDur(x.duration) : ''}</small></div></div>`
-  if (x.kind === 'video') return `<div class="tcard vid" data-tv="${x.id}" style="${x.image ? `background-image:url('${esc(x.image)}')` : ''}"><span class="tch">🎥 Video</span><div class="tcb"><b>${esc(x.title)}</b><small>${fmtAgo(x.time)}${x.views ? ' · 👁 ' + fmtN(x.views) : ''} · ${fmtDur(x.duration || 0)}</small></div></div>`
+  if (x.kind === 'short') return `<div class="tcard short vid" data-tv="${x.id}" style="${x.image ? `background-image:url('${esc(cssUrl(x.image))}')` : ''}"><span class="tch">🎬 Shorts</span><div class="pplay">▶</div><div class="tcb"><b>${esc(x.title)}</b><small>${x.views ? '👁 ' + fmtN(x.views) : ''}${x.duration ? ' · ' + fmtDur(x.duration) : ''}</small></div></div>`
+  if (x.kind === 'video') return `<div class="tcard vid" data-tv="${x.id}" style="${x.image ? `background-image:url('${esc(cssUrl(x.image))}')` : ''}"><span class="tch">🎥 Video</span><div class="tcb"><b>${esc(x.title)}</b><small>${fmtAgo(x.time)}${x.views ? ' · 👁 ' + fmtN(x.views) : ''} · ${fmtDur(x.duration || 0)}</small></div></div>`
   const em = TCATS[x.cat] ? TCATS[x.cat][0] : '📰'
   const img = x.image ? `<img loading="lazy" src="${esc(x.image)}" alt="" referrerpolicy="no-referrer">` : `<div class="tnoimg">${em}</div>`
   return `<div class="tcard${x.image ? '' : ' noimg'}" data-tn="${x.id}">${img}<div class="tcb"><span class="tch">${em} ${TCATS[x.cat] ? TCATS[x.cat][1] : 'Yangilik'}</span><b>${esc(x.title)}</b>${x.snippet ? `<small>${esc(x.snippet)}</small>` : ''}<small class="tm">${fmtAgo(x.time)}</small></div></div>`

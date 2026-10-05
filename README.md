@@ -66,11 +66,9 @@ TURN bo‘lmasa, ko‘p hollarda faqat STUN bilan ulanadi. Lekin ayrim mobil ope
 ## Ma’lumotlar qayerda saqlanadi
 
 - Xabarlar va fayllar **telefonning o‘zida** (IndexedDB) saqlanadi.
-- Server faqat yetkazish uchun vaqtincha saqlaydi, so‘ng avtomatik o‘chiradi:
-  - shaxsiy chat — 14 kun;
-  - guruh/kanal — 30 kun;
-  - istoriya — 24 soat;
-  - lenta — 60 kun.
+- **O‘CHMAS TARIX**: xabarlar, fayllar va istoriyalar serverda foydalanuvchi o‘zi o‘chirmaguncha saqlanadi
+  (kod: `expires_at = +100 yil`; cron faqat texnik chiqindilarni — eskirgan kodlar, pin-joblar,
+  signal navbati — tozalaydi, yozishmalarga tegmaydi).
 - Serverdan o‘chgan faylni ilova **onlayn turgan boshqa a’zolar qurilmasidan** WebRTC orqali olib beradi (“o‘rgimchak to‘ri”).
 - Har foydalanuvchi qurilmasidan sozlamada tanlagan hajmda (maksimal 30 GB) joy beradi. Har fayl 15–20 ta qurilmada nusxalanadi.
 

@@ -209,7 +209,7 @@ function pickUsers(title, onDone, btn = 'Qo‘shish') {
   }
   sh.onclick = async (e) => {
     const it = e.target.closest('[data-p]')
-    if (it) { const u = shown.find((x) => x.id === +it.dataset.p); sel.has(u.id) ? sel.delete(u.id) : sel.set(u.id, u); qs('.chk', it).classList.toggle('on', sel.has(u.id)); return }
+    if (it) { const u = shown.find((x) => x.id === +it.dataset.p); if (!u) return; sel.has(u.id) ? sel.delete(u.id) : sel.set(u.id, u); qs('.chk', it).classList.toggle('on', sel.has(u.id)); return }
     if (e.target.closest('#pu-s')) { try { await onDone([...sel.keys()]); closeSheet(sh) } catch (er) { toast('⚠️ ' + er.message) } }
   }
 }
@@ -539,14 +539,14 @@ async function pgWallet() {
 async function pgData() {
   let st = null
   try { st = Store.info ? await Promise.resolve(Store.info()) : null } catch {}
-  const gb = +(localStorage.getItem('g50_store_gb') || 5)
+  const gb = Math.min(30, Math.max(1, +(localStorage.getItem('g50_store_gb') || 30))) // v71: default 30 (storage.js MAX_GB bilan bir xil — avval 5 deb noto‘g‘ri ko‘rardi)
   openPage('Ma’lumotlar va xotira', `
     <div class="rows">
       <div style="display:block"><div class="rt">Qurilmada ajratilgan joy: <b id="gb-v">${gb} GB</b><small>Maksimum 30 GB. Joy tugasa eski fayllar avtomatik bo‘shatiladi.</small></div><input type="range" id="gb-r" min="1" max="30" value="${gb}" style="width:100%"></div>
       <div><div class="rt">Hozir band<small>${st ? `${fmtSize(st.used || 0)} / ${st.limitGB} GB` : '—'}</small></div></div>
     </div>
     <div class="sec">Zaxira va tozalash</div>
-    ${rowsHTML([prow('backup', '🗜', '#4dabf7', '#2E7BFF', 'Butun tarixni zaxiralash', 'Barcha chatlar bitta faylga saqlanadi'), prow('clear', '🧹', '#FF6B81', '#E52550', 'Keshni tozalash', 'Qurilmadagi media fayllar o‘chiriladi')])}`,
+    ${rowsHTML([prow('pshare', '🕸', '#20C997', '#0CA678', 'P2P orqali ulashish', localStorage.getItem('g50_share') === '0' ? 'O‘chiq — qurilmangiz fayl bermaydi' : 'Yoqilgan — qurilmangiz tarmoqdagi fayllarni boshqalarga yetkazadi'), prow('backup', '🗜', '#4dabf7', '#2E7BFF', 'Butun tarixni zaxiralash', 'Barcha chatlar bitta faylga saqlanadi'), prow('clear', '🧹', '#FF6B81', '#E52550', 'Keshni tozalash', 'Qurilmadagi media fayllar o‘chiriladi')])}`,
   (p) => {
     const r = qs('#gb-r', p)
     r.oninput = () => { const v = qs('#gb-v', p); if (v) v.textContent = r.value + ' GB' }
@@ -554,6 +554,13 @@ async function pgData() {
     p.onclick = async (e) => {
       const it = e.target.closest('[data-a],[data-pg]'); if (!it) return
       const ak = it.dataset.a || it.dataset.pg
+      // v71: P2P ulashish — ilgari g50_share bayrog‘ini o‘zgartiruvchi UI UMUMAN yo‘q edi
+      if (ak === 'pshare') {
+        const nx = localStorage.getItem('g50_share') === '0' ? '1' : '0'
+        localStorage.setItem('g50_share', nx)
+        const sm = qs('.rt small', it); if (sm) sm.textContent = nx === '0' ? 'O‘chiq — qurilmangiz fayl bermaydi' : 'Yoqilgan — qurilmangiz tarmoqdagi fayllarni boshqalarga yetkazadi'
+        toast(nx === '0' ? '🕸 P2P ulashish o‘chirildi' : '🕸 P2P ulashish yoqildi'); return
+      }
       if (ak === 'clear') { if (await confirmBox('Qurilmadagi barcha media fayllar o‘chirilsinmi? Xabarlar matni saqlanib qoladi.', 'Tozalash')) tryDo(async () => { await Store.clearAll(); mediaCache.clear() }, '🧹 Tozalandi') }
       if (ak === 'backup') {
         if (!(await confirmBox('Barcha chatlar tarixi bitta faylga yuklab olinadi. Davom etamizmi?', 'Zaxiralash', false))) return
