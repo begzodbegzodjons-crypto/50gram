@@ -157,6 +157,7 @@ async function callUser(uid, video) {
   CALL = { peer, video: !!video, outgoing: true, ice: [], el: callUI(peer, video, 'Ulanmoqda…'), t0: Date.now(), ringMode: '' }
   clog('chaqirildi', 'to=' + uid + ' video=' + !!video) // KLIENT JURNALI: qo'ng'iroq boshlandi
   startSigPoll() // qo'ng'iroq davomida navbat-polling: WS zombi bo'lsa ham signallar yetadi
+  purgeStaleSignals() // eski qo'ng'iroq juvonlari yangisini o'chirmasin (jurnal-isbot 09:56:42)
   callButtons('active')
   ringTone(true) // JIRINGLASH DARHOL: tarmoq javobini kutmasdan — bosgan paytdanoq eshitiladi
   try {
@@ -711,6 +712,20 @@ function startSigPoll() {
   drainSigQueue()
 }
 function stopSigPoll() { if (sigPollT) { clearInterval(sigPollT); sigPollT = 0 } }
+// ESKI NAVBATNI SUPURISH (yangi CHAQIRUVCHI qo'ng'irog'i boshlanishida): yangi qo'ng'iroqning
+// call_id'i hali tayinlanmagan paytda navbatdagi ESKI qo'ng'iroq juvonlari (hangup/call_closed)
+// o'qilib qolsa — yangi qo'ng'iroq o'chib ketardi (jurnal-isbot). Yangi qo'ng'iroqning o'z
+// signallari hali bo'lolmaydi (call_id serverdan qaytmagan) — shuning uchun supurish XAVFSIZ.
+async function purgeStaleSignals() {
+  try {
+    const r = await api('/signal/queue?since=0')
+    const sigs = (r && r.signals) || []
+    if (sigs.length) {
+      for (const s of sigs) { const sid = +s.sid || 0; if (sid > lastSid) lastSid = sid }
+      logSig('eski-navbat supurildi', sigs.length + ' ta eski qo\'ng\'iroq juvonlari tashlandi')
+    }
+  } catch {}
+}
 
 // SID DEDUP: bir signal WS va navbat orqali IKKI MARTA kelishi mumkin — ikkinchi ishlov
 // setRemoteDescription/addIceCandidate xatolariga olib kelardi. Endi sid bo'yicha o'tkazib yuboriladi.
@@ -781,12 +796,25 @@ async function handleSignalEv(ev) {
       await flushIce(C)
     }
     if (d.k === 'ice') { if (C.pc?.remoteDescription) await C.pc.addIceCandidate(d.c).catch(() => {}); else C.ice.push(d.c) }
-    if (d.k === 'hangup') endCall('ended', false)
-    if (d.k === 'busy') endCall('missed', true, 'Band')
+    // YAKUNLOVCHI SIGNALLAR — ESKI QO'NG'IROQ JUVONIDAN HIMOYA (jurnal-isbot 09:56:42):
+    // eski qo'ng'iroqning hangup/busy signali navbatda qolib, YANGI qo'ng'iroq boshlanganda
+    // (call_id hali tayinlanmagan / boshqa) o'qilsa — yangi qo'ng'iroq O'ZI-O'ZI o'chardi.
+    // Endi: ikkala call_id MA'LUM va FARQLI bo'lsa — eski, TEGMAYMIZ (bittasi noma'lum
+    // bo'lsa — eski xulq, moslikni server-vaqt belgilaydi; outgoing startda navbat supuriladi).
+    const sameCall = !d.call_id || !C.id || String(C.id) === String(d.call_id)
+    // YOSH CHAQIRUV OYNASI (purge bilan birgalikda): chaqiruvchi call_id olmasidan OLDIN
+    // kelgan hangup/busy ALBATTA eski qo'ng'iroqnikidir (yangi qo'ng'iroq serverda hali
+    // YARATILMAGAN) — tashlaymiz. purge natijasidan tezroq kelib qolishi mumkin (poyga).
+    if ((d.k === 'hangup' || d.k === 'busy') && C.outgoing && !C.id && Date.now() - (C.t0 || 0) < 6000) {
+      logSig('eski-juvon tashlandi', 'k=' + d.k + " (yangi chaqiruv, call_id hali yo'q — 6s oyna)")
+      return
+    }
+    if (d.k === 'hangup' && sameCall) endCall('ended', false)
+    if (d.k === 'busy' && sameCall) endCall('missed', true, 'Band')
     if (d.k === 'call_closed') {
       // NAVBATDAN KELGAN YAKUNIY HOLAT (server yozgan): WS zombi bo'lsa 'hangup' yetmaydi —
       // endi jiringlash ekrani navbat-polling bilan ~2s ichida yopiladi («qotib qolish» yo'q)
-      if (!C.started && d.call_id && String(C.id) === String(d.call_id)) endCall('missed', false, d.status === 'declined' ? 'Rad etildi' : 'Javob berilmadi')
+      if (sameCall && !C.started && d.call_id && C.id) endCall('missed', false, d.status === 'declined' ? 'Rad etildi' : 'Javob berilmadi')
     }
   } catch (e) { console.warn('signal', e) }
 }
