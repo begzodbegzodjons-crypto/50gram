@@ -1,0 +1,26 @@
+name: UI-send tashxisi (vaqtinchalik)
+on:
+  workflow_dispatch:
+concurrency:
+  group: testlar-zanjiri
+  cancel-in-progress: false
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Playwright o'rnatish (chromium)
+        run: |
+          cd scripts
+          npm init -y >/dev/null 2>&1 || true
+          npm i playwright@1.63.0 --no-audit --no-fund >/dev/null
+          npx playwright install chromium
+          npx playwright install-deps chromium >/dev/null || sudo npx playwright install-deps chromium
+      - name: UI-send tashxisi
+        env:
+          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+        run: node scripts/ui_send_diag.mjs
