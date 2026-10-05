@@ -1,6 +1,12 @@
 name: Butun ilova AUDITI (barcha funksiyalar)
 on:
   workflow_dispatch:
+concurrency:
+  # smoke/e2e bilan BITTA zanjir — audit ularga parallel tushsa, bir xil test
+  # raqamlari bilan bir-birining sessiyasini o'chirib 401-bo'roni berardi
+  # (isbot: b20e254 audit run 37263374213 — 10 QIZIL hammasi 401).
+  group: testlar-zanjiri
+  cancel-in-progress: false
 jobs:
   audit:
     runs-on: ubuntu-latest
