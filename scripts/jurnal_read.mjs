@@ -33,7 +33,7 @@ if (!v.token) { console.error('VERIFY xato:', JSON.stringify(v).slice(0, 200)); 
 console.log('login OK uid=' + v.user?.id)
 
 const j = await jreq('/api/jurnal?n=' + N, { headers: { authorization: 'Bearer ' + v.token } })
-const rows = j.rows || []
+const rows = j.items || []
 console.log('=== JURNAL (' + rows.length + ' yozuv) ===')
 if (!rows.length) { console.log('jurnal BO\'SH — serverda hech qanday xato yozuvi yo\'q (toza holat)') }
 for (const w of rows) {
