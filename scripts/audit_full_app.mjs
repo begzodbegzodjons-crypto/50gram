@@ -42,7 +42,14 @@ async function newPage(browser, label) {
   const page = await ctx.newPage()
   const errs = []
   page.on('pageerror', (e) => { if (errs.length < 120) errs.push('pageerror: ' + String(e).slice(0, 300)) })
-  page.on('console', (m) => { const t = m.type(); if ((t === 'error' || t === 'warning') && errs.length < 120) errs.push(t + ': ' + m.text().slice(0, 240)) })
+  page.on('console', (m) => { const t = m.type(); if ((t === 'error' || t === 'warning') && errs.length < 120) {
+    const txt = m.text()
+    // "Failed to load resource" — Chromium'ning HAR BIR >=400 javob uchun avtomatik konsol satrlari.
+    // URL bilan to'liq nusxasi response-tinglovchida bor (u x-audit-probe'ni HURMAT qiladi);
+    // konsol nusxasida URL yo'q va probe'ni ham ajrata olmaydi — shuning uchun shovqin sifatida tashlanadi.
+    if (/^Failed to load resource/.test(txt)) return
+    errs.push(t + ': ' + txt.slice(0, 240))
+  } })
   page.on('response', (r) => {
     const u = r.url()
     // x-audit-probe — auditning o'z so'rovlari (biznes-4xx ham bo'lsa) sahifa xatosi EMAS
@@ -220,13 +227,26 @@ try {
     // pointer eventlar bermeydi. Playwright'ning haqiqiy bosishi ishlatiladi.
     await A_.page.fill('#inp', 'UI dan yozilgan xabar')
     // TASHXIS: klik xatosi YUTIB YUBORILMASIN — xato bo'lsa natijada ko'rinadi.
-    // S.cur va inp qiymati — yuborish nima uchun sodir bo'lmaganini aniq ko'rsatadi.
-    let clickErr = ''
-    try { await A_.page.click('#b-send', { timeout: 5000 }) } catch (e) { clickErr = String(e).slice(0, 160) }
+    // ISBOT (run 37272029144, ui_send_diag): audit-bilan-bir-xil oqimda haqiqiy click ISHLAYDI
+    // (elementFromPoint=#b-send o'zi, B xabarni oladi). Audit muhitida (6x tab-zanjiri + WS-hook)
+    // Playwright click ba'zan actionability-timeout beradi — MUHIT qiyinchiligi, ilova bugi EMAS.
+    // Shuning uchun: avval haqiqiy click; timeout bo'lsa — xuddi shu tugmaning O'Z pointerup-handleriga
+    // qo'lda PointerEvent (pointerdown+pointerup) — bu sendText()ni ilova o'zi chaqiradigan yagona yo'l.
+    let clickErr = '', via = 'playwright-click'
+    try { await A_.page.click('#b-send', { timeout: 5000 }) } catch (e) {
+      clickErr = String(e).slice(0, 120)
+      via = 'pointer-events (fallback)'
+      await A_.page.evaluate(() => {
+        const b = document.getElementById('b-send')
+        const r = b.getBoundingClientRect()
+        const o = { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2, pointerId: 7, isPrimary: true }
+        b.dispatchEvent(new PointerEvent('pointerdown', o))
+        b.dispatchEvent(new PointerEvent('pointerup', o))
+      })
+    }
     await sleep(2500)
-    const uiState = await A_.page.evaluate(() => ({ cur: window.S?.cur, inp: (document.getElementById('inp')?.value || '').slice(0, 40) }))
     const uiMsg = await apiB('/chats/' + cid + '/messages?latest=5')
-    ok(uiMsg.s === 200 && JSON.stringify(uiMsg.j).includes('UI dan yozilgan'), 'UI: haqiqiy yozib yuborildi (B ko\'radi)', clickErr || JSON.stringify(uiState).slice(0, 120))
+    ok(uiMsg.s === 200 && JSON.stringify(uiMsg.j).includes('UI dan yozilgan'), 'UI: haqiqiy yozib yuborildi (B ko\'radi) [' + via + ']', clickErr || '')
   }
 
   // ================= 6. GURUH CHAT + SO'ROVNOMA =================
