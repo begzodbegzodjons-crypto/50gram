@@ -22,6 +22,9 @@ export interface Env {
   ESKIZ_PASSWORD?: string
   ESKIZ_FROM?: string
   SMS_TEXT?: string
+  // SMS MASTER-SWITCH: "app" = kod ilova ichida qizil yozuvda (Eskiz TINCH yotadi);
+  // "eskiz" = haqiqiy SMS (secretlar + balans kerak). Batafsil: sms.ts va wrangler.toml
+  SMS_MODE?: string
   TURN_KEY_ID?: string
   TURN_KEY_TOKEN?: string
   // Web Push (VAPID): public = base64url(65-baytli P-256 nuqta), private = base64url(JSON {d,x,y})
@@ -224,7 +227,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v67"
+const BUILD_V = "v68"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -458,9 +461,10 @@ async function authOtp(c: C) {
     if (ex && +(ex.token_exp || 0) > t && (!ex.logout_at || +(ex.last_seen || 0) > t - 86_400_000) && !devPhones.includes(phone))
       return fail("Bu raqam band — tizimda mavjud. Kod olish uchun avval ilovadan chiqish (Logout) qiling", 409)
   }
-  // SINOV REJIMI (SMS hali ulanmagan): HAR QANDAY raqam kodni ilova ICHIDA oladi —
-  // "avvalgiday": raqam kiritildi → kod darhol qizil yozuvda ko'rinadi.
-  // Eskiz ulanganda (smsOn=true) bu tarmoq o'chadi — o'sha paytdan haqiqiy SMS yuboriladi.
+  // ILOVA-ICHKI REJIM (SMS_MODE="app"): HAR QANDAY raqam kodni ilova ICHIDA oladi —
+  // raqam kiritildi → kod darhol QIZIL yozuvda ko'rinadi (mijoz dev_code bilan chizadi).
+  // Eskizga o'tganda (SMS_MODE="eskiz" + secretlar) smsOn=true bo'ladi — o'sha paytdan
+  // haqiqiy SMS yuboriladi, bu tarmoq o'zi o'chadi (kod o'zgarishi shart emas).
   let devSelf = false
   if (!smsOn && !test && c.env.DEV_MODE === "1") devSelf = true
   // Kutish muddati: haqiqiy SMS (Eskiz) pullik/pumping-xavfli — 55s; ilova-ichki kod bepul — 20s
@@ -475,7 +479,7 @@ async function authOtp(c: C) {
     return json({ ok: true, phone })
   }
   if (devSelf) return json({ ok: true, phone, dev_code: code })
-  return fail("SMS xizmati sozlanmagan (ESKIZ_EMAIL/ESKIZ_PASSWORD)", 503)
+  return fail("SMS xizmati sozlanmagan (SMS_MODE=eskiz qiling va ESKIZ secretlarini qo‘ying)", 503)
 }
 async function authVerify(c: C) {
   const phone = normPhone(c.b.phone)

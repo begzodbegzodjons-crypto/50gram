@@ -628,14 +628,24 @@ $('b-otp').onclick = async () => {
   try {
     const r = await post('/auth/otp', { phone: '998' + d })
     authPhone = r.phone
-    $('code-info').innerHTML = `<b>${esc(authPhone)}</b> raqamiga SMS kod yuborildi`
-    if (r.dev_code) { $('code-info').innerHTML += `<br><span style="color:var(--qizil)">Sinov rejimi: kod ${r.dev_code}</span>` }
-    step('a-code'); $('code').value = ''; setTimeout(() => $('code').focus(), 50); startResend()
+    if (r.dev_code) {
+      // ILOVA-ICHKI REJIM (SMS_MODE="app", haqiqiy SMS hali yo'q): kod SHU YERDA
+      // qizil yozuvda beriladi — foydalanuvchi kodni BOSADI, u o'zi kiritiladi.
+      $('code-info').innerHTML = `<b>${esc(authPhone)}</b> raqami uchun tasdiqlash kodi:`
+      $('code-info').innerHTML += `<div id="devcode" style="margin-top:12px;color:var(--qizil);font-size:36px;font-weight:800;letter-spacing:10px;line-height:1;cursor:pointer;user-select:none;font-variant-numeric:tabular-nums" title="Bosing — kod o‘zi kiritiladi">${r.dev_code}</div><div class="mut" style="margin-top:8px">👆 Kodni bosing — avtomatik kiritiladi (haqiqiy SMS foydalanuvchilar ko‘paygach ulanadi)</div>`
+    } else {
+      $('code-info').innerHTML = `<b>${esc(authPhone)}</b> raqamiga SMS kod yuborildi`
+    }
+    step('a-code'); $('code').value = ''; setTimeout(() => $('code').focus(), 50); startResend(r.dev_code ? 20 : 60)
+    if (r.dev_code) {
+      const dc = $('devcode')
+      if (dc) dc.onclick = () => { $('code').value = r.dev_code; $('b-verify').click() }
+    }
   } catch (e) { toast('⚠️ ' + e.message) }
   b.disabled = false; b.textContent = 'Kod olish'
 }
-function startResend() {
-  let s = 60; const b = $('b-resend'); b.disabled = true
+function startResend(sec = 60) {
+  let s = sec; const b = $('b-resend'); b.disabled = true
   clearInterval(resendT)
   resendT = setInterval(() => { s--; b.textContent = s > 0 ? `Qayta yuborish (${s})` : 'Qayta yuborish'; if (s <= 0) { b.disabled = false; clearInterval(resendT) } }, 1000)
 }
@@ -935,7 +945,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v67'
+window.__50BUILD = 'v68'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return

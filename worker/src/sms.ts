@@ -1,5 +1,15 @@
 // SMS yuborish — Eskiz.uz (O'zbekiston). Hisob: https://eskiz.uz
 // Secretlar: ESKIZ_EMAIL, ESKIZ_PASSWORD. Ixtiyoriy: ESKIZ_FROM (default 4546), SMS_TEXT ("{code}" bilan)
+//
+// MASTER-SWITCH (SMS_MODE, wrangler.toml'da):
+//   "app"   → Eskiz HECH QACHON chaqirilmaydi (secretlar bor bo'lsa ham!) — kod ilova
+//             ICHIDA qizil yozuvda beriladi (authOtp'dagi dev_code). Foydalanuvchilar
+//             ko'payguncha shu rejim.
+//   "eskiz" → haqiqiy SMS (Eskiz orqali). Secretlar yetishmasa — xato, jim ilova-kodga
+//             qaytmaydi (rejim o'zi so'ralgan, shartni bajarish kerak).
+// Shu tarzda Eskiz secretlari hisobda mavjud bo'lsa ham, "app" rejimida ular TINCH
+// yotadi — noto'g'ri parol / bo'sh balans kirishni BUZOLMAYDI (oldingi «o'zi buzildi»
+// naqshining oldi olinadi).
 let token = ""
 
 async function login(env: any) {
@@ -26,7 +36,9 @@ async function login(env: any) {
 }
 
 export function smsConfigured(env: any) {
-  return !!(env.ESKIZ_EMAIL && env.ESKIZ_PASSWORD)
+  // MASTER-SWITCH: Eskiz faqat SMS_MODE="eskiz" bo'lgandagina ishlaydi.
+  // Secretlar mavjudligi o'zi yetarli EMAS — kalit "app" turib bo'lsa Eskiz TINCH yotadi.
+  return env.SMS_MODE === "eskiz" && !!(env.ESKIZ_EMAIL && env.ESKIZ_PASSWORD)
 }
 
 export async function sendSms(env: any, phone: string, code: string) {
