@@ -688,9 +688,18 @@ $('b-prof').onclick = async () => {
   b.disabled = false
 }
 function setMe(u) { S.me = { ...(S.me || {}), ...u }; localStorage.setItem('g50_me', JSON.stringify(S.me)) }
-function logout(silent) {
+async function logout(silent) {
   // Serverga ham xabar: hisob "chiqdi" → shu raqam endi kod olish uchun OCHIQ (muallif tizimi).
-  try { if (S.token) fetch(API + '/auth/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + S.token }, keepalive: true }) } catch {}
+  // v72 TUZATISH («logout qilmay dastur» — raqam BAND qolishi ildizi): oldin fetch FIRE-AND-FORGET
+  // edi — darhol location.reload() WebView so'rovni o'chirib yuborardi, server logout_at YOZMASDI
+  // → raqam «BAND» qolaverardi. Endi fetch AWAIT qilinadi (3s oshiq-vaqt himoyasi bilan) —
+  // server javobini kutib turib, SO'NNG sahifa yangilanadi.
+  try {
+    if (S.token) await Promise.race([
+      fetch(API + '/auth/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + S.token }, keepalive: true }),
+      new Promise((res) => setTimeout(res, 3000)),
+    ])
+  } catch {}
   // APK fon xizmati ham to'xtasin: eski token bilan polling/beat davom etsa hisob "band" qolaveradi
   try { window.Android50 && window.Android50.setToken && window.Android50.setToken('') } catch {}
   localStorage.removeItem('g50_token'); localStorage.removeItem('g50_me')
@@ -951,7 +960,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v71'
+window.__50BUILD = 'v72'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return

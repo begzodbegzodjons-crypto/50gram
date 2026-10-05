@@ -55,13 +55,14 @@ enabled = true
 #             ESKIZ_FROM / SMS_TEXT ixtiyoriy (default: 4546 va standart matn).
 # =====================================================================
 SMS_MODE = "app"
-# DEV_MODE="1" + SMS_MODE="app": kod FAQAT DEV_PHONES ro'yxatidagi raqamlarga javobda
-# qaytadi (dev_code) va ilova uni QIZIL yozuvda ko'rsatadi. Ro'yxatdagi boshqa raqamga
-# 503 (yopiq-beta). SMS_MODE="eskiz" bo'lganda bu maydon o'zi ishdan chiqadi (kod faqat
-# haqiqiy SMS bilan boradi) — uni "0" qilish SHART EMAS. (v71: xavfsizlik — dev_code
-# endi har qanday raqamga emas, FAQAT ro'yxatga cheklangan: hisob-o'g'irlash yopildi)
+# DEV_MODE="1" + SMS_MODE="app": kod HAR QANDAY raqamga ilova ICHIDA qaytadi (dev_code —
+# QIZIL yozuv). Yangi raqam ro'yxatdan o'tadi, logout qilgan ega qaytadi. FAOL hisob
+# qo'riqlanadi: ilova ochiq turganda (last_seen 15 daqiqadan yangi) boshqa odam shu
+# raqamga 409 «tarmoqda mavjud» oladi — «bitta raqam — bitta faol dastur» (v72).
+# SMS_MODE="eskiz" bo'lganda bu maydon o'zi ishdan chiqadi (kod faqat haqiqiy SMS
+# bilan boradi) — uni "0" qilish SHART EMAS.
 DEV_MODE = "1"
-# DEV kod faqat shu raqam(lar)ga: operator hisobi himoyalangan yagona istisno
+# DEV kod qo'shimcha imtiyoz: shu raqamlar «band» qoidasidan tashqari — doim kiradi
 DEV_PHONES = "+998907776655,+998900000003,+998900000004,+998900000005,+998900000006"
 # Sinov raqamlari (SMS yuborilmaydi): "+998900000001:111111,+998900000002:222222"
 TEST_PHONES = ""

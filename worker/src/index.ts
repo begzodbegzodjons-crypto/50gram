@@ -230,7 +230,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v71"
+const BUILD_V = "v72"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -459,27 +459,30 @@ async function authOtp(c: C) {
   const devPhones = (c.env.DEV_PHONES || "").split(",").map((x) => x.trim()).filter(Boolean)
   const smsOn = smsConfigured(c.env)
   const test = (c.env.TEST_PHONES || "").split(",").map((x) => x.trim().split(":")).find(([p]) => p === phone)
-  // PARALEL KIRISH HIMOYASI (muallif tizimi): hisob tizimda FAOL bo'lsa — logout qilmagan
-  // VA sessiyasi hali yaroqli (token_exp o'tmagan) — shu raqamga yangi kod BERILMAYDI:
-  // "raqam band — tizimda mavjud". Logout qilingan yoki sessiyasi eskirgan hisobga KOD
-  // BERILADI (qayta kirish). Operator raqamlari (DEV_PHONES) — yagona istisno, doim kiradi.
+  // «BITTA RAQAM — BITTA FAOL DASTUR» HIMOYASI (muallif tizimi, v72):
+  // begona odam boshqa foydalanuvchi FAOL ishlatayotgan raqamiga kira olmaydi —
+  // «Bu raqam tarmoqda mavjud» javobi (409). Logout qilingan yoki yopiq turgan
+  // raqam esa OCHIQ — ega qizil kod bilan qaytadi (quyidagi BAND qoidasiga qarang).
   // Haqiqiy SMS (Eskiz) ulanganda bu qo'riqchi shart emas — kod faqat haqiqiy egasiga boradi.
   if (!smsOn && !test) {
     const ex = await c.db.one("SELECT id, logout_at, token_exp, last_seen FROM users WHERE phone=?", [phone])
-    // BAND qoidasi: sessiya yaroqli VA (logout qilmagan YOKI hisob hali TIRIK — oxirgi
-    // faollik 24 soat ichida: ping/storageBeat har daqiqada keladi). last_seen sharti
-    // masofaviy logout'ni bekor qiladi: boshqa qurilma hali ishlatayotgan bo'lsa raqam
-    // BAND qoladi (paralel yo'q). Haqiqiy chiqish last_seen=0 qiladi → raqam OCHIQ.
-    if (ex && +(ex.token_exp || 0) > t && (!ex.logout_at || +(ex.last_seen || 0) > t - 86_400_000) && !devPhones.includes(phone))
-      return fail("Bu raqam band — tizimda mavjud. Kod olish uchun avval ilovadan chiqish (Logout) qiling", 409)
+    // BAND = «bu raqam TARMOKDA MAVJUD va HOZIR faol ishlatilmoqda» (v72 qayta ko'rib chiqildi):
+    //  - to'g'ri LOGOUT qilingan (logout_at belgilangan) → raqam OCHIQ: ega qizil kod bilan DARHOL qaytadi;
+    //  - ilova HOZIR ochiq turgan (ping har ~45s → last_seen 15 daqiqadan yangi) → BAND: boshqa
+    //    odam bu raqamga kira olmaydi — «bitta raqam — bitta faol dastur», begona akkauntga kirish yo'q;
+    //  - ilova 15+ daqiqadan beri yopiq (yoki logout buzib qolgan) → OCHIQ: ega qayta kiradi,
+    //    sess aylanadi (authVerify) va eskirgan qurilma 401 bilan avtomatik uchiriladi.
+    //  DEV_PHONES (ega raqamlari) — doim ochiq (band qoidasidan tashqari).
+    if (ex && !ex.logout_at && +(ex.token_exp || 0) > t && +(ex.last_seen || 0) > t - 15 * 60_000 && !devPhones.includes(phone))
+      return fail("Bu raqam tarmoqda mavjud — bitta raqam faqat bitta dasturda ishlaydi. Bu raqam sizniki bo'lsa, avvalgi qurilmada Logout qiling yoki biroz kuting", 409)
   }
-  // ILOVA-ICHKI REJIM (SMS_MODE="app"): kod faqat DEV_PHONES (ega ro'yxati) raqamlariga
-  // ilova ICHIDA qaytariladi — QIZIL yozuvda ko'rinadi. XAVFSIZLIK (v71): oldin HAR QANDAY
-  // raqam dev_code olardi — boshqa odamning raqamini kiritib, uning hisobiga kirish mumkin
-  // edi (hisob o'g'irlash). Endi ro'yxatdagi raqamlargina «qizil kod» oladi; tashqi foydalanuvchi
-  // uchun haqiqiy SMS (SMS_MODE="eskiz") yoqilguncha 503 — yopiq-beta rejim.
+  // ILOVA-ICHKI REJIM (SMS_MODE="app", Eskiz O'CHIQ): kod HAR QANDAY raqam uchun ilova
+  // ICHIDA qaytadi (QIZIL yozuv) — yangi raqam ro'yxatdan o'tadi, logout qilgan ega qaytadi.
+  // XAVFSIZLIK (v72): faol hisob yuqoridagi BAND qoidasi bilan qo'riqlanadi — ilova ochiq
+  // turganda begona odam shu raqamga kod ola olmaydi (409 «tarmoqda mavjud»). Eskizga
+  // o'tganda (SMS_MODE="eskiz" + secretlar) smsOn=true bo'ladi — bu tarmoq o'zi o'chadi.
   let devSelf = false
-  if (!smsOn && !test && c.env.DEV_MODE === "1" && devPhones.includes(phone)) devSelf = true
+  if (!smsOn && !test && c.env.DEV_MODE === "1") devSelf = true
   // Kutish muddati: haqiqiy SMS (Eskiz) pullik/pumping-xavfli — 55s; ilova-ichki kod bepul — 20s
   const cd = smsOn ? 55000 : 20000
   const prev = await c.db.one("SELECT sent_at FROM otp WHERE phone=?", [phone])
