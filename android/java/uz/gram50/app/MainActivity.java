@@ -5,6 +5,8 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -13,6 +15,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.view.Gravity;
 import android.view.View;
+import android.view.WindowManager;
 import android.view.animation.AlphaAnimation;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
@@ -95,8 +98,51 @@ public class MainActivity extends Activity {
       } catch (Exception ignored) { }
     }
 
+    // v2.8 (v74 klient bilan birga): QO'NG'IROQ OVOZI YO'NALISHI — WebView WebRTC ovozi
+    // ko'pincha QULOQCHIGA yo'nalgan bo'ladi, foydalanuvchi «ovoz kelmayapti» deb o'ylaydi.
+    // JS: Android50.speaker(true) — karnayga, speaker(false) — quloqchiga qaytaradi.
     @JavascriptInterface
-    public String version() { return "2.6"; }
+    public void speaker(final boolean on) {
+      runOnUiThread(new Runnable() {
+        @Override public void run() {
+          try {
+            AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am == null) return;
+            if (Build.VERSION.SDK_INT >= 31) {
+              if (on) {
+                for (AudioDeviceInfo d : am.getAvailableCommunicationDevices()) {
+                  if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+                    am.setCommunicationDevice(d); // yangi API — Android 12+
+                    break;
+                  }
+                }
+              } else {
+                am.clearCommunicationDevice();
+              }
+            } else {
+              am.setSpeakerphoneOn(on); // eski API — Android 11 va pastda ishonchli
+            }
+          } catch (Exception ignored) { }
+        }
+      });
+    }
+
+    // v2.8: QO'NG'IROQDA EKRAN UXLAMASIN — ekran o'chsa OS kamera/mikrofonni to'xtatishi
+    // mumkin (video «qotib qoladi»). JS: Android50.keepScreen(true/false).
+    @JavascriptInterface
+    public void keepScreen(final boolean on) {
+      runOnUiThread(new Runnable() {
+        @Override public void run() {
+          try {
+            if (on) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+          } catch (Exception ignored) { }
+        }
+      });
+    }
+
+    @JavascriptInterface
+    public String version() { return "2.8"; }
 
     /** Web tomondan ruxsatlarni ataylab so'rash (masalan qo'ng'iroq tugmasi bosilganda). */
     @JavascriptInterface
@@ -130,7 +176,7 @@ public class MainActivity extends Activity {
     s.setCacheMode(WebSettings.LOAD_DEFAULT);
     s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     s.setJavaScriptCanOpenWindowsAutomatically(true);
-    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.6");
+    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.8");
     web.addJavascriptInterface(new Bridge(), "Android50");
 
     web.setWebViewClient(new WebViewClient() {

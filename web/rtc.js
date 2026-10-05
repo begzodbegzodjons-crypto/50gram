@@ -132,7 +132,9 @@ function callButtons(kind) {
     b.innerHTML = wrap('end', IC.end, 'Rad etish', 'decline') + wrap('ok', CALL.video ? IC.cam : IC.phone, 'Javob berish', 'accept')
   } else {
     b.innerHTML = `<div class="cbtn mic"><button class="cb" data-c="mic">${IC.mic}</button><span>Mikrofon</span></div>`
-      + (CALL.video ? `<div class="cbtn cam"><button class="cb" data-c="cam">${IC.cam}</button><span>Kamera</span></div><div class="cbtn"><button class="cb" data-c="flip">${IC.flip}</button><span>Almashtirish</span></div>` : `<div class="cbtn spk"><button class="cb" data-c="spk">${IC.spk}</button><span>Dinamik</span></div>`)
+      + (CALL.video ? `<div class="cbtn cam"><button class="cb" data-c="cam">${IC.cam}</button><span>Kamera</span></div><div class="cbtn"><button class="cb" data-c="flip">${IC.flip}</button><span>Almashtirish</span></div>` : ``)
+      // v74: «Dinamik» VIDEO qo'ng'iroqda HAM bo'lsin — APK'da karnay/quloqchi almashtirish
+      + `<div class="cbtn spk"><button class="cb" data-c="spk">${IC.spk}</button><span>Dinamik</span></div>`
       + wrap('end', IC.end, 'Tugatish', 'hang')
   }
   b.onclick = (e) => {
@@ -144,7 +146,7 @@ function callButtons(kind) {
     if (k === 'mic') { const tr = CALL.local?.getAudioTracks()[0]; if (tr) { tr.enabled = !tr.enabled; t.classList.toggle('off', !tr.enabled); t.innerHTML = tr.enabled ? IC.mic : IC.micOff } }
     if (k === 'cam') { const tr = CALL.local?.getVideoTracks()[0]; if (tr) { tr.enabled = !tr.enabled; t.classList.toggle('off', !tr.enabled); t.innerHTML = tr.enabled ? IC.cam : IC.camOff } }
     if (k === 'flip') flipCam()
-    if (k === 'spk') { const a = qs('.ra', CALL.el); a.muted = !a.muted; CALL.spkMuted = a.muted; t.classList.toggle('off', a.muted) } // spkMuted: media-qorovul ataylab o'chirilgan ovozga QO'L TEKKIZMASIN
+    if (k === 'spk') { const a = qs('.ra', CALL.el); a.muted = !a.muted; CALL.spkMuted = a.muted; t.classList.toggle('off', a.muted); try { window.Android50 && window.Android50.speaker && window.Android50.speaker(!a.muted) } catch {} } // spkMuted: media-qorovul ataylab o'chirilgan ovozga QO'L TEKKIZMASIN
   }
 }
 const setCallState = (t) => CALL && (qs('.cst', CALL.el).textContent = t)
@@ -229,6 +231,8 @@ document.addEventListener('visibilitychange', () => {
   // APK/PWA fonga kirib-chiqqanda WebView mediani to'xtatishi mumkin — qo'ng'iroq ovozini
   // va rasmni qayta ishga tushiramiz (aks holda qo'ng'iroq «qotib qoldi»day tuyuladi)
   if (!document.hidden && CALL) { try { playRemote(CALL) } catch {} }
+  // v74: qaytganda ekran-uyqu qulfini qayta olamiz (fon'da uzilib qolgan bo'lishi mumkin)
+  try { if (!document.hidden && CALL?.video) holdWake(true) } catch {}
   // QO'NG'IROQ QO'RIQHONASI — 4-QALQON: fonga kirganda brauzer taymerlarni 1 daqiqagacha
   // sekinlashtirishi mumkin. Qaytganda: (a) jiringlash davom etsin, (b) qo'ng'iroq YO'Q
   // bo'lsa DARHOL pending tekshiruv — fon'da kechikkanning o'rnini bir zumda to'laydi.
@@ -349,22 +353,49 @@ setInterval(() => {
     if (C.started && C.pc && pcs === 'connected') {
       C.pc.getStats().then((st) => {
         if (CALL !== C || !C.pc || C.pc.connectionState !== 'connected') return
-        let bytes = 0, frames = -1, hasVideo = false
+        let bytes = 0, frames = -1, hasVideo = false, aIn = 0
+        let oBytes = 0, oABytes = 0, oFrames = -1, hasOutV = false
         st.forEach((r) => {
           // YO'NALTIRUVCHI BELGISI (jurnal uchun): media TURN relay orqalimi yoki to'g'ridan-to'g'rimi —
           // «mobil tarmoqda ovoz/video yo'q» deganda birinchi savol aynan shu
           if (r.type === 'candidate-pair' && r.state === 'succeeded') C.relay = (r.localCandidateType === 'relay' || r.remoteCandidateType === 'relay') ? 1 : 0
           if (r.type === 'inbound-rtp' && !r.isRemote) {
             bytes += r.bytesReceived || 0
+            if (r.kind === 'audio') aIn += r.bytesReceived || 0
             if (r.kind === 'video') { hasVideo = true; frames = r.framesDecoded || 0 }
           }
+          // v74: CHIQUVCHI OQIM — «bir taraf yaxshi ko'rsatyapti, bir taraf QOTIB ovozi
+          // kelmayapti» ildizi: qotgan tomonning KAMERA/MIKROFONI OS tomonidan o'chirilgan
+          // bo'ladi (fon rejimi, boshqa ilova musodara qilishi, WebView to'xtatishi).
+          if (r.type === 'outbound-rtp') {
+            oBytes += r.bytesSent || 0
+            if (r.kind === 'audio') oABytes += r.bytesSent || 0
+            if (r.kind === 'video') { hasOutV = true; oFrames = r.framesEncoded === undefined ? -1 : (r.framesEncoded || 0) }
+          }
         })
-        if (C.mT === undefined) { C.mT = Date.now(); C.mB = bytes; C.mF = frames; return }
+        if (C.mT === undefined) { C.mT = Date.now(); C.mB = bytes; C.mF = frames; C.mA = aIn; C.mOB = oBytes; C.mOA = oABytes; C.mOF = oFrames; return }
         const t = Date.now()
         if (t - C.mT < 4500) return // ~5s oynada bir marta baholash
         const dBytes = bytes - C.mB
         const dFrames = frames >= 0 && C.mF >= 0 ? frames - C.mF : -1
-        C.mT = t; C.mB = bytes; C.mF = frames
+        const dOF = oFrames >= 0 && C.mOF >= 0 ? oFrames - C.mOF : -1
+        const dOA = oABytes - (C.mOA || 0)
+        C.mT = t; C.mB = bytes; C.mF = frames; C.mA = aIn; C.mOB = oBytes; C.mOA = oABytes; if (oFrames >= 0) C.mOF = oFrames
+        // ── v74-A: CHIQUVCHI VIDEO O'LGAN — kadrlar 15s encode qilinmayapti, trek esa tirik
+        // va yoqilgan. OS kamerani o'chirgan — yangi kamera ochib RENEGOTIATION'SIZ
+        // (replaceTrack) tiklaymiz: qarshi tomon qo'ng'iroqni UZMASDAN tirik rasmini oladi.
+        const vt = C.local?.getVideoTracks()[0]
+        if (C.video && hasOutV && dOF === 0 && vt && vt.readyState === 'live' && vt.enabled) {
+          C.ovS = (C.ovS || 0) + 1
+          if (C.ovS >= 3) { C.ovS = 0; healOutgoing(C, 'video') }
+        } else C.ovS = 0
+        // ── v74-B: CHIQUVCHI OVOZ O'LGAN — 20s davomida MIKROFON bayti umuman yuborilmayapti
+        // (Chrome/WebView DTX'siz ovozni uzluksiz yuboradi — bayt to'xtashi = mikrofon o'lgan).
+        const at = C.local?.getAudioTracks()[0]
+        if (dOA === 0 && at && at.readyState === 'live' && at.enabled) {
+          C.oaS = (C.oaS || 0) + 1
+          if (C.oaS >= 4) { C.oaS = 0; healOutgoing(C, 'audio') }
+        } else C.oaS = 0
         if (dBytes > 0) {
           C.mS = 0; C.mTries = 0 // oqim tirik — hisoblagichlarni nolga tushir
           // OVOZ ELEMENTI SALOMATLIGI («ulangan, LEKIN ovozi kelmayapti» ildizi): baytlar
@@ -379,6 +410,27 @@ setInterval(() => {
               const p = a.play(); if (p && p.catch) p.catch(() => {})
               clog('audio-tiklash', 'element jonlandi (paused=' + a.paused + ', turn=' + (C.relay === undefined ? '?' : C.relay) + ')')
             }
+          } catch {}
+          // ── v74-C: video kelmoqda LEKIN kiruvchi AUDIO treki MUZLAGAN (muted = RTP ovozi
+          // umuman kelmayapti — birtomonlama «ovoz yo'q» ildizi). Elementni jonlantiramiz,
+          // 20s davom etib qolsa — 2 martagacha ICE restart (tarmoq yo'lini yangilaymiz).
+          try {
+            const rt = C.pc.getReceivers ? (C.pc.getReceivers().find((x) => x.track && x.track.kind === 'audio') || {}).track : null
+            if (rt && rt.readyState === 'live' && rt.muted) {
+              C.ramS = (C.ramS || 0) + 1
+              if (C.ramS === 2 && !C.spkMuted) { // ataylab o'chirilgan ovozga qo'l tekkizmaymiz
+                const a = qs('.ra', C.el)
+                if (a && C.remoteStream) { a.srcObject = null; a.srcObject = C.remoteStream; a.muted = false; a.volume = 1; const p = a.play(); if (p && p.catch) p.catch(() => {}) }
+                clog('ovoz-muzlagan', 'element qayta ulandi (turn=' + (C.relay === undefined ? '?' : C.relay) + ')')
+              }
+              if (C.ramS >= 4 && (C.ramTries || 0) < 2 && !C.restaring) {
+                C.ramS = 0; C.ramTries = (C.ramTries || 0) + 1
+                clog('ovoz-muzlagan', 'audio treki 20s muted (video tirik) — ICE restart #' + C.ramTries + ' (turn=' + (C.relay === undefined ? '?' : C.relay) + ')')
+                setCallState('Qayta ulanmoqda…')
+                C.restaring = true
+                Promise.resolve(restartIce(C, true)).catch(() => {}).finally(() => { C.restaring = false })
+              }
+            } else if (rt && !rt.muted) { C.ramS = 0; C.ramTries = 0 }
           } catch {}
           // OVOZ kelyapti lekin VIDEO qotgan (5s'da birorta ham yangi kadr yo'q) — elementlarni
           // qayta jonlantiramiz (WebView video elementi muzlashi — aynan shifokor talab qilingan)
@@ -424,6 +476,12 @@ setInterval(() => {
           setCallState('Qayta ulanmoqda…')
           C.restaring = true
           Promise.resolve(restartIce(C, true)).catch(() => {}).finally(() => { C.restaring = false })
+        }
+        // ── v74-E: 3 marta ICE restart ham yordam bermadi — ABADIY MUZLASH YO'Q: qo'ng'iroqni
+        // aniq xato bilan yopamiz (foydalanuvchi qayta qo'ng'iroq qiladi — Telegram xulqi)
+        if (C.mTries >= 3) {
+          C.deadMs = (C.deadMs || 0) + 1
+          if (C.deadMs >= 4) { endCall('ended', true, 'Aloqa sifati yo‘qolgan — qayta qo‘ng‘iroq qiling'); return }
         }
       }).catch(() => {})
     }
@@ -498,6 +556,47 @@ async function acceptCall() {
     endCall('declined', true, '⚠️ ' + e.message)
   }
 }
+// v74: CHIQUVCHI MEDIA TIKLASH — «bir taraf yaxshi ko'rsatyapti, bir taraf QOTIB ovozi
+// kelmayapti» ning hal qiluvchi davosi. Qotgan tomonda KO'PINCHA o'z KAMERA/MIKROFONI o'lgan
+// bo'ladi (OS fon rejimida o'chirgan, boshqa ilova musodara qilgan, WebView to'xtatgan).
+// Yangi getUserMedia + sender.replaceTrack — RENEGOTIATION'SIZ ishlaydi (SDP o'zgarmaydi),
+// qarshi tomon qo'ng'iroqni UZMASDAN tirik rasm/ovozni qabul qila boshlaydi.
+async function healOutgoing(C, kind) {
+  if (!C.local) return // bayroq qotib qolmasin — guard bayroqdan OLDIN
+  C.healing = C.healing || {}
+  if (C.healing[kind]) return
+  C.healing[kind] = true
+  const isV = kind === 'video'
+  const getT = (s) => isV ? s.getVideoTracks() : s.getAudioTracks()
+  try {
+    const old = getT(C.local)[0]
+    if (!old || old.readyState !== 'live' || !old.enabled) return
+    const snd = C.pc?.getSenders().find((x) => x.track && x.track.kind === kind)
+    if (!snd) return
+    old.stop() // qotgan trekni qo'yib yuboramiz — qurilma yangi ochilish uchun bo'shsin
+    try { C.local.removeTrack(old) } catch {}
+    const con = isV
+      ? { video: { facingMode: C.facing || 'user', width: { ideal: 1280 }, height: { ideal: 720 } } }
+      : { audio: { echoCancellation: true, noiseSuppression: true } }
+    const s = await navigator.mediaDevices.getUserMedia(con)
+    const nt = getT(s)[0]
+    if (!nt) throw new Error('yangi trek bo\'sh')
+    await snd.replaceTrack(nt)
+    try { C.local.addTrack(nt); qs('.local', C.el).srcObject = C.local } catch {}
+    C['h_' + kind] = (C['h_' + kind] || 0) + 1
+    clog('chiqish-tiklandi', kind + ' yangi trek #' + C['h_' + kind] + ' (turn=' + (C.relay === undefined ? '?' : C.relay) + ') — qarshi tomon endi tirik oladi')
+  } catch (e) {
+    clog('chiqish-tiklash-xato', kind + ' | ' + String((e && e.message) || e).slice(0, 120))
+  } finally { C.healing[kind] = false }
+}
+// v74: QO'NG'IROQDA EKRAN UXLAMASIN — Wake Lock API (PWA/APK'da ishlaydi, xatosiz jim o'tadi).
+// Ekran o'chsa OS kamera/mikrofonni to'xtatishi mumkin — «qotib qolish» ildizlaridan biri.
+async function holdWake(on) {
+  try {
+    if (on) { if (CALL && !CALL.wake && navigator.wakeLock?.request) CALL.wake = await navigator.wakeLock.request('screen').catch(() => null) }
+    else { try { CALL?.wake?.release?.() } catch {}; if (CALL) CALL.wake = null }
+  } catch {}
+}
 // QARSHI TOMON MEDIASINI O'YNATISH — «ovoz kelmayapti» tuzatuvi (jonli efirdagi livePlay bilan
 // bir xil isbotlangan yondashuv). autoplay atributi yolg'iz yetarli emas: srcObject ontrack
 // ichida KEYINROQ o'rnatiladi — ba'zi brauzer/WebView'lar play()ni bloklaydi va jim qoladi.
@@ -544,6 +643,10 @@ async function setupPC(C) {
       clog('ulanildi', 'turn=' + (C.relay === undefined ? '?' : C.relay)) // relay=1 → TURN orqali (mobil tarmoq normal), 0 → to'g'ridan-to'g'ri
       clearTimeout(C.dropT) // qayta ulandi — qotish qorovulini to'xtat
       playRemote(C)
+      // v74: video qo'ng'iroqda EKRAN UXLAMASIN (OS kamera/mikrofonni to'xtatmasligi uchun)
+      // + APK'da ovoz KARNAYGA chiqsin (WebRTC WebView'da quloqchiga yo'nalgan bo'ladi)
+      try { holdWake(true) } catch {}
+      try { if (C.video && window.Android50) { window.Android50.keepScreen && window.Android50.keepScreen(true); window.Android50.speaker && window.Android50.speaker(true) } } catch {}
       if (!C.started) {
         C.started = Date.now()
         clearTimeout(C.timeout); clearTimeout(C.connWatch); clearTimeout(C.connWatch2)
@@ -615,6 +718,9 @@ function endCall(status = 'ended', report = true, msg) {
   stopSigPoll() // navbat-polling to'xtasin
   ringTone(false)
   nativeCallCancel() // APK: qo'ng'iroq bildirishnomasini yopish
+  // v74: qo'ng'iroq tugadi — ekran-uyqu qulfi va karnay yo'nalishini tiklaymiz
+  try { holdWake(false) } catch {}
+  try { if (C.video && window.Android50) { window.Android50.keepScreen && window.Android50.keepScreen(false); window.Android50.speaker && window.Android50.speaker(false) } } catch {}
   clearTimeout(C.timeout); clearInterval(C.tick)
   clearTimeout(C.connWatch); clearTimeout(C.connWatch2); clearTimeout(C.dropT)
   const dur = C.started ? Math.round((Date.now() - C.started) / 1000) : 0
