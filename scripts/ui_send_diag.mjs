@@ -19,24 +19,37 @@ page.on('response', (r) => { if (r.url().includes('/api/') && (r.status() >= 400
 const ctxB = await browser.newContext({ userAgent: UA, viewport: { width: 420, height: 800 } })
 const pageB = await ctxB.newPage()
 
-async function devLogin(page, phone) {
+async function devLogin(page, phone, who) {
   await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
   await sleep(1500)
-  const r = await page.evaluate(async (phone) => {
+  const r = await page.evaluate(async ({ phone, who }) => {
     const otp = await fetch('/api/auth/otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone }) }).then((x) => x.json())
     const v = await fetch('/api/auth/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: '+' + phone, code: otp.dev_code }) }).then((x) => x.json())
+    // AUDIT BILAN BIR XIL: token + g50_me (ilova boot uchun ikkalasi ham kerak bo'lishi mumkin)
     localStorage.setItem('g50_token', v.token)
+    localStorage.setItem('g50_me', JSON.stringify(v.user))
+    if (!v.user.first_name) {
+      const p = await fetch('/api/me', { method: 'PATCH', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + v.token }, body: JSON.stringify({ first_name: who === 'A' ? 'E2E-A' : 'E2E-B' }) }).then((x) => x.json())
+      if (p && p.id) localStorage.setItem('g50_me', JSON.stringify(p))
+    }
     return v
-  }, phone)
+  }, { phone, who })
   log('login', phone, '→ uid', r.user?.id)
   return r
 }
 
 try {
-  const ua = await devLogin(page, '998900000005')
-  const ub = await devLogin(pageB, '998900000006')
+  const ua = await devLogin(page, '998900000005', 'A')
+  const ub = await devLogin(pageB, '998900000006', 'B')
 
-  // direct chat yaratish (page fetch orqali — audit bilan bir xil)
+  // BOOT KUTISH (audit singari): reload → ilova to'liq ochilishi
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await pageB.reload({ waitUntil: 'domcontentloaded' })
+  await sleep(4000)
+  const bootState = await page.evaluate(() => ({ hasS: !!window.S, me: localStorage.g50_me ? 'bor' : 'yo\'q', items: document.querySelectorAll('[data-chat]').length }))
+  log('boot holati:', JSON.stringify(bootState))
+
+  // direct chat yaratish (page fetch orqali — audit bilan bir xil, reload YO'Q)
   const cid = await page.evaluate(async (uid) => {
     const res = await fetch('/api/chats/direct', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + localStorage.g50_token }, body: JSON.stringify({ user_id: uid }) })
     return (await res.json()).id
@@ -44,8 +57,6 @@ try {
   log('direct chat:', cid)
 
   // ILOVA UI'sida chatni ochish: chats tab → chat item .click() (audit bilan bir xil)
-  await page.reload({ waitUntil: 'domcontentloaded' })
-  await sleep(3000)
   await page.evaluate(() => { const b = document.querySelector('.dock button[data-t="t-chats"]'); if (b) b.click() })
   await sleep(800)
   // RO'YXAT YUKLANISHINI KUTISH: item 15s ichida paydo bo'lishi kerak (CI'da SW/WS sekin bo'lishi mumkin)
