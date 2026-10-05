@@ -1,0 +1,16 @@
+name: Jurnal o'qish (egaga tashxisi)
+on:
+  workflow_dispatch:
+jobs:
+  jurnal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: err_jurnal + klient qo'ng'iroq jurnallarini o'qish
+        env:
+          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+        run: node scripts/jurnal_read.mjs

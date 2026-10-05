@@ -227,7 +227,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v68"
+const BUILD_V = "v69"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -2630,7 +2630,7 @@ async function ice(c: C) {
       const s = j.iceServers
       if (Array.isArray(s)) servers.push(...s)
       else if (s) servers.push(s)
-    } catch (e) { console.log("TURN xato", String(e)) }
+    } catch (e) { jurnalYoz(c.env, "/ice", c.uid, "turn", "TURN creds: " + String(e).slice(0, 300)) } // console.log'da YO'QOLARDI — TURN buzilishi ko'rinmas qolardi (STUN fallbackda mobil tarmoqda media o'tmasdi)
   }
   return json({ iceServers: servers })
 }
@@ -2682,8 +2682,20 @@ async function signal(c: C) {
   // qiluvchining WebSocket'i o'lik/zombi bo'lsa, POST 200 OK qaytarardi LEKIN signal 0 ta
   // soketga yetib «Ulanmoqda…» abadiy qolardi. Endi navbat 2 daqiqa saqlanadi — klient
   // polling bilan albatta oladi.
-  try { await c.db.run("INSERT INTO call_signals(id,to_uid,from_uid,body,created_at) VALUES(?,?,?,?,?)", [sid, to, c.uid, body, now()]) } catch (e) { console.log("sigq", String(e)) }
+  try { await c.db.run("INSERT INTO call_signals(id,to_uid,from_uid,body,created_at) VALUES(?,?,?,?,?)", [sid, to, c.uid, body, now()]) } catch (e) { jurnalYoz(c.env, "/signal", c.uid, "sigq", "navbat INSERT: " + String(e)) } // console.log'da YO'QOLARDI — signal yo'qolishining ko'rinmas ildizi
   await notify(c.env, [to], { type: "signal", sid, from: c.uid, data })
+  return json({ ok: true })
+}
+// KLIENT QO'NG'IROQ JURNALI (egaga /api/jurnal orqali ko'rinadi): sahifa-konsoli
+// Cloudflare'da SAQLANMAYDI — haqiqiy qurilmadagi «video qotdi / ovoz kelmayapti /
+// qo'ng'iroq qotib qoldi» holatlari avval LOG'SIZ yo'qolardi. Endi klient har qo'ng'iroq
+// hayotiy siklini (chaqirish→javob→offer→answer→ICE→media→yopilish) shu yerga yozadi.
+// Best-effort: o'z xatosi javobni hech qachon buzmaydi. So'roviga ≤900 belgi.
+async function callLog(c: C) {
+  const msg = String(c.b?.m || "").replace(/\s+/g, " ").trim().slice(0, 900)
+  if (!msg) return json({ ok: true })
+  const path = "call:" + String(c.b?.c || "").slice(0, 24)
+  c.wait(jurnalYoz(c.env, path, c.uid, "klient", msg))
   return json({ ok: true })
 }
 async function signalQueue(c: C) {
@@ -2733,6 +2745,16 @@ async function callStatus(c: C) {
   // tomonga xabar qiladi — klient jiringlashni zudlik bilan yopadi (faqat hali javob
   // berilmagan holatda; faol qo'ng'iroq 'hangup' orqali yopilaveradi).
   c.wait(notify(c.env, [call.caller_id, call.callee_id], { type: "call_closed", call_id: call.id, status: final }))
+  // NAVBATGA HAM YOZAMIZ (qo'ng'iroq qotib qolishining oxirgi eshigi): WS zombi bo'lsa
+  // 'call_closed' WS orqali yetmasdi va jiringlash ekrani o'z 65-75s taymerigacha QOTIB
+  // TURARDI. Navbatga yozilsa — qarshi tomon navbat-polling (1.8s) bilan ~2s ichida yopadi.
+  try {
+    for (const u of [call.caller_id, call.callee_id]) {
+      if (u === c.uid) continue
+      const sid2 = newId()
+      await c.db.run("INSERT INTO call_signals(id,to_uid,from_uid,body,created_at) VALUES(?,?,?,?,?)", [sid2, u, c.uid, JSON.stringify({ k: "call_closed", call_id: call.id, status: final }), now()])
+    }
+  } catch {}
   return json({ ok: true })
 }
 
@@ -3302,6 +3324,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/calls", startCall],
   ["GET", "/calls/pending", callPending],
   ["POST", "/calls/:id/status", callStatus],
+  ["POST", "/clog", callLog],
   ["POST", "/signal", signal],
   ["GET", "/signal/queue", signalQueue],
   ["POST", "/p2p/have", p2pHave],
@@ -3491,6 +3514,9 @@ export default {
       // OTP PUMPING: 50 so'rov/1 soat (mobil tarmoq CGNAT — bir IP'da YUZLARGA foydalanuvchi
       // bo'lishi mumkin; avvalgi 25/12soat chegara ODDIY foydalanuvchilarni ham urib yuborardi)
       if (url.pathname === "/api/auth/otp" && fwLokal(fwip, "otp", 50, 3_600_000)) { fwOchko(env, wait, fwip, "otp"); return FW_404() }
+      // KLIENT QO'NG'IROQ JURNALI: 120 yozuv/1 soat (mijoz so'roviga ≤30/ql, cheklovdan katta —
+      // haqiqiy foydalanuvchiga hech qachon yetmaydi, spam'ni to'sadi)
+      if (url.pathname === "/api/clog" && fwLokal(fwip, "clog", 120, 3_600_000)) { fwOchko(env, wait, fwip, "clog"); return FW_404() }
     }
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS })
     // Hajm chegarasi — ulkan payload bilan abuse (upload bo'laklari ≤1.2MB, JSON ≤2MB)
