@@ -2778,7 +2778,10 @@ async function liveCount(c: C, l: any) {
   const n = await c.db.one("SELECT COUNT(*) AS cnt FROM live_viewers WHERE live_id=?", [l.id])
   const v = Number(n?.cnt || 0)
   // Task 41: peak — bu efirning eng yuqori tomoshabinlar soni (TOP efir reytingi uchun)
-  await c.db.run("UPDATE lives SET viewers=?, peak=MAX(peak,?) WHERE id=?", [v, v, l.id])
+  // DIQQAT: MAX(peak,?) — SQLite scalar-MAX; TiDB (MySQL) 2-argumentli MAX'ni BILMAYDI
+  // → join/end har safar 500 berardi (audit isboti: run 37266389288). MySQL'da GREATEST.
+  // COALESCE: peak NULL bo'lsa GREATEST NULL qaytaradi — 0 bilan himoya.
+  await c.db.run("UPDATE lives SET viewers=?, peak=GREATEST(COALESCE(peak,0),?) WHERE id=?", [v, v, l.id])
   return v
 }
 async function detachFromParent(c: C, l: any, row: any) {

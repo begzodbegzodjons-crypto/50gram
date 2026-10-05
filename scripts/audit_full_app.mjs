@@ -20,6 +20,7 @@ const B = { phone: '998900000006', full: '+998900000006' }
 
 let fails = 0, infos = 0
 let tokA = null, tokB = null
+let p2pChat = 0
 const cleanupIds = { posts: [], stories: [], chats: [], lives: [] }
 const logoutTok = async (token) => { if (!token) return; try { await fetch(BASE + '/api/auth/logout', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token }, body: '{}' }) } catch {} }
 const ok = (cond, label, extra = '') => { console.log((cond ? '  ✓ ' : '  ✗ FAIL ') + label + (extra ? ' — ' + String(extra).slice(0, 260) : '')); if (!cond) fails++ }
@@ -44,7 +45,10 @@ async function newPage(browser, label) {
   page.on('console', (m) => { const t = m.type(); if ((t === 'error' || t === 'warning') && errs.length < 120) errs.push(t + ': ' + m.text().slice(0, 240)) })
   page.on('response', (r) => {
     const u = r.url()
-    if (u.includes('/api/') && r.status() >= 400 && errs.length < 120) errs.push('HTTP ' + r.status() + ' ' + r.request().method() + ' ' + u.replace(/^.*\/api\//, ''))
+    // x-audit-probe — auditning o'z so'rovlari (biznes-4xx ham bo'lsa) sahifa xatosi EMAS
+    let probe = false
+    try { probe = !!r.request().headers()['x-audit-probe'] } catch {}
+    if (u.includes('/api/') && r.status() >= 400 && !probe && errs.length < 120) errs.push('HTTP ' + r.status() + ' ' + r.request().method() + ' ' + u.replace(/^.*\/api\//, ''))
   })
   page.__errs = errs; page.__label = label
   return { ctx, page }
@@ -95,8 +99,10 @@ async function logout(page) {
 }
 
 // Page-context API: natija { s: status, j: json } qaytaradi — 4xx ham tashxis uchun saqlanadi
+// x-audit-probe: 1 — bu so'rov AUDITNING O'ZI yuborgan probe; sahifa-jurnaliga kiritilmaydi
+// (aks holda auditning o'z test-so'rovlari "sahifa xatosi" deb hisoblanib, soxta QIZIL berardi)
 const pageApi = (page) => async (path, method, body) => page.evaluate(async ({ path, method, body }) => {
-  const h = { 'content-type': 'application/json' }
+  const h = { 'content-type': 'application/json', 'x-audit-probe': '1' }
   if (localStorage.g50_token) h.authorization = 'Bearer ' + localStorage.g50_token
   const res = await fetch('/api' + path, { method: method || (body !== undefined ? 'POST' : 'GET'), headers: h, body: body !== undefined ? JSON.stringify(body) : undefined })
   let j = null; try { j = await res.json() } catch {}
@@ -190,6 +196,7 @@ try {
   check('POST /chats/direct', dc, (r) => !!r.j?.id)
   const cid = dc.j?.id
   if (cid) {
+    p2pChat = cid // 12-bo'lim (P2P reyestri) shu chat bilan so'raydi
     cleanupIds.chats.push(cid)
     const ch1 = await apiA('/chats/' + cid); check('GET /chats/:id', ch1, (r) => r.j?.id === cid)
     const m1 = await apiA('/chats/' + cid + '/messages', 'POST', { kind: 'text', body: 'Salom! Audit xabari ' + Date.now(), client_id: 'aud1' })
@@ -212,10 +219,14 @@ try {
     // HAQIQIY interaksiya: b-send 'pointerup'da sendText() chaqiradi — sintetik .click()
     // pointer eventlar bermeydi. Playwright'ning haqiqiy bosishi ishlatiladi.
     await A_.page.fill('#inp', 'UI dan yozilgan xabar')
-    try { await A_.page.click('#b-send', { timeout: 5000 }) } catch {}
+    // TASHXIS: klik xatosi YUTIB YUBORILMASIN — xato bo'lsa natijada ko'rinadi.
+    // S.cur va inp qiymati — yuborish nima uchun sodir bo'lmaganini aniq ko'rsatadi.
+    let clickErr = ''
+    try { await A_.page.click('#b-send', { timeout: 5000 }) } catch (e) { clickErr = String(e).slice(0, 160) }
     await sleep(2500)
+    const uiState = await A_.page.evaluate(() => ({ cur: window.S?.cur, inp: (document.getElementById('inp')?.value || '').slice(0, 40) }))
     const uiMsg = await apiB('/chats/' + cid + '/messages?latest=5')
-    ok(uiMsg.s === 200 && JSON.stringify(uiMsg.j).includes('UI dan yozilgan'), 'UI: haqiqiy yozib yuborildi (B ko\'radi)')
+    ok(uiMsg.s === 200 && JSON.stringify(uiMsg.j).includes('UI dan yozilgan'), 'UI: haqiqiy yozib yuborildi (B ko\'radi)', clickErr || JSON.stringify(uiState).slice(0, 120))
   }
 
   // ================= 6. GURUH CHAT + SO'ROVNOMA =================
@@ -226,7 +237,9 @@ try {
   if (gid) {
     cleanupIds.chats.push(gid)
     const gm1 = await apiA('/chats/' + gid + '/messages', 'POST', { kind: 'text', body: 'Guruhga xush kelibsiz!' }); check('guruhga xabar', gm1)
-    const poll = await apiA('/chats/' + gid + '/messages', 'POST', { kind: 'poll', meta: { q: 'Audit testi: qanday?', a: ['Yaxshi', 'Zo\'r'] } })
+    // KALIT 'options' bo'lishi SHART — server vote meta.options o'qiydi, klient pollHTML ham
+    // mt.options chizadi (eski 'a:' kaliti 400 "Variant noto'g'ri" berardi — audit bugi edi)
+    const poll = await apiA('/chats/' + gid + '/messages', 'POST', { kind: 'poll', meta: { q: 'Audit testi: qanday?', options: ['Yaxshi', 'Zo\'r'] } })
     check('so\'rovnoma yaratish', poll, (r) => !!r.j?.id)
     if (poll.j?.id) {
       const vt = await apiB('/messages/' + poll.j.id + '/vote', 'POST', { opt: 0 }); check('so\'rovnomaga ovoz', vt)
@@ -267,7 +280,10 @@ try {
   const rl = await apiA('/reels'); ok(rl.s === 200, 'GET /reels', JSON.stringify(rl.j).slice(0, 110))
   const tr = await apiA('/trend'); ok(tr.s === 200, 'GET /trend', JSON.stringify(tr.j).slice(0, 110))
   const ti = await apiA('/trend/insights'); ok(ti.s === 200, 'GET /trend/insights')
-  const ta = await apiA('/trend/article'); ok(ta.s === 200, 'GET /trend/article')
+  // server ?id= so'raydi (yo'qsa 400 "id kerak") — lENTADAN real yangilik id'sini olamiz
+  const trItem = (tr.j?.items || [])[0]
+  if (trItem?.id) { const ta = await apiA('/trend/article?id=' + encodeURIComponent(trItem.id)); check('GET /trend/article?id=…', ta) }
+  else info('GET /trend/article o\'tkazildi — lentada yangilik yo\'q')
 
   // ================= 10. JONLI EFIR: start/join/comment/gift/end =================
   log('10-JONLI EFIR: start/join/comment/gift/ready/end/top')
@@ -291,7 +307,10 @@ try {
 
   // ================= 12. P2P REYESTR (o'qish) =================
   log('12-P2P: peers ro\'yxati')
-  const pp = await apiA('/p2p/peers'); ok(pp.s === 200, 'GET /p2p/peers')
+  // server ?chat= yoki ?media= so'raydi (yo'qsa 400 "chat yoki media kerak") —
+  // 5-bo'limdagi direct chat bilan so'raymiz (eski parametrsiz so'rov audit bugi edi)
+  if (p2pChat) { const pp = await apiA('/p2p/peers?chat=' + p2pChat); ok(pp.s === 200, 'GET /p2p/peers?chat=…', JSON.stringify(pp.j).slice(0, 100)) }
+  else info('GET /p2p/peers o\'tkazildi — direct chat yaratilmagan')
 
   // ================= 13. TOZALASH: test-mazmun o'chirladi =================
   log('13-TOZALASH: postlar/istoriyalar/chatlar/efir o\'chirladi')
