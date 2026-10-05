@@ -600,7 +600,11 @@ function endCall(status = 'ended', report = true, msg) {
 // tez-tez), POST /signal serverga yetardi LEKIN qabul qiluvchiga yetmasdi — 0 ta soketga
 // push bo'lardi va qo'ng'iroq «Ulanmoqda…» da qolardi. Endi server har signalni 2 daqiqaga
 // navbatga yozadi, klient qo'ng'iroq davomida polling bilan ALBATTA oladi.
-let lastSid = 0, sigPollT = 0, sigPollBusy = false, sigPollAt = 0
+let lastSid = 0, sigPollT = 0, sigPollBusy = false, sigPollAt = 0, sigFails = 0, sigLogAt = 0
+// [sig] JURNAL — har signal va har navbat-xato KO'RINADIGAN bo'lsin: «qo'ng'iroq jim hal bo'ldi»
+// holatlarini log'siz tashxislab bo'lmaydi (foydalanuvchi talabi: log bilan topish). Hajmi kichik:
+// faqat qo'ng'iroq davri, ICE'lar jurnallanmaydi.
+function logSig(tag, extra) { try { console.info('[sig]', tag, '|', extra || '') } catch {} }
 async function drainSigQueue() {
   if (!CALL) return
   // QOTIQ QOROVULI: api() GET xato bo'lsa 20s timeout + 1 marta retry = 40s gacha osilib
@@ -612,21 +616,32 @@ async function drainSigQueue() {
   sigPollBusy = true
   sigPollAt = Date.now()
   try {
-    // Poll 5s'dan ko'p kutmaydi — kechikkan javob tashlanadi, keyingi tick qayta urinadi
-    const r = await Promise.race([
-      api('/signal/queue?since=' + lastSid),
-      new Promise((res) => setTimeout(() => res(null), 5000)),
-    ])
-    if (r) for (const s of r.signals || []) {
+    // ⚠️ AVVALGI 5s Promise.race — SIGNAL YO'QOTISH BUGI edi: server fetch-and-DELETE qiladi,
+    // javob 5s'dan kech kelsa klient uni TASHLAB yuborardi, lekin signallar serverdan allaqachon
+    // O'CHIRILGAN bo'lardi — «navbat kafolati» o'z ishi ichida o'likyotgan edi. Endi javob TO'LIQ
+    // kutiladi (api() ning o'z 20s+retry himoyasi bor) — kechikkan javob sid-dedup bilan XAVFSIZ.
+    const r = await api('/signal/queue?since=' + lastSid)
+    sigFails = 0
+    const sigs = (r && r.signals) || []
+    if (sigs.length) logSig('navbat ' + sigs.length + ' ta', sigs.map((s) => (s.data || {}).k).join(','))
+    for (const s of sigs) {
       const sid = +s.sid || 0 // sid string kelishi mumkin (DB BIGINT) — songa majburlash
       if (sid > lastSid) lastSid = sid
-      try { handleSignalEv({ type: 'signal', sid, from: s.from, data: s.data }) } catch {}
+      try { handleSignalEv({ type: 'signal', sid, from: s.from, data: s.data }) } catch (e) { logSig('navbat-ishlov xato', String((e && e.message) || e)) }
     }
-  } catch {}
+  } catch (e) {
+    // JIM YUTMASLIK: navbat-poll xatolari JURNALGA yoziladi (tarmoq to'xtaganda aniq ko'rinadi)
+    sigFails++
+    if (Date.now() - sigLogAt > 4000) { sigLogAt = Date.now(); logSig('navbat-xato #' + sigFails, String((e && e.message) || e)) }
+    // 3+ ketma-ket xato — WS zombi: soketni majburiy yopamiz → onclose zudlik bilan qayta ulaydi
+    if (sigFails >= 3) { sigFails = 0; logSig('navbat-xato', '3+ ketma-ket — WS majburiy qayta ulanadi'); try { S.ws && S.ws.readyState === 1 && S.ws.close() } catch {} }
+  }
   sigPollBusy = false
 }
 function startSigPoll() {
   stopSigPoll()
+  sigFails = 0
+  logSig('poll yoqildi', 'lastSid=' + lastSid)
   sigPollT = setInterval(drainSigQueue, 1800)
   drainSigQueue()
 }
@@ -647,15 +662,17 @@ async function handleSignalEv(ev) {
   if (sigDedup(ev.sid)) return // WS + navbat ikki marta yetkazishi mumkin (jonli efir ham)
   if (d.k && d.k[0] === 'l') return liveSignal(from, d)
   const C = CALL
+  // [sig] JURNAL: har qo'ng'iroq-signali qayd etiladi (ICE shovqinli — faqat DROP'da)
+  if (d.k !== 'ice') logSig('k=' + d.k, 'from=' + from + ' call_id=' + d.call_id + ' | C=' + (C ? (C.outgoing ? 'out' : 'in') + ' id=' + C.id + ' pc=' + !!C.pc + ' started=' + !!C.started : 'YO‘Q'))
   // TAQQOSLASH String() BILAN: navbatdan kelgan from string bo'lishi mumkin (DB BIGINT),
   // WS'dan esa number — qat'iy !== ikkisini MOS KELMAS deb DROPP qilardi. Bitta tur
   // mos kelmasligi ham BARCHA signallarni (accept/offer/answer/ice/hangup) yo'qotardi.
-  if (!C || String(C.peer.id) !== String(from)) return
+  if (!C || String(C.peer.id) !== String(from)) { if (d.k === 'ice' || d.k === 'accept' || d.k === 'offer' || d.k === 'answer') logSig('DROP peer', 'k=' + d.k + ' from=' + from); return }
   // POYG'A TUZATISH: sekin tarmoqda POST /calls javobi kechiksa, qarshi tomonning 'accept'i
   // CALL.id hali tayinlanmasidan turib kelardi va JIM drop qilinardi — qabul qiluvchi abadiy
   // «Ulanmoqda…» da qolardi. Endi: call_id hali bo'lmasa qabul qilinadi (adopt), bor bo'lsa
   // va mos kelmasagina drop.
-  if (d.call_id && C.id && String(C.id) !== String(d.call_id)) return
+  if (d.call_id && C.id && String(C.id) !== String(d.call_id)) { logSig('DROP call_id', 'k=' + d.k + ' kelgan=' + d.call_id + ' bizniki=' + C.id); return }
   if (d.call_id && !C.id && d.k === 'accept') C.id = d.call_id
   try {
     if (d.k === 'accept' && C.outgoing && !C.pc) {

@@ -175,7 +175,7 @@ async function api(path, opt = {}) {
     catch (e) { lastErr = e; if (method !== 'GET' || att) break }
     finally { if (to) clearTimeout(to) }
   }
-  if (!r) throw new Error(lastErr && lastErr.name === 'AbortError' ? 'Server javob bermadi — birozdan so‘ng qayta urinib ko‘ring' : 'Internet aloqasi yo‘q')
+  if (!r) { try { console.info('[api] tarmoq xato', path, lastErr && lastErr.name) } catch {} ; throw new Error(lastErr && lastErr.name === 'AbortError' ? 'Server javob bermadi — birozdan so‘ng qayta urinib ko‘ring' : 'Internet aloqasi yo‘q') }
   let j = {}
   try { j = await r.json() } catch {}
   if (r.status === 401 && S.token && !path.startsWith('/auth')) { logout(true); throw new Error('Qaytadan kiring') }
@@ -703,10 +703,10 @@ function wsConnect() {
   try {
     const ws = new WebSocket(API.replace(/^http/, 'ws') + '/ws?token=' + encodeURIComponent(S.token))
     S.ws = ws
-    ws.onopen = () => { S.wsOk = true; wsRetry = 1000; lastWsRecv = Date.now(); setConn(); syncAll(); try { window.__50wsOpen && window.__50wsOpen() } catch {} }
+    ws.onopen = () => { S.wsOk = true; wsRetry = 1000; lastWsRecv = Date.now(); setConn(); syncAll(); try { console.info('[ws] ochildi') } catch {} ; try { window.__50wsOpen && window.__50wsOpen() } catch {} }
     ws.onmessage = (e) => { lastWsRecv = Date.now(); let ev; try { ev = JSON.parse(e.data) } catch { return } if (ev.type !== 'pong') dispatch(ev) }
-    ws.onclose = () => { S.wsOk = false; setConn(); if (S.ws === ws) S.ws = null; if (S.token) setTimeout(wsConnect, wsRetry); wsRetry = Math.min(wsRetry * 2, 20000) }
-    ws.onerror = () => {}
+    ws.onclose = (ev) => { S.wsOk = false; setConn(); try { console.info('[ws] yopildi code=' + (ev && ev.code) + ' clean=' + !!(ev && ev.wasClean)) } catch {}; if (S.ws === ws) S.ws = null; if (S.token) setTimeout(wsConnect, wsRetry); wsRetry = Math.min(wsRetry * 2, 20000) }
+    ws.onerror = () => { try { console.info('[ws] xato (socket error)') } catch {} }
     clearInterval(pingT); pingT = setInterval(() => {
       try {
         if (ws.readyState !== 1) return

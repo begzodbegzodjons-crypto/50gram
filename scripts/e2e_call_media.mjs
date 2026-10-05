@@ -274,6 +274,17 @@ try {
 
   // ============ 2-SSENARIY: A→B qo'ng'iroq, B javob bermaydi (simptom A) ============
   log('2-SENARIY: A → B qo\'ng\'iroq (javob YO\'Q) — jiringlash 15s turishi kerak')
+  // POYG'A TOZALANISH: 1-ssenariy qoldiqlari (B tomon watchdog 30s gacha yopadi) butunlay
+  // yopilishini KUTAMIZ — aks holda B hali «qo'ng'iroqda» deb hisoblab yangi qo'ng'iroqqa
+  // to'g'ri 'busy' qaytaradi (ilova to'g'ri ishlaydi, test erta boshlaydi)
+  for (let i = 0; i < 30; i++) {
+    const busy = await Promise.all([
+      A_.page.evaluate(() => !!document.querySelector('.over.call')),
+      B_.page.evaluate(() => !!document.querySelector('.over.call')),
+    ])
+    if (!busy[0] && !busy[1]) break
+    await A_.page.waitForTimeout(2000)
+  }
   await A_.page.waitForTimeout(2500) // holatlar tozalanishi uchun
   await A_.page.evaluate((uid) => callUser(uid, false), ub.uid)
   let ring2 = false
