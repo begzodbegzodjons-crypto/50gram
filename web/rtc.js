@@ -92,9 +92,14 @@ window.__50warmup = async () => {
   document.addEventListener('pointerdown', () => {
     // v75: promise saqlanadi — getMedia uning TINCHGUNCHA kutadi (ikki kamera so'rovi
     // bir vaqtda ketib, qurilmani osirib qo'ymasligi uchun — getMedia'dagi WARMUP-POYG'ASI)
+    let ws = null
     const p = navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user', width: { ideal: 640 } } })
-      .then((s) => s.getTracks().forEach((t) => t.stop())).catch(() => {})
+      .then((s) => { ws = s; s.getTracks().forEach((t) => t.stop()) }).catch(() => {})
     window.__50warmP = p
+    // v76 GHOST-SWEEPER (warmup): ruxsat so'rovi bekorga qolsa getUserMedia OSILIB QOLADI —
+    // 8s'dan KECH yechilsa oqim O'ZI-O'ZI ochilib KAMERANI BAND qolmasin (getMedia'dagi
+    // jurnal-isbotlangan ildizning aynan xuddi shu ko'rinishi): kech yechilgan oqim DARHOL o'chadi.
+    setTimeout(() => { try { p.then(() => { try { if (ws) ws.getTracks().forEach((t) => t.stop()) } catch {} }).catch(() => {}) } catch {} }, 6000)
     setTimeout(() => { if (window.__50warmP === p) window.__50warmP = null }, 8000)
   }, { once: true })
 }
@@ -185,31 +190,46 @@ async function callUser(uid, video) {
   if (uid === S.me.id) return
   let peer = S.users.get(uid)
   if (!peer) try { peer = await api('/users/' + uid); S.users.set(uid, peer) } catch (e) { return toast('⚠️ ' + e.message) }
-  // t0 — qorovul uchun; ringMode — qorovul jiringlashni to'g'ri rejimda qayta yoqadi
-  CALL = { peer, video: !!video, outgoing: true, ice: [], el: callUI(peer, video, 'Ulanmoqda…'), t0: Date.now(), ringMode: '' }
+  // v76 YANGI TARTIB — «ulanmoqda deb umaman bog'lanmayapti» ning JURNAL-BILAN ISBOTLANGAN
+  // asosiy ildizi (17:30–18:16: har urinish 12-16s osilib o'lgan): AVVALGI kodda kamera AVVAL
+  // ochilardi — kamera osilib qolsa POST /calls UMUMAN yuborilmasdi va qarshi tomon telefoni
+  // JIM qolardi (qo'ng'iroq umuman ketmasdi!). Endi: qo'ng'iroq AVVAL yuboriladi — qarshi
+  // tomon DARHOL jiringlaydi, kamera parallel ochiladi, javob kelib qolsa ham yo'qotilmaydi.
+  CALL = { peer, video: !!video, outgoing: true, ice: [], el: callUI(peer, video, 'Chaqirilmoqda…'), t0: Date.now(), ringMode: '' }
   clog('chaqirildi', 'to=' + uid + ' video=' + !!video) // KLIENT JURNALI: qo'ng'iroq boshlandi
   startSigPoll() // qo'ng'iroq davomida navbat-polling: WS zombi bo'lsa ham signallar yetadi
   purgeStaleSignals() // eski qo'ng'iroq juvonlari yangisini o'chirmasin (jurnal-isbot 09:56:42)
   callButtons('active')
   ringTone(true) // JIRINGLASH DARHOL: tarmoq javobini kutmasdan — bosgan paytdanoq eshitiladi
   try {
+    const r = await post('/calls', { to: uid, video: !!video })
+    if (!CALL) return
+    CALL.id = r.call_id
+    clog('call_id', r.call_id + ' | qarshi tomon jiringlayapti — kamera endi ochiladi')
+    setCallState('Chaqirilmoqda…')
+    // 60s (qabul qiluvchi 65s) — uzoq kutish «qotib turibdi» hissi bermasin; javob bo'lmasa aniq xato
+    CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', true, 'Javob berilmadi'), 60000)
+    // Halol UI: kamera ochilishi 2.5s+ davom etsa — foydalanuvchi NIMA kutayotganini ko'rsin
+    // (avvalgi «Ulanmoqda…» yolg'on edi — ulanish emas, KAMERA kutilyotgan edi)
+    const C1 = CALL
+    CALL.camT = setTimeout(() => { if (CALL === C1 && !C1.local && !C1.started) setCallState('Kamera ochilmoqda…') }, 2500)
     const local = await getMedia(video)
     // v75 OQIM-OQISH HIMOYASI: getMedia 12-31s ishlashi mumkin — bu orada qo'ng'iroq yopilsa
     // (qorovul/bekor), oqim HECH KIMNIKISIZ qolib KAMERA BAND QOLADI (ghost) — darhol o'chiramiz
     if (!CALL) { try { local.getTracks().forEach((t) => t.stop()) } catch {}; return }
     CALL.local = local
     qs('.local', CALL.el).srcObject = CALL.local
-    const r = await post('/calls', { to: uid, video: !!video })
-    if (!CALL) return
-    CALL.id = r.call_id
-    clog('call_id', r.call_id + ' | server qabul qildi, jiringlayapti')
-    setCallState('Chaqirilmoqda…')
-    // 60s (qabul qiluvchi 65s) — uzoq kutish «qotib turibdi» hissi bermasin; javob bo'lmasa aniq xato
-    CALL.timeout = setTimeout(() => CALL && !CALL.started && endCall('missed', true, 'Javob berilmadi'), 60000)
+    camOk() // kamera sog'lom — avto-tiklash hisoblagichini tozalaymiz
+    clearTimeout(CALL.camT)
+    // v76: qarshi tomon kamera ochilishidayoq JAVOB BERIB qo'ysa — accept kelgan bo'ladi
+    // (parking): hozir offer yaratamiz. Aks holda «Chaqirilmoqda…» holatida qolaveradi.
+    if (CALL.pendingAccept) processAccept(CALL)
+    else setCallState('Chaqirilmoqda…')
   } catch (e) {
     // XATO KO‘RINADIGAN bo‘lsin: nima uchun kamera ochilmaganini qo‘ng‘iroq oynasida ham ko‘rsatamiz
     try { if (CALL) setCallState('⚠️ ' + e.message) } catch {}
     toast('⚠️ ' + e.message)
+    camFail(CALL, e) // v76: kamera-osilgan aniq tashxisi + avto-tiklanish (qayta-chaqiruv)
     endCall('ended', !!CALL?.id, '⚠️ ' + e.message)
   }
 }
@@ -571,7 +591,7 @@ async function acceptCall() {
   nativeCallCancel() // APK: native qo'ng'iroq oynasi yopilsin
   C.acceptAt = Date.now() // qorovul: javob berilgach ulanishga alohida 45s graziya
   ringTone(false); clearTimeout(C.timeout)
-  setCallState('Ulanmoqda…')
+  setCallState('Kamera ochilmoqda…') // v76 halol UI: avval KAMERA ochiladi — «Ulanmoqda…» yolg'on edi
   callButtons('active')
   try {
     const local = await getMedia(C.video)
@@ -580,6 +600,8 @@ async function acceptCall() {
     if (CALL !== C) { try { local.getTracks().forEach((t) => t.stop()) } catch {}; return }
     C.local = local
     qs('.local', C.el).srcObject = C.local
+    camOk() // v76: kamera sog'lom — avto-tiklash hisoblagichi tozalanadi
+    setCallState('Ulanmoqda…')
     // JURNAL: getMedia natijasi — «ovoz kelmayapti» ildizlaridan biri: kamera/mikrofon
     // ochilganda trek YO'Q bo'lib qolsa (ba'zi WebView'lar) — logda aniq ko'rinadi
     clog('media tayyor', 'audio=' + C.local.getAudioTracks().length + ' video=' + C.local.getVideoTracks().length)
@@ -600,9 +622,76 @@ async function acceptCall() {
   } catch (e) {
     try { if (CALL) setCallState('⚠️ ' + e.message) } catch {}
     toast('⚠️ ' + e.message)
+    camFail(C, e) // v76: kamera-osilgan aniq tashxisi + avto-tiklanish (qarshi tomonga qayta chaqiruv)
     endCall('declined', true, '⚠️ ' + e.message)
   }
 }
+// ---------------- v76: PROCESSACCEPT — chaqiruvchi tomonda «accept» PARKING ----------------
+// AVVALGI TARTIBDA kamera AVVAL ochilardi — endi qo'ng'iroq avval yuborilgani uchun 'accept'
+// kamera hali ochilyotganda (C.local yo'q) kelib qolishi TABIIY. Avvalgi kod setupPC'da
+// C.local.getTracks() dagi TypeError bilan jim o'lgurdi — chaqiruvchi offer YUBORMASDI va
+// qabul qiluvchi «Ulanmoqda…» da abadiy qolardi. Endi accept PARK qilinadi va media tayyor
+// bo'lgach processAccept offer yaratadi (qabul qiluvchi endi hech qachon kutib qolmaydi).
+async function processAccept(C) {
+  if (!C || !C.outgoing || C.pc || C.processing) return
+  C.processing = true
+  try {
+    C.pendingAccept = false
+    if (!C.local) return // himoya: media yo'q bo'lsa — callUser oxiri yoki qorovul ishlaydi
+    setCallState('Ulanmoqda…')
+    await setupPC(C)
+    const o = await C.pc.createOffer()
+    await C.pc.setLocalDescription(o)
+    C.offerAt = Date.now() // qorovul: WS qayta ulanganda XUDDI SHU offerni qayta yuborish uchun
+    // 'offer' yo'qolsa qabul qiluvchi abadiy kutadi — 3 marta qayta urinamiz, yetmasa aniq yopamiz
+    const ok = await sigTo(C.peer.id, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON() })
+    if (!ok && !C.started) return endCall('missed', true, 'Signal yetmadi — internetni tekshirib ko‘ring')
+    armConnectWatchdog(C)
+  } catch (e) {
+    try { if (CALL) setCallState('⚠️ ' + ((e && e.message) || 'Ulanmadi')) } catch {}
+  } finally { C.processing = false }
+}
+// ---------------- v76: KAMERA XATO-TASHXISI + AVTO-TIKLANISH ----------------
+// JURNAL-ISBOT (17:30–18:16): foydalanuvchi qurilmasida getUserMedia 12-16s OSILIB, har
+// qo'ng'iroq «Kamera javob bermadi» bilan o'lgan — va HECH QANDAY tashxis yo'q edi (nima
+// uchun osilgani jurnalda ko'rinmasdi). Endi: 1) osilgan paytda brauzer holati (ruxsatlar,
+// qurilmalar) jurnalga yoziladi — keyingi hodisada ANIQ sabab ko'rinadi; 2) 2 marta
+// ketma-ket osilish — sahifa AVTOMATIK yangilanadi (WebView media-steki tozalanadi) va
+// qo'ng'iroq o'zi qayta yoqiladi — foydalanuvchi «yana bosing / ilovani o'chir» azobini ko'rmaydi.
+async function camFail(C, e) {
+  const name = (e && e.name) || ''
+  if (name !== 'MediaHangError' && name !== 'NotAllowedError' && name !== 'NotReadableError' && name !== 'AbortError') return
+  let diag = name
+  try {
+    const p = await navigator.permissions.query({ name: 'camera' }).catch(() => null)
+    const m = await navigator.permissions.query({ name: 'microphone' }).catch(() => null)
+    if (p) diag += ' camPerm=' + p.state
+    if (m) diag += ' micPerm=' + m.state
+    const devs = await navigator.mediaDevices.enumerateDevices().catch(() => [])
+    const cams = devs.filter((d) => d.kind === 'videoinput').length
+    const mics = devs.filter((d) => d.kind === 'audioinput').length
+    const labeled = devs.find((d) => (d.kind === 'videoinput' || d.kind === 'audioinput') && d.label)
+    diag += ' cam=' + cams + ' mic=' + mics + (labeled ? ' (label bor)' : ' (label yo\'q — ruxsat yo\'q)')
+  } catch {}
+  clog('kamera-xato', diag)
+  try {
+    const st = JSON.parse(sessionStorage.getItem('g50_camfail') || 'null')
+    const t = Date.now()
+    const n = st && t - st.ts < 5 * 60000 ? (st.n || 0) + 1 : 1
+    if (n === 2 && !st.rel && C) {
+      // 2-MARTA: sahifa yangilanadi — WebView media-steki tozalanadi, qo'ng'iroq o'zi qayta yoqiladi
+      sessionStorage.setItem('g50_camfail', JSON.stringify({ n, ts: t, rel: 1, uid: C.peer.id, video: C.video ? 1 : 0 }))
+      clog('kamera-tiklash', 'kamera 2 marta osildi — sahifa avtomatik yangilanadi va qo\'ng\'iroq qayta yoqiladi')
+      shipClog()
+      setTimeout(() => { try { location.reload() } catch {} }, 900)
+    } else {
+      // 1-marta: foydalanuvchining o'z urinishiga imkon; 3-marta: reload ham yordam bermagan —
+      // endi AVTOMATIK aylanish YO'Q (loop-himoya), aniq yo'riqnoma ko'rsatiladi
+      sessionStorage.setItem('g50_camfail', JSON.stringify({ n, ts: t }))
+    }
+  } catch {}
+}
+function camOk() { try { sessionStorage.removeItem('g50_camfail') } catch {} }
 // v74: CHIQUVCHI MEDIA TIKLASH — «bir taraf yaxshi ko'rsatyapti, bir taraf QOTIB ovozi
 // kelmayapti» ning hal qiluvchi davosi. Qotgan tomonda KO'PINCHA o'z KAMERA/MIKROFONI o'lgan
 // bo'ladi (OS fon rejimida o'chirgan, boshqa ilova musodara qilgan, WebView to'xtatgan).
@@ -769,7 +858,7 @@ function endCall(status = 'ended', report = true, msg) {
   try { holdWake(false) } catch {}
   try { if (C.video && window.Android50) { window.Android50.keepScreen && window.Android50.keepScreen(false); window.Android50.speaker && window.Android50.speaker(false) } } catch {}
   clearTimeout(C.timeout); clearInterval(C.tick)
-  clearTimeout(C.connWatch); clearTimeout(C.connWatch2); clearTimeout(C.dropT)
+  clearTimeout(C.connWatch); clearTimeout(C.connWatch2); clearTimeout(C.dropT); clearTimeout(C.camT)
   const dur = C.started ? Math.round((Date.now() - C.started) / 1000) : 0
   // YAKUNIY JURNAL (serverga yoziladi): qo'ng'iroq NIMA bilan, QANCHA turib, QAYDA holatda tugagani
   clog('endCall', 'status=' + status + ' | ' + (msg || '') + ' | davomiylik=' + dur + 's | pc=' + (C.pc ? C.pc.connectionState : 'yo\'q') + ' | turn=' + (C.relay === undefined ? '?' : C.relay))
@@ -865,6 +954,29 @@ function startSigPoll() {
   drainSigQueue()
 }
 function stopSigPoll() { if (sigPollT) { clearInterval(sigPollT); sigPollT = 0 } }
+// ---------------- v76: RELOAD'DAN KEYINGI AVTO-QAYTA-CHAQIRUV ----------------
+// camFail() sahifani yangilaganda shu funksiya qo'ng'iroqni O'ZI qayta yoqadi — foydalanuvchi
+// kamera tiklanganini ham SEZMAYDI (1.2–3.7s tasodifiy kutish: ikki qurilma bir vaqtda
+// tiklanib bir-biriga qo'ng'iroq qilishi — «Band» to'qnashuvi — oldi olinadi).
+window.__50camRedial = async () => {
+  try {
+    const st = JSON.parse(sessionStorage.getItem('g50_camfail') || 'null')
+    if (!st || !st.rel || !st.uid) return
+    if (Date.now() - st.ts > 90000) return // eski yozuv — foydalanuvchi o'zi boshqa ish qilgan
+    for (let i = 0; i < 50; i++) { // ilova to'liq ochilguncha (S.me tayyor) — maks 15s
+      if (S.me && S.me.id && S.token) break
+      await new Promise((r) => setTimeout(r, 300))
+    }
+    if (!S.me || !S.token || CALL) return
+    const uid = st.uid, video = !!st.video
+    setTimeout(() => {
+      if (CALL || !S.me) return
+      toast('Kamera tizimi tiklandi — qo‘ng‘iroq qayta yoqilmoqda…')
+      clog('kamera-tiklash', 'reload tugadi — qo‘ng‘iroq avtomatik qayta yoqilmoqda')
+      callUser(uid, video)
+    }, 1200 + Math.floor(Math.random() * 2500))
+  } catch {}
+}
 // ESKI NAVBATNI SUPURISH (yangi CHAQIRUVCHI qo'ng'irog'i boshlanishida): yangi qo'ng'iroqning
 // call_id'i hali tayinlanmagan paytda navbatdagi ESKI qo'ng'iroq juvonlari (hangup/call_closed)
 // o'qilib qolsa — yangi qo'ng'iroq o'chib ketardi (jurnal-isbot). Yangi qo'ng'iroqning o'z
@@ -909,16 +1021,16 @@ async function handleSignalEv(ev) {
   if (d.call_id && !C.id && d.k === 'accept') C.id = d.call_id
   try {
     if (d.k === 'accept' && C.outgoing && !C.pc) {
-      ringTone(false); clearTimeout(C.timeout)
-      setCallState('Ulanmoqda…')
-      await setupPC(C)
-      const o = await C.pc.createOffer()
-      await C.pc.setLocalDescription(o)
-      C.offerAt = Date.now() // qorovul: WS qayta ulanganda XUDDI SHU offerni qayta yuborish uchun
-      // 'offer' yo'qolsa qabul qiluvchi abadiy kutadi — 3 marta qayta urinamiz, yetmasa aniq yopamiz
-      const ok = await sigTo(from, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON() })
-      if (!ok && !C.started) return endCall('missed', true, 'Signal yetmadi — internetni tekshirib ko‘ring')
-      armConnectWatchdog(C)
+      ringTone(false); clearTimeout(C.timeout); clearTimeout(C.camT)
+      // v76: kamera hali ochilyotgan bo'lsa (C.local yo'q) — accept PARKING: media tayyor
+      // bo'lgach processAccept offer yuboradi. AVVALGI KOD bu holatda setupPC'da jim
+      // o'lgurdi — qabul qiluvchi offer kelgunicha abadiy «Ulanmoqda…» da qolardi.
+      if (!C.local) {
+        C.pendingAccept = true
+        logSig('accept kutishda', 'kamera hali ochilmoqda — media tayyor bo‘lgach offer yuboriladi')
+        return
+      }
+      await processAccept(C)
     }
     if (d.k === 'offer' && !C.pc && !C.outgoing) {
       // v75 EARLY-OFFER PARKING (jonli jurnal isboti: «pc=new ... Ulanib bo'lmadi»): offer

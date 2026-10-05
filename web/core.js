@@ -950,6 +950,8 @@ async function startApp() {
   if ('serviceWorker' in navigator) setInterval(() => { try { navigator.serviceWorker.getRegistration().then((r) => r && r.update && r.update().catch(() => {})) } catch {} }, 300000)
   checkBuildSafe()
   handleHash()
+  // v76: kamera avto-tiklanishi — sahifa yangilangach qo'ng'iroq o'zi qayta yoqiladi (rtc.js)
+  try { window.__50camRedial && window.__50camRedial() } catch {}
   // Trend videolari fonda tayyorlanadi — Reels bo'limi ochilganda DARHOL qiziq videolar chiqadi
   setTimeout(() => { try { window.warmTrend && window.warmTrend() } catch {} }, 1800)
   if ('serviceWorker' in navigator) {
@@ -994,7 +996,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v75'
+window.__50BUILD = 'v76'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
