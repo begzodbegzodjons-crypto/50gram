@@ -3415,12 +3415,21 @@ async function cleanup(env: Env) {
 }
 
 // 4xx skaner nazorati — chegara oshsa true (blok) qaytaradi
+// KOLLABORATIV ZARAR HIMOYASI («bir marta ishlagan funksiya keyin ishlamay qoldi» ildizi):
+// 1) AUDIT probe'lari (x-audit-probe:1) ATAYLAB 4xx oladi — ular hisobga KIRMASIN (aks holda
+//    audit o'z runner-IP'ini 30 daqiqaga bloklaydi va keyingi CI-testlar (E2E!) YO'LDA
+//    qoladi — aynan shu sababli E2E 3c2d44e da A tomoni API'si o'lib, qo'ng'iroq YIQILDI);
+//    haqiqiy skaner bu sarlavhani bilishi mumkin — lekin u baribir TRAP/FLOOD/OTP/429
+//    qoidalariga urilib turadi, yagona himoya shu emas.
+// 2) Chegara 100→300 (haqiqiy skaner 300ni ham tez yig'adi; CGNAT/mobil-IP'dagi YUZLAR
+//    halol foydalanuvchi birga yig'ilganda 4xx kam bo'ladi — kollaborativ zarar yo'q).
+// 3) Birinchi blok 30→5 daqiqa (takrorlanuvchilar fwOchko daraja-3 bilan uzayadi).
 function fw4xx(env: Env, wait: (p: Promise<unknown>) => void, ip: string) {
   const e = FW_4XX.get(ip), t = Date.now()
   if (!e || t - e.t > 600_000) { if (FW_4XX.size > 5000) FW_4XX.clear(); FW_4XX.set(ip, { n: 1, t }); return false }
-  if (++e.n <= 100) return false
+  if (++e.n <= 300) return false
   FW_4XX.delete(ip)
-  fwLBlok(ip, 30 * 60_000)
+  fwLBlok(ip, 5 * 60_000)
   fwOchko(env, wait, ip, "scan", 3)
   return true
 }
@@ -3480,6 +3489,9 @@ export default {
     }
     // ---- SEC FIREWALL: ko'rinmas himoya qatlami (oddij foydalanuvchi hech narsa sezmaydi) ----
     const fwip = fwIp(req)
+    // AUDIT PROBE BELGISI: CI-auditning O'Z so'rovlari — ataylab 4xx oladi, fw4xx hisobiga kirmasin
+    // (aks holda audit o'z runner-IP'ini bloklab, keyingi testlarni yo'qotadi — fw4xx izohiga qarang)
+    const probeQ = req.headers.get("x-audit-probe") === "1"
     // SOVUQ IZOLYAT: yangi tug'ilgan izolyatda blok-ro'yxat hali yuklanmagan — birinchi so'rov
     // UNI KUTADI (≤200ms, izolyat umri ichida BIR martalik). Aks holda bloklangan IP birinchi
     // so'rovda o'tib ketardi (xavfsizlik teshigi) va bloklar izolyatlar orasida notekis ishlar edi.
@@ -3541,7 +3553,7 @@ export default {
         return stub.fetch(req)
       }
       const r = match(req.method, path)
-      if (!r) { if (fwip && fw4xx(env, wait, fwip)) return FW_404(); return FW_404() }
+      if (!r) { if (fwip && !probeQ && fw4xx(env, wait, fwip)) return FW_404(); return FW_404() }
       let uid = 0
       if (!r!.open) {
         const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "")
@@ -3570,7 +3582,7 @@ export default {
       if (["POST", "PATCH", "DELETE"].includes(req.method) && ct.includes("json")) b = await req.json().catch(() => ({}))
       const res = await r!.h({ env, db, uid, req, url, p: r!.p, b: b || {}, wait })
       // Skanerlash nazorati: 1 IP → 10 daqiqada 100+ xato (401/429 hisobga kirmaydi) → 30 daqiqa blok
-      if (fwip && res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 429 && fw4xx(env, wait, fwip)) return FW_404()
+      if (fwip && !probeQ && res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 429 && fw4xx(env, wait, fwip)) return FW_404()
       return res
     } catch (e: any) {
       if (e instanceof HttpError) {

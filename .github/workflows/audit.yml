@@ -27,3 +27,12 @@ jobs:
         env:
           E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
         run: node scripts/audit_full_app.mjs
+      # JURNAL O'QISH (bir runner = bir IP): audit endi o'z IP'sini fw4xx bilan bloklamaydi
+      # (probe-istisno) — shu IP'dan darhol err_jurnal o'qiladi: server 500'lari + klient
+      # qo'ng'iroq jurnallari. Tashxis vositasi — o'qib bo'lmasa audit QIZIL BO'LMASIN.
+      - name: err_jurnal + klient qo'ng'iroq jurnallarini o'qish
+        if: always()
+        continue-on-error: true
+        env:
+          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+        run: node scripts/jurnal_read.mjs
