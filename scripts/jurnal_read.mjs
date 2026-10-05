@@ -8,12 +8,16 @@ const BASE = (process.env.E2E_BASE || 'https://50gram.begzodbegzodjons.workers.d
 const PHONE = process.env.JURNAL_PHONE || '998900000005' // DEV_PHONES egasi (audit raqami)
 const N = Math.min(300, +(process.env.JURNAL_N || 80))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+// MUHIM: SEC firewall faqat brauzer/app UA'larini qabul qiladi (FW_UA_OK) — node'ning
+// standart 'node' UA'si «tashqi josus» deb 1-urinishda 30 KUNGA blok beradi (isbot: jurnal
+// run 37292097912). Smoke bilan bir xil brauzer-UA ishlatamiz.
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 
 async function jreq(path, opt = {}, tries = 4) {
   let last = null
   for (let i = 0; i < tries; i++) {
     try {
-      const res = await fetch(BASE + path, opt)
+      const res = await fetch(BASE + path, { ...opt, headers: { 'user-agent': UA, ...(opt.headers || {}) } })
       const txt = await res.text()
       try { return JSON.parse(txt) } catch (e) { last = new Error('HTTP ' + res.status + ' ' + txt.slice(0, 40)) }
     } catch (e) { last = e }
@@ -37,4 +41,4 @@ for (const w of rows) {
   console.log(`[${t}] ${w.src || '?'} ${w.path || ''} uid=${w.uid || 0} :: ${String(w.msg || '').slice(0, 260)}`)
 }
 // logout — raqam «band» qolmasin
-try { await fetch(BASE + '/api/auth/logout', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + v.token }, body: '{}' }) } catch {}
+try { await fetch(BASE + '/api/auth/logout', { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': UA, authorization: 'Bearer ' + v.token }, body: '{}' }) } catch {}
