@@ -28,6 +28,16 @@ jobs:
           trap cleanup EXIT
           H=$(curl -s -A "$UA" "$BASE/api/health"); echo "health: $H"
           echo "$H" | grep -q '"ok":true' || { echo "FAIL health"; exit 1; }
+          # ============ 3-YO'QLIK VERSIYA QULFI (build tuzatish) ============
+          # sw.js V == core.js __50BUILD == worker BUILD_V — BITTASI ham qolishsa,
+          # ochiq sahifalar «versiya mos kelmadi» deb O'ZINI reload qiladi (jonli ishda
+          # halokati: qo'ng'iroq oynasi o'z-o'zidan yo'qoladi). Bu qo'riqxonada TUGATILADI.
+          SWV=$(grep -o "const V = '50gram-v[0-9]*'" web/sw.js | grep -oE "[0-9]+$")
+          CJV=$(grep -o "__50BUILD = 'v[0-9]*'" web/core.js | grep -oE "[0-9]+$")
+          WKV=$(grep -o 'const BUILD_V = "v[0-9]*"' worker/src/index.ts | grep -oE "[0-9]+$")
+          echo "versiyalar: sw=v$SWV core=v$CJV worker=v$WKV"
+          [ -n "$SWV" ] && [ "$SWV" = "$CJV" ] && [ "$SWV" = "$WKV" ] || { echo "FAIL versiya-qo'riqxonasi: sw=v$SWV core=v$CJV worker=v$WKV — uchtasi bir xil bo'lishi SHART"; exit 1; }
+          echo "3-yo'qlik versiya qulfi: OK (v$SWV)"
           # 1) KIRISH (test raqami — dev kod ilova-ichki rejim)
           O=$(curl -s -A "$UA" -X POST "$BASE/api/auth/otp" -H 'content-type: application/json' -d '{"phone":"998900000003"}')
           echo "$O" | grep -q '"ok":true' || { echo "FAIL otp: $O"; exit 1; }

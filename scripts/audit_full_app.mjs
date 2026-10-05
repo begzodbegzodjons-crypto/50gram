@@ -313,6 +313,15 @@ try {
 } catch (e) {
   console.error('AUDIT XATO:', e)
   fails++
+  // ISBOT SAQLANSHIN: crash bo'lsa ham sahifa jurnallari chop etiladi (tashxis uchun)
+  try {
+    for (const P of [typeof A_ !== 'undefined' ? A_ : null, typeof B_ !== 'undefined' ? B_ : null]) {
+      if (!P || !P.page || !P.page.__errs) continue
+      const e2 = P.page.__errs.filter((x) => /^(error|warning|pageerror|HTTP)/.test(x) && !/favicon|sourcemap|No available adapters/i.test(x))
+      console.log(P.page.__label + ' jurnali (' + e2.length + '):')
+      e2.slice(-14).forEach((x) => console.log('    ·', x.slice(0, 220)))
+    }
+  } catch {}
 } finally {
   try { await Promise.all([logoutTok(tokA), logoutTok(tokB)]) } catch {}
   try { await browser.close() } catch {}
