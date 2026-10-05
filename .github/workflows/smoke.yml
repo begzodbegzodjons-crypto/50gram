@@ -5,6 +5,9 @@ on:
     branches:
 
       - main
+concurrency:
+  group: testlar-zanjiri
+  cancel-in-progress: false
 jobs:
   smoke:
     runs-on: ubuntu-latest

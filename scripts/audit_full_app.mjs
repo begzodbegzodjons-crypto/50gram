@@ -149,7 +149,7 @@ try {
   const sr = await apiB('/search?q=E2E-A'); check('GET /search', sr, (r) => Array.isArray(r.j?.users))
   const dv = await apiB('/discover'); check('GET /discover', dv, () => true)
   const un = patch.j?.username
-  if (un) { const rs = await apiB('/resolve/' + un); check('GET /resolve/:username', rs, (r) => !!r.j?.id) }
+  if (un) { const rs = await apiB('/resolve/' + un); check('GET /resolve/:username', rs, (r) => !!r.j?.user?.id) }
   const ct1 = await apiA('/contacts', 'POST', { phone: B.full, first_name: 'E2E-Bdo\'st' }); check('POST /contacts (B qo\'shildi)', ct1)
   const ct2 = await apiA('/contacts'); check('GET /contacts', ct2, (r) => Array.isArray(r.j?.contacts || r.j))
   const bk = await apiA('/blocks'); check('GET /blocks', bk, () => true)
@@ -200,7 +200,7 @@ try {
     const rd = await apiB('/chats/' + cid + '/read', 'POST', { last: mid }); check('markRead (B o\'qidi)', rd)
     const ed = await apiA('/messages/' + mid, 'PATCH', { body: 'Audit xabari TAHRIRLANDI' }); check('PATCH xabar tahrirlash', ed)
     const rc = await apiB('/messages/' + mid + '/react', 'POST', { emoji: '👍' }); check('reaksiya qo\'shish', rc)
-    const pn = await apiA('/messages/' + mid + '/pin', 'POST', {}); check('xabar pin', pn)
+    const pn = await apiA('/messages/' + mid + '/pin', 'POST', { on: true }); check('xabar pin', pn, (r) => +r.j?.pinned_id === +mid)
     const mb = await apiA('/chats/' + cid + '/members'); check('GET members', mb, (r) => Array.isArray(r.j?.members || r.j))
     const st = await apiA('/chats/' + cid + '/stats'); check('GET stats', st)
     // UI: chatni ochib haqiqiy yozish
@@ -209,9 +209,11 @@ try {
     const opened = await A_.page.evaluate((cid) => { const it = document.querySelector('[data-chat="' + cid + '"]'); if (it) { it.click(); return true } return false }, cid)
     ok(opened, 'UI: chat ro\'yxatdan ochildi')
     await sleep(1200)
-    await A_.page.evaluate(() => { const i = document.getElementById('inp'); if (i) { i.value = 'UI dan yozilgan xabar'; i.dispatchEvent(new Event('input', { bubbles: true })) } })
-    await A_.page.evaluate(() => document.getElementById('b-send')?.click())
-    await sleep(2000)
+    // HAQIQIY interaksiya: b-send 'pointerup'da sendText() chaqiradi — sintetik .click()
+    // pointer eventlar bermeydi. Playwright'ning haqiqiy bosishi ishlatiladi.
+    await A_.page.fill('#inp', 'UI dan yozilgan xabar')
+    try { await A_.page.click('#b-send', { timeout: 5000 }) } catch {}
+    await sleep(2500)
     const uiMsg = await apiB('/chats/' + cid + '/messages?latest=5')
     ok(uiMsg.s === 200 && JSON.stringify(uiMsg.j).includes('UI dan yozilgan'), 'UI: haqiqiy yozib yuborildi (B ko\'radi)')
   }
@@ -227,7 +229,7 @@ try {
     const poll = await apiA('/chats/' + gid + '/messages', 'POST', { kind: 'poll', meta: { q: 'Audit testi: qanday?', a: ['Yaxshi', 'Zo\'r'] } })
     check('so\'rovnoma yaratish', poll, (r) => !!r.j?.id)
     if (poll.j?.id) {
-      const vt = await apiB('/messages/' + poll.j.id + '/vote', 'POST', { choice: 0 }); check('so\'rovnomaga ovoz', vt)
+      const vt = await apiB('/messages/' + poll.j.id + '/vote', 'POST', { opt: 0 }); check('so\'rovnomaga ovoz', vt)
     }
     const mu = await apiB('/chats/' + gid + '/mute', 'POST', { on: true }); check('guruhni mute', mu)
     const lv2 = await apiB('/chats/' + gid + '/leave', 'POST', {}); check('B guruhdan chiqdi', lv2)
@@ -301,8 +303,9 @@ try {
 
   // ================= 14. JURNAL: barcha sahifa xatolari =================
   log('14-JURNAL: sahifa JS xatlari (A va B, boshidan ohirigacha)')
-  const errA = A_.page.__errs.filter((e) => /^(error|warning|pageerror|HTTP)/.test(e) && !/favicon|sourcemap/i.test(e))
-  const errB = B_.page.__errs.filter((e) => /^(error|warning|pageerror|HTTP)/.test(e) && !/favicon|sourcemap/i.test(e))
+  const NOISE = /favicon|sourcemap|No available adapters/i // Chromium headless ichki shovqini (ilova kodi emas)
+  const errA = A_.page.__errs.filter((e) => /^(error|warning|pageerror|HTTP)/.test(e) && !NOISE.test(e))
+  const errB = B_.page.__errs.filter((e) => /^(error|warning|pageerror|HTTP)/.test(e) && !NOISE.test(e))
   if (errA.length) { log('A jurnali (' + errA.length + '):'); errA.forEach((e) => console.log('    ·', e.slice(0, 200))) }
   if (errB.length) { log('B jurnali (' + errB.length + '):'); errB.forEach((e) => console.log('    ·', e.slice(0, 200))) }
   ok(errA.length === 0, 'A sahifasida JS/HTTP xatosi YO\'Q (' + errA.length + ')', errA.slice(0, 3).join(' | '))
