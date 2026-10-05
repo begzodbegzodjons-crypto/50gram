@@ -74,6 +74,25 @@ class HttpError extends Error {
 const fail = (msg: string, status = 400): never => { throw new HttpError(msg, status) }
 const now = () => Date.now()
 
+// ---- XATO JURNALI (doimiy) — «jim hal bo'lish» tugatilishi, server tomonda ----
+// console.log Cloudflare Workers'da SAQLANMAYDI: 500-sinf xato yuz berganda ildiz
+// jurnalda ko'rinmasdi. Endi har server-xato D1'ga yoziladi (err_jurnal) va egaga
+// /api/jurnal orqali o'qiladi. HECH QACHON javobni buzmaydi: o'z xatosini yutadi,
+// faqat fon (waitUntil) ichida yozadi. Tozalash: cleanup() 14 kundan eskilarni o'chadi.
+function jurnalYoz(env: Env, path: string, uid: number, src: string, msg: string): Promise<void> {
+  return (async () => {
+    try {
+      const db = env.__db || makeDb(env.DATABASE_URL)
+      // jadval kafolati: t29ok keshlangan bo'lsa — instant return, xarajatsiz
+      try { await ensureSchema(db) } catch {}
+      await db.run(
+        "INSERT INTO err_jurnal (ts, path, uid, src, msg) VALUES (?,?,?,?,?)",
+        [Date.now(), String(path || "").slice(0, 110), uid || 0, String(src || "").slice(0, 14), String(msg ?? "").replace(/\s+/g, " ").trim().slice(0, 560)],
+      )
+    } catch {}
+  })()
+}
+
 // =====================================================================
 // SEC FIREWALL — izolyat-ichki qatlam (FOYDALANUVCHIGA KO'RINMAS).
 // Oddiy foydalanuvchi: NOL qo'shimcha kechikish (xotira-tekshiruvi xolos).
@@ -270,6 +289,11 @@ async function ensureSchema(db: Db) {
     // klient WS o'lsa /signal/queue orqali o'qiydi (fetch-and-delete).
     "CREATE TABLE IF NOT EXISTS call_signals (id BIGINT PRIMARY KEY, to_uid BIGINT NOT NULL, from_uid BIGINT NOT NULL, body MEDIUMTEXT NOT NULL, created_at BIGINT NOT NULL)",
     "CREATE INDEX IF NOT EXISTS idx_csignals_to ON call_signals (to_uid, id)",
+    // XATO JURNALI (doimiy): serverdagi 500-sinf xatolar D1'ga yoziladi — console.log
+    // Cloudflare'da saqlanmaydi va «keyin o'zi buzildi» deganda ildiz ko'rinmasdi.
+    // Egaga /api/jurnal orqali o'qiladi (o'zbekcha tashxis doktrinasi: log bilan topish).
+    "CREATE TABLE IF NOT EXISTS err_jurnal (id BIGINT AUTO_INCREMENT PRIMARY KEY, ts BIGINT NOT NULL, path VARCHAR(120) NOT NULL DEFAULT '', uid BIGINT NOT NULL DEFAULT 0, src VARCHAR(16) NOT NULL DEFAULT '', msg VARCHAR(600) NOT NULL DEFAULT '')",
+    "CREATE INDEX IF NOT EXISTS idx_errj_ts ON err_jurnal (ts)",
   ]
   for (const s of stmts) { try { await db.run(s) } catch {} }
   try {
@@ -3175,6 +3199,19 @@ async function storageStats(c: C) {
   return json({ nodes: Number(nodes?.cnt || 0), quota: Number(nodes?.quota || 0), used: Number(nodes?.used || 0), files: Number(media?.cnt || 0), healthy: Number(media?.jobs || 0) })
 }
 
+// XATO JURNALINI O'QISH — FAQAT EGAGA (DEV_PHONES). Boshqa har kim uchun yo'l mavjudligi
+// ham oshkor qilinmaydi (oddiy "Not found" 404 — firewall doktrinasi bilan bir xil).
+// Parametr: ?n=150 (1..300) — so'nggi n yozuv, eng yangisi birinchi.
+async function adminJurnal(c: C) {
+  try { await ensureSchema(c.db) } catch {} // err_jurnal jadvali birinchi o'qishdan oldin ham bo'lsin
+  const u = await c.db.one("SELECT phone FROM users WHERE id=?", [c.uid]).catch(() => null)
+  const admins = listVar(c.env.DEV_PHONES).map((s) => (s.startsWith("+") ? s : "+" + s))
+  if (!u || !admins.includes(String(u.phone || ""))) return FW_404()
+  const n = Math.min(300, Math.max(1, Math.floor(+(c.url.searchParams.get("n") || 150) || 150)))
+  const rows = await c.db.q("SELECT id, ts, path, uid, src, msg FROM err_jurnal ORDER BY id DESC LIMIT " + n)
+  return json({ items: rows, now: now() })
+}
+
 // ------------------------- Router -------------------------
 type H = (c: C) => Promise<Response>
 const routes: Array<[string, string, H, boolean?]> = [
@@ -3187,6 +3224,9 @@ const routes: Array<[string, string, H, boolean?]> = [
   // BUILD QOROVUSI: klient (core.js) versiyasini tekshiradi — mos kelmasa o'zi yangilanadi.
   // Ochiq (auth'siz): kirish ekranida ham eski kod yangilanib qolsin. Keshlanmaydi.
   ["GET", "/build", async () => json({ v: BUILD_V, now: now() }), true],
+  // XATO JURNALI — faqat egaga (DEV_PHONES). Serverdagi har 500-sinf xato err_jurnal'ga
+  // yoziladi; bu yo'l orqali o'zbekcha tashxis: «log bilan topish» doktrinasi.
+  ["GET", "/jurnal", adminJurnal],
   ["GET", "/me", getMe],
   ["PATCH", "/me", patchMe],
   ["POST", "/ping", async (c) => { const t = now(); await c.db.run("UPDATE users SET last_seen=?, token_exp=? WHERE id=?", [t, t + 180 * 86400 * 1000, c.uid]); return json({ ok: true, now: t }) }],
@@ -3325,6 +3365,8 @@ async function cleanup(env: Env) {
   await db.run("DELETE FROM otp WHERE expires_at<?", [t])
   await db.run("DELETE FROM push_subs WHERE updated_at<?", [t - 90 * DAY]) // 90 kun ishlatilmagan obunalar
   await db.run("DELETE FROM peer_have WHERE updated_at<?", [t - 120 * DAY])
+  // Xato-jurnali gigiyenasi: 14 kundan eski server-xatolar o'chadi (jurnal abadiy o'smaydi)
+  await db.run("DELETE FROM err_jurnal WHERE ts<?", [t - 14 * DAY])
   await db.run("UPDATE lives SET ended_at=? WHERE ended_at=0 AND started_at<?", [t, t - 12 * 3600000])
   // TiDB XOTIRA POSBONI (Task 39): server — faqat ko'prik. Asosiy xotira — foydalanuvchilar
   // qurilmalari (planReplicas kamida 15 nusxa yig'adi, P2P o'rgimchak to'ri yetkazadi).
@@ -3451,6 +3493,7 @@ export default {
     const clen = +(req.headers.get("content-length") || 0)
     if (clen > 26_000_000) { if (fwip) fwOchko(env, wait, fwip, "flood", 3); return json({ error: "Hajm juda katta" }, 413) }
     const path = url.pathname.slice(4).replace(/\/+$/, "") || "/"
+    let juid = 0 // xato-jurnali uchun kuzatuv (catch scope'ida uid ko'rinmaydi)
     try {
       if (!env.JWT_SECRET || env.JWT_SECRET.length < 16) fail("Server sozlanmagan: JWT_SECRET (kamida 16 belgi)", 500)
       if (!env.DATABASE_URL && !env.__db) fail("Server sozlanmagan: DATABASE_URL", 500)
@@ -3475,6 +3518,7 @@ export default {
         const payload = await verifyJwt(token, env.JWT_SECRET)
         if (!payload) { if (fwip) { if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404(); fwOchko(env, wait, fwip, "tok") } fail("Avtorizatsiya kerak", 401) }
         uid = Number(payload.sub)
+        juid = uid
         // YAGONA FAOL SESSIYA (bir raqam — bitta faol qurilma): logout barcha tokenlarni
         // o'ldiradi (logout_at), yangi kirish esa eskisini (sess mos emas → 401). Eski
         // tokenlar (s klaimsiz) moslik bo'yicha ishlaydi — yangilanish yumshoq o'tadi.
@@ -3499,8 +3543,14 @@ export default {
       if (fwip && res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 429 && fw4xx(env, wait, fwip)) return FW_404()
       return res
     } catch (e: any) {
-      if (e instanceof HttpError) return json({ error: e.message }, e.status)
+      if (e instanceof HttpError) {
+        // 500-sinf HttpError (masalan "Server sozlanmagan") ham jurnalga tushadi —
+        // sozlash xatolari «jim» o'lib qolmasin. Oddiy biznes-4xx jurnalga YOZILMAYDI.
+        if (e.status >= 500) wait(jurnalYoz(env, path, juid, "http", e.message))
+        return json({ error: e.message }, e.status)
+      }
       console.log("Server xatosi", e?.stack || String(e))
+      wait(jurnalYoz(env, path, juid, "http", String(e?.message || e)))
       return json({ error: "Server xatosi. Birozdan keyin urinib ko‘ring" }, 500)
     }
   },

@@ -34,11 +34,39 @@ export type Db = {
   run: (sql: string, params?: unknown[]) => Promise<void>
 }
 
+// TRANTZIENT XATO QAYTASHI («avval ishlagan funksiya keyin o'zi buzildi» sinfining yashirin ildizi):
+// TiDB Cloud Serverless HTTP ko'prik orqali ishlaydi — bitta DNS/TLS titrashi, bridge 5xx yoki
+// 429-throttle BUTUN so'rovni 500 «Server xatosi» qilib yuborardi. O'QISH so'rovlar idempotent —
+// xavfsiz qaytariladi. YOZISH (run) QAYTARILMAYDI: javob yo'qolgan bo'lsa yozuv allaqachon
+// bajarilgan bo'lishi mumkin (dublikat xabar xavfi) — yozishda xato foydalanuvchi tomonidan
+// qayta urinish bilan yopiladi, bu esa dublikatdan xavfsiz.
+const TRANSIENT_STATUS = new Set([429, 500, 502, 503, 504])
+function tranzient(e: unknown): boolean {
+  if (e instanceof TypeError) return true // fetch failed / tarmoq uzilishi
+  const m = String((e as any)?.message || e || "")
+  if (/\b(fetch failed|network|terminated|ECONNRESET|ETIMEDOUT|socket|timeout)\b/i.test(m)) return true
+  const st = Number((e as any)?.status || 0)
+  return st > 0 && TRANSIENT_STATUS.has(st) // DatabaseError.status (TiDB ko'prik javobi)
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
 export function makeDb(url: string): Db {
   const conn = connect({ url })
   const q = async (sql: string, params: unknown[] = []) => {
-    const r: any = await conn.execute(sql, params as any[])
-    return Array.isArray(r) ? r.map(fix) : []
+    let last: unknown
+    for (let i = 0; i < 3; i++) {
+      // 3 urinishgacha: 1-urinish + 2 qaytash (300ms, 800ms) — o'rtacha kechikish <1s,
+      // foydalanuvchi hech narsa sezmagan holda titrash yutiladi.
+      try {
+        const r: any = await conn.execute(sql, params as any[])
+        return Array.isArray(r) ? r.map(fix) : []
+      } catch (e) {
+        last = e
+        if (i === 2 || !tranzient(e)) throw e
+        await sleep(i === 0 ? 300 : 800)
+      }
+    }
+    throw last
   }
   return {
     q,

@@ -3,13 +3,26 @@
 let token = ""
 
 async function login(env: any) {
-  const f = new FormData()
-  f.append("email", env.ESKIZ_EMAIL)
-  f.append("password", env.ESKIZ_PASSWORD)
-  const r = await fetch("https://notify.eskiz.uz/api/auth/login", { method: "POST", body: f })
-  const j: any = await r.json().catch(() => ({}))
-  token = j?.data?.token || ""
-  if (!token) throw new Error("Eskiz login xatosi")
+  // 2 urinish: Eskiz'ning o'zi vaqti-vaqti bilan titraydi (tarmoq/5xx) — bitta titrash
+  // OTP'ni butunlay o'chirib qo'yardi («bir marta ishlagan funksiya ishlamay qoldi» naqshi).
+  // Parol noto'g'ri bo'lsa ham shunchaki 2 marta rad etiladi — zarari yo'q.
+  let last: unknown
+  for (let i = 0; i < 2; i++) {
+    try {
+      const f = new FormData()
+      f.append("email", env.ESKIZ_EMAIL)
+      f.append("password", env.ESKIZ_PASSWORD)
+      const r = await fetch("https://notify.eskiz.uz/api/auth/login", { method: "POST", body: f })
+      const j: any = await r.json().catch(() => ({}))
+      token = j?.data?.token || ""
+      if (token) return
+      throw new Error("Eskiz login xatosi")
+    } catch (e) {
+      last = e
+      if (i === 0) await new Promise((r) => setTimeout(r, 400))
+    }
+  }
+  throw last
 }
 
 export function smsConfigured(env: any) {

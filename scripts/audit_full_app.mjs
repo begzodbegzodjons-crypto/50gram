@@ -153,6 +153,11 @@ try {
   ok(wsB.some((s) => s === 1), 'B WebSocket OPEN', JSON.stringify(wsB))
   const pv = await apiA('/push/vapid'); ok(pv.s === 200 && !!pv.j?.key, 'push/vapid kaliti', 'len=' + (pv.j?.key || '').length)
   const ice = await apiA('/ice'); ok(ice.s === 200, 'ice (TURN/STUN)', JSON.stringify(ice.j).slice(0, 120))
+  // XATO JURNALI (serverdagi doimiy 500-jurnal): A raqami DEV_PHONES'da — ochilishi SHART.
+  // Agar serverda 500 yuz bergan bo'lsa, aynan shu ro'yxatda ko'rinadi (jurnal-bilan-tashxis).
+  const jr = await apiA('/jurnal?n=50')
+  ok(jr.s === 200 && Array.isArray(jr.j?.items), 'xato-jurnali (admin) ochiladi', jr.s === 200 ? 'yozuv=' + jr.j.items.length : 'HTTP ' + jr.s)
+  if (jr.s === 200 && jr.j.items.length) info('SERVER JURNALIDA yozuv bor — tekshirilishi shart', JSON.stringify(jr.j.items.slice(0, 5)).slice(0, 400))
 
   // ================= 2. PROFIL / QIDIRUV / KASHFIYOT / KONTAKT / BLOK =================
   log('2-PROFIL: me/users/search/discover/resolve/contacts/blocks')
