@@ -606,28 +606,43 @@ async function sendText() {
   localStorage.removeItem('g50_draft_' + chatId)
   for (let i = 0; i < text.length; i += 4000) await sendRaw(chatId, { kind: 'text', body: text.slice(i, i + 4000), meta: i === 0 ? withReply({}) : {} }).catch(() => {})
 }
+// v81: sendFile ENDI TO'LIQ HIMoyalangan — avval try/catch'dan TASHQARIDA 3 ta xavfli qadam
+// bor edi (createObjectURL / withReply / pushTemp→renderMsgs). Ulardan biri uzilsa — xato
+// JIMS yo'qolardi (hech qanday toast, hech qanday jurnal — «yuborilganda hech narsa bo'lmayapti»
+// alomatining asosiy gumondori). Endi HAR qadam jurnalga yoziladi (media-qadam/media-xato):
+// boshlanmoqda → siqildi → yuklandi → YUBORILDI. Qaysi qadamda to'xtasa — jurnaldan aniq ko'rinadi.
 async function sendFile(file, kind, extra = {}, chatId0) {
   const chatId = chatId0 || S.cur
-  if (!chatId || !file) return
-  if (file.size > 30 * 1024 * 1024) return toast('⚠️ Fayl 30 MB dan katta bo‘lmasin')
-  const local = ['photo', 'video', 'voice', 'round'].includes(kind) ? URL.createObjectURL(file) : null
-  const baseMeta = withReply({ ...(extra.meta || {}), name: file.name || kind, fsize: file.size })
-  const temp = pushTemp(chatId, kind, extra.body, { ...baseMeta, local })
+  if (!chatId || !file) { mediaLog('sendFile-oldi', new Error('chatId=' + (chatId || 0) + ' fayl=' + !!file + ' kind=' + kind), { kind }, 'xato'); if (!chatId) toast('⚠️ Chat ochilmagan — yuborilmadi'); return }
+  if (file.size > 30 * 1024 * 1024) { mediaLog('sendFile-hajm', new Error('hajm=' + file.size + ' limitdan katta'), { kind, size: file.size, mime: file.type }); return toast('⚠️ Fayl 30 MB dan katta bo‘lmasin') }
+  mediaLog('sendFile-boshlanmoqda', new Error('kind=' + kind + ' hajm=' + file.size + ' mime=' + (file.type || '?') + ' chat=' + chatId), { kind, size: file.size, mime: file.type }, 'qadam')
+  let temp = null
   try {
+    let local = null
+    try { local = ['photo', 'video', 'voice', 'round'].includes(kind) ? URL.createObjectURL(file) : null } catch (e) { mediaLog('sendFile-local', e, { kind }) }
+    const baseMeta = withReply({ ...(extra.meta || {}), name: file.name || kind, fsize: file.size })
+    temp = pushTemp(chatId, kind, extra.body, { ...baseMeta, local })
     let blob = file
-    if (kind === 'photo' && file.type !== 'image/gif') blob = await resizeImage(file, 1600, 0.85)
+    if (kind === 'photo' && file.type !== 'image/gif') {
+      // v81 ZAXIRA: siqish ishlamasa (HEIC/qamra formati/eski WebView decode qilolmaydi) —
+      // avval BUTUN yuborish buzilardi. Endi ASL fayl o'z holida yuboriladi (yuborish baribir ishlaydi).
+      try { blob = await resizeImage(file, 1600, 0.85) } catch (e) { mediaLog('resize-zaxira', e, { kind, size: file.size, mime: file.type || '?' }); blob = file }
+    }
     const id = await upload(blob, file.name || kind, (p) => {
       const bar = qs(`[data-cid="${temp.client_id}"] .prog i`)
       if (bar) bar.style.width = Math.round(p * 100) + '%'
     })
+    mediaLog('sendFile-yuklandi', new Error('media=' + id), { kind }, 'qadam')
     await sendRaw(chatId, { kind, body: extra.body || undefined, meta: { ...baseMeta, ...mediaInfo(id), fsize: blob.size } }, temp)
-  } catch (e) { dropTemp(chatId, temp); toast('⚠️ ' + e.message); mediaLog('sendFile', e, { kind, size: file.size, mime: file.type }) }
+    mediaLog('sendFile-YUBORILDI', new Error('ok'), { kind }, 'qadam')
+  } catch (e) { if (temp) dropTemp(chatId, temp); toast('⚠️ ' + (e.message || 'Yuborishda xato')); mediaLog('sendFile', e, { kind, size: file.size, mime: file.type }) }
 }
 // MEDIA XATO JURNALI: «rasm yuborib bo'lmayapti» shikoyatlari avval JIMS yo'qolardi —
 // endi har media-xato /api/clog orqali egaga jurnaliga yoziladi (aniq sabab: qadam,
 // tur, hajm, xato matni). Best-effort: o'z xatosi hech narsani buzmaydi.
-function mediaLog(step, err, extra = {}) {
-  try { fetch(API + '/clog', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + S.token }, body: JSON.stringify({ c: 'media', m: `media-xato [${step}] kind=${extra.kind || '?'} size=${extra.size || 0} mime=${extra.mime || '?'} :: ${String(err?.message || err).slice(0, 300)}` }), keepalive: true }).catch(() => {}) } catch {}
+// v81: 4-arg (tag) — 'xato' (standart) yoki 'qadam' (yo'l-yo'riq belgilari: har qadam jurnalga).
+function mediaLog(step, err, extra = {}, tag = 'xato') {
+  try { fetch(API + '/clog', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + S.token }, body: JSON.stringify({ c: 'media', m: `media-${tag} [${step}] kind=${extra.kind || '?'} size=${extra.size || 0} mime=${extra.mime || '?'} :: ${String(err?.message || err).slice(0, 300)}` }), keepalive: true }).catch(() => {}) } catch {}
 }
 const sendSticker = (e, a) => S.cur && sendRaw(S.cur, { kind: 'sticker', meta: withReply({ e, a }) }).catch(() => {})
 // Task 29: paket stikerini yuborish (animatsiyali SVG)
@@ -809,9 +824,13 @@ $('b-attach').onclick = () => {
     if (a === 'gal' || a === 'cam') {
       try {
         const files = a === 'cam' ? [await pickFile('image/*,video/*', false, 'environment')].filter(Boolean) : await pickFile('image/*,video/*', true)
+        // v81 TASHXIS: galereya o'z javobini BERDI — nechta fayl, qanday tur (jurnalga).
+        // Agar foydalanuvchi rasm tanlasa-yu bu yozuv jurnalda BO'LMASA — WebView faylni
+        // yetkazmagani (change hodisasi o'tmagan) aniq bo'ladi.
+        mediaLog('picker-javob', new Error('ta=' + a + ' n=' + (files ? files.length : 0) + (files && files[0] ? ' birinchi=' + (files[0].type || '?') + '/' + files[0].size : ' (BO\'SH)')), { kind: a }, 'qadam')
         if (!files.length) return
         const body = files.length === 1 ? await captionAsk(files[0]) : ''
-        if (body === null) return
+        if (body === null) { mediaLog('picker-yopildi', new Error('izoh oynasi bekor yopildi'), { kind: a }, 'qadam'); return }
         files.slice(0, 10).forEach((f, i) => sendFile(f, f.type.startsWith('video/') ? 'video' : 'photo', { body: i === 0 ? body : '' }))
       } catch (e) { mediaLog('picker-' + a, e, { kind: a }); toast('⚠️ Rasm tanlashda xato: ' + (e.message || e)) }
     }
@@ -830,7 +849,8 @@ function captionAsk(file) {
     const url = URL.createObjectURL(file)
     const sh = sheet(h3('Izoh qo‘shasizmi?') + `${file.type.startsWith('video/') ? `<video src="${url}" style="width:100%;max-height:45vh;border-radius:14px" controls></video>` : `<img src="${url}" style="width:100%;max-height:45vh;object-fit:contain;border-radius:14px">`}
       <input class="inp" id="cap-i" placeholder="Izoh (ixtiyoriy)" maxlength="1000"><button class="btn big" id="cap-s">Yuborish ➤</button>`, { onClose: () => res(null) })
-    qs('#cap-s', sh).onclick = () => { const v = qs('#cap-i', sh).value.trim(); const b = sh.closest('.shbg'); b._onClose = null; b.remove(); URL.revokeObjectURL(url); res(v) }
+    // v81: b himoyalangan — bir marta ham null bo'lsa onclick JIM uzilmasdi
+    qs('#cap-s', sh).onclick = () => { const v = qs('#cap-i', sh).value.trim(); const b = sh.closest('.shbg'); if (b) { b._onClose = null; b.remove() } URL.revokeObjectURL(url); res(v) }
   })
 }
 function shareContactSheet() {

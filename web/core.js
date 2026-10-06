@@ -439,8 +439,13 @@ function pickFile(accept, multiple = false, capture) {
   return new Promise((res) => {
     const i = document.createElement('input'); i.type = 'file'; if (accept) i.accept = accept; i.multiple = multiple
     if (capture) i.setAttribute('capture', capture)
-    i.onchange = () => res(multiple ? [...i.files] : i.files[0] || null)
-    i.click()
+    // v81: galereya BEKOR qilib yopilsa («cancel» — Android Chrome/WebView 113+) — va'da
+    // abadiy osilib qolmasdi (avval: tanlash bekor qilinsa hech narsa sodir bo'lmasdi).
+    let ok = false
+    const fin = (v) => { if (!ok) { ok = true; res(v) } }
+    i.onchange = () => fin(multiple ? [...i.files] : i.files[0] || null)
+    i.addEventListener('cancel', () => fin(multiple ? [] : null))
+    try { i.click() } catch (e) { fin(multiple ? [] : null) }
   })
 }
 
@@ -1019,7 +1024,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v80'
+window.__50BUILD = 'v81'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
