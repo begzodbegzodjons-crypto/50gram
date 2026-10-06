@@ -621,7 +621,13 @@ async function sendFile(file, kind, extra = {}, chatId0) {
       if (bar) bar.style.width = Math.round(p * 100) + '%'
     })
     await sendRaw(chatId, { kind, body: extra.body || undefined, meta: { ...baseMeta, ...mediaInfo(id), fsize: blob.size } }, temp)
-  } catch (e) { dropTemp(chatId, temp); toast('⚠️ ' + e.message) }
+  } catch (e) { dropTemp(chatId, temp); toast('⚠️ ' + e.message); mediaLog('sendFile', e, { kind, size: file.size, mime: file.type }) }
+}
+// MEDIA XATO JURNALI: «rasm yuborib bo'lmayapti» shikoyatlari avval JIMS yo'qolardi —
+// endi har media-xato /api/clog orqali egaga jurnaliga yoziladi (aniq sabab: qadam,
+// tur, hajm, xato matni). Best-effort: o'z xatosi hech narsani buzmaydi.
+function mediaLog(step, err, extra = {}) {
+  try { fetch(API + '/clog', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + S.token }, body: JSON.stringify({ c: 'media', m: `media-xato [${step}] kind=${extra.kind || '?'} size=${extra.size || 0} mime=${extra.mime || '?'} :: ${String(err?.message || err).slice(0, 300)}` }), keepalive: true }).catch(() => {}) } catch {}
 }
 const sendSticker = (e, a) => S.cur && sendRaw(S.cur, { kind: 'sticker', meta: withReply({ e, a }) }).catch(() => {})
 // Task 29: paket stikerini yuborish (animatsiyali SVG)
@@ -801,11 +807,13 @@ $('b-attach').onclick = () => {
     const a = it.dataset.a
     closeSheet(sh)
     if (a === 'gal' || a === 'cam') {
-      const files = a === 'cam' ? [await pickFile('image/*,video/*', false, 'environment')].filter(Boolean) : await pickFile('image/*,video/*', true)
-      if (!files.length) return
-      const body = files.length === 1 ? await captionAsk(files[0]) : ''
-      if (body === null) return
-      files.slice(0, 10).forEach((f, i) => sendFile(f, f.type.startsWith('video/') ? 'video' : 'photo', { body: i === 0 ? body : '' }))
+      try {
+        const files = a === 'cam' ? [await pickFile('image/*,video/*', false, 'environment')].filter(Boolean) : await pickFile('image/*,video/*', true)
+        if (!files.length) return
+        const body = files.length === 1 ? await captionAsk(files[0]) : ''
+        if (body === null) return
+        files.slice(0, 10).forEach((f, i) => sendFile(f, f.type.startsWith('video/') ? 'video' : 'photo', { body: i === 0 ? body : '' }))
+      } catch (e) { mediaLog('picker-' + a, e, { kind: a }); toast('⚠️ Rasm tanlashda xato: ' + (e.message || e)) }
     }
     if (a === 'file') { const fs = await pickFile('', true); (fs || []).slice(0, 10).forEach((f) => sendFile(f, 'file')) }
     if (a === 'contact') shareContactSheet()
