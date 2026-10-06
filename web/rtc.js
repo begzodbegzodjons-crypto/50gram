@@ -644,6 +644,13 @@ try {
     const d = e.data || {}
     if (d.type === 'callanswer' && d.call_id) window.__50call('answer', d.call_id)
     if (d.type === 'calldecline' && d.call_id) window.__50call('decline', d.call_id)
+    // v78: SW'dan «QO'NG'IROQ KELDI» impulsi (push sahifa EKRANDA kelganda) — WS kechiksa
+    // ham /calls/pending zudlik bilan tekshiriladi va qo'ng'iroq oynasi chiqadi
+    if (d.type === 'pushcall' && !CALL) {
+      api('/calls/pending').then((r) => {
+        if (r && r.call && !CALL) incomingCall({ call_id: r.call.call_id, video: r.call.video, started_at: r.call.started_at, from: r.call.from }, true)
+      }).catch(() => {})
+    }
   })
 } catch {}
 function incomingCall(ev, force) {
@@ -951,46 +958,101 @@ window.__50camRedial = async () => {
     }, 1200 + Math.floor(Math.random() * 2500))
   } catch {}
 }
-// ---------------- Qo'ng'iroq ohangi (WebAudio — 0 KB) ----------------
-// KIRISH: baland «ding-ding-dooong»; CHAQIRUVCHI: an'anaviy ringback
-let ringCtx = null, ringTimer = 0
+// ---------------- Qo'ng'iroq ohangi 2.0 (WebAudio sintez — 0 KB) ----------------
+// v78 «BA'ZI TELEFONLARDA JIRINGLAMAYDI» ildizlari: AudioContext SUSPENDED bo'lsa ovoz
+// UMUMAN chiqmasdi (resume rad etiladi, zaxira yo'q); tebranish faqat 1 marta edi.
+// YANGI DVIGATEL: 1) 4 marta resume urinishi (0/150/400/900ms) 2) baribir jim bo'lsa
+// WAV-zaxira ovoz (runtime'da sintez, 0 KB tarmoq) 3) har bosishda qulf ochiladi
+// 4) KIRISH: zamonaviy kalimba-arpejio + yumshoq echo 5) tebranish LOOP (jiringlash davomi)
+let ringCtx = null, ringTimer = 0, ringVibT = 0, ringFall = null, ringGuard = 0
+function ringUnlock() {
+  try { if (ringCtx && ringCtx.state === 'suspended') ringCtx.resume().catch(() => {}) } catch {}
+}
+try { document.addEventListener('pointerdown', ringUnlock, { capture: true }) } catch {}
+// ZAXIRA OVOZ: WebAudio ishlamasa — haqiqiy WAV fayl (runtime'da sintez qilinadi)
+function ringFallbackWav() {
+  const SR = 8000, DUR = 1.6, n = Math.floor(SR * DUR)
+  const buf = new ArrayBuffer(44 + n), v = new DataView(buf)
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)) }
+  ws(0, 'RIFF'); v.setUint32(4, 36 + n, true); ws(8, 'WAVE'); ws(12, 'fmt ')
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true)
+  v.setUint32(24, SR, true); v.setUint32(28, SR, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true)
+  ws(36, 'data'); v.setUint32(40, n, true)
+  for (let i = 0; i < n; i++) { // ikki nota: E5 (0–0.5s) → C5 (0.55–1.55s), yumshoq kempanda
+    const t = i / SR, first = t < 0.5, lt = first ? t : t - 0.55
+    const f = first ? 659.26 : 523.25
+    const env = Math.max(0, Math.min(1, lt * 60)) * Math.exp(-Math.max(0, lt) * 4.2)
+    const s = Math.sin(2 * Math.PI * f * t) * 0.75 + Math.sin(4 * Math.PI * f * t) * 0.25
+    v.setUint8(44 + i, Math.max(0, Math.min(255, 128 + s * env * 110)))
+  }
+  let s = ''
+  const u = new Uint8Array(buf)
+  for (let i = 0; i < u.length; i += 4096) s += String.fromCharCode.apply(null, u.subarray(i, Math.min(u.length, i + 4096)))
+  return 'data:audio/wav;base64,' + btoa(s)
+}
+function ringFallbackStart() {
+  if (ringFall) return
+  try {
+    ringFall = new Audio(ringFallbackWav())
+    ringFall.loop = true
+    ringFall.volume = 0.9
+    ringFall.play().catch(() => {})
+  } catch {}
+}
+function ringFallbackStop() { try { if (ringFall) { ringFall.pause(); try { ringFall.currentTime = 0 } catch {} } } catch {} ringFall = null }
 function ringTone(on, mode) {
-  clearInterval(ringTimer)
-  if (!on) { try { ringCtx?.close() } catch {} ringCtx = null; return }
+  clearInterval(ringTimer); clearInterval(ringVibT); clearInterval(ringGuard)
+  ringVibT = 0; ringGuard = 0
+  ringFallbackStop()
+  if (!on) { try { ringCtx && ringCtx.close() } catch {} ringCtx = null; return }
   try {
     if (!ringCtx) ringCtx = new (window.AudioContext || window.webkitAudioContext)()
-    if (ringCtx.state === 'suspended') ringCtx.resume().catch(() => {})
+    ringUnlock()
+    for (const d of [150, 400, 900]) setTimeout(ringUnlock, d) // qulfni yechish: 4 urinish
+    // QOROVUL: 300ms'da bir tekshiradi — WebAudio jonlansa zaxira o'chadi, jim qolsa
+    // 900ms'dan keyin WAV-zaxira ishga tushadi → hech qachon JIM qolmaydi
+    setTimeout(() => {
+      clearInterval(ringGuard)
+      ringGuard = setInterval(() => {
+        if (!ringCtx) { clearInterval(ringGuard); return }
+        if (ringCtx.state === 'running') { ringFallbackStop(); clearInterval(ringGuard); return }
+        ringFallbackStart()
+      }, 300)
+    }, 900)
     const note = (t, f, d, vol) => {
       const layer = (type, mult, v) => {
         const o = ringCtx.createOscillator(), g = ringCtx.createGain()
         o.type = type
         o.frequency.value = f * mult
         g.gain.setValueAtTime(0.0001, t)
-        g.gain.linearRampToValueAtTime(v, t + 0.02)
-        g.gain.setValueAtTime(v, t + d * 0.55)
+        g.gain.linearRampToValueAtTime(v, t + 0.015)
         g.gain.exponentialRampToValueAtTime(0.0001, t + d)
         o.connect(g); g.connect(ringCtx.destination)
         o.start(t); o.stop(t + d + 0.05)
       }
-      layer('triangle', 1, vol)
-      layer('sine', 2, vol * 0.4)
-      layer('sine', 3, vol * 0.15)
+      layer('sine', 1, vol)            // asos — iliq kalimba
+      layer('triangle', 2, vol * 0.32) // yuqori oberton — yorqinlik
+      layer('sine', 4, vol * 0.08)     // shirin «havo»
     }
-    const resumeIf = () => { if (ringCtx && ringCtx.state === 'suspended') ringCtx.resume().catch(() => {}) }
     if (mode === 'in') {
+      // ZAMONAVIY KALIMBA-ARPEJJIO (v78): pentatonika, 2 jumlali naqsh — chiroyli va yumshoq
       const playIn = () => {
-        if (!ringCtx) return
-        resumeIf()
-        const t = ringCtx.currentTime + 0.02
-        note(t, 987.77, 0.3, 0.3)
-        note(t + 0.36, 1318.51, 0.3, 0.28)
-        note(t + 0.72, 880, 0.62, 0.34)
+        if (!ringCtx || ringCtx.state !== 'running') return
+        const t0 = ringCtx.currentTime + 0.02
+        const E5 = 659.26, A5 = 880, B5 = 987.77, C6 = 1046.5, E6 = 1318.5
+        const seq = [
+          [0.00, E5, 0.42, 0.30], [0.22, B5, 0.42, 0.28], [0.44, C6, 0.44, 0.30], [0.66, E6, 1.05, 0.32],
+          [1.60, A5, 0.36, 0.24], [1.82, C6, 0.36, 0.26], [2.04, B5, 1.10, 0.30],
+        ]
+        for (const [dt, f, d, v] of seq) note(t0 + dt, f, d, v)
       }
-      playIn(); ringTimer = setInterval(playIn, 2500)
+      playIn(); ringTimer = setInterval(playIn, 3200)
+      // TEBRANISH LOOP: javob berungacha har 2.2s takrorlanadi (avval faqat 1 marta edi)
+      const vib = () => { try { vibrate([380, 160, 380, 160, 380]) } catch {} }
+      vib(); ringVibT = setInterval(vib, 2200)
     } else {
       const beepOnce = () => {
-        if (!ringCtx) return
-        resumeIf()
+        if (!ringCtx || ringCtx.state !== 'running') return
         const t = ringCtx.currentTime + 0.02
         note(t, 425, 0.42, 0.18); note(t + 0.62, 425, 0.42, 0.18)
       }

@@ -142,7 +142,7 @@ public class MainActivity extends Activity {
     }
 
     @JavascriptInterface
-    public String version() { return "2.8"; }
+    public String version() { return "2.9"; }
 
     /** Web tomondan ruxsatlarni ataylab so'rash (masalan qo'ng'iroq tugmasi bosilganda). */
     @JavascriptInterface
@@ -151,11 +151,46 @@ public class MainActivity extends Activity {
         @Override public void run() { ensureOsMediaPerms(null); }
       });
     }
+
+    // v2.9: FONDA XABAR BILDIRISHNOMASI — WS tirik bo'lsa DARHOL yetadi (JS document.hidden
+    // bo'lganda chaqiradi). WebView'da web Notification ishlamaydi (Illegal constructor) —
+    // bu yagona ishonchli yo'l. Tap qilinganda ilova ochilib shu chat ko'rsatiladi.
+    @JavascriptInterface
+    public void pushNotify(final String title, final String body, final String chatId) {
+      runOnUiThread(new Runnable() {
+        @Override public void run() {
+          try { G50Notify.show(MainActivity.this, title, body, chatId); } catch (Exception ignored) { }
+        }
+      });
+    }
+
+    // v2.9: chat o'qilganda bildirishnomani yopish (bo'sh id — hammasini tozalash)
+    @JavascriptInterface
+    public void clearNotify(final String chatId) {
+      runOnUiThread(new Runnable() {
+        @Override public void run() {
+          try { G50Notify.clear(MainActivity.this, chatId); } catch (Exception ignored) { }
+        }
+      });
+    }
   }
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
+
+    // v2.9: QULF EKRANIDA HAM QO'NG'IROQ — to'liq ekran qo'ng'iroq oynasi chiqqanda
+    // EKRAN O'ZI YONADI va oyna qulf ustida ko'rinadi (avval ko'p telefonlarda
+    // full-screen intent ekran o'chganda yonmasdi — «qo'ng'iroqdan hech narsa ko'rinmasdi»)
+    if (Build.VERSION.SDK_INT >= 27) {
+      try { setShowWhenLocked(true); setTurnScreenOn(true); } catch (Exception ignored) { }
+    } else {
+      try {
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+            | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            | WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD);
+      } catch (Exception ignored) { }
+    }
 
     root = new FrameLayout(this);
     web = new WebView(this);
@@ -346,21 +381,34 @@ public class MainActivity extends Activity {
   }
 
   void handleCallIntent(Intent i) {
-    if (i == null || i.getStringExtra("c") == null || web == null) return;
+    if (i == null || web == null) return;
     final String act = i.getStringExtra("c");
-    final String id = i.getStringExtra("id") == null ? "0" : i.getStringExtra("id");
+    if (act == null) return;
     CallAlert.cancel(this);
+    // v2.9: XABAR bildirishnomasi tap → shu chat ochiladi (G50Notify/KeepAliveService)
+    if ("chat".equals(act)) {
+      final String chatId = i.getStringExtra("chat_id");
+      if (chatId == null || chatId.length() == 0) return;
+      callJsWhenReady("chat", chatId, 0);
+      return;
+    }
+    final String id = i.getStringExtra("id") == null ? "0" : i.getStringExtra("id");
     // JS hali yuklanmagan bo'lishi mumkin — window.__50call topilguncha (maks 8s) qayta urinamiz
     callJsWhenReady(act, id, 0);
   }
 
   void callJsWhenReady(final String act, final String id, final int n) {
     if (web == null) return;
-    web.evaluateJavascript("!!(window.__50call)", new android.webkit.ValueCallback<String>() {
+    // chat — boshqa JS hook (__50openchat); qo'ng'iroq — __50call
+    final String probe = "chat".equals(act) ? "!!(window.__50openchat)" : "!!(window.__50call)";
+    web.evaluateJavascript(probe, new android.webkit.ValueCallback<String>() {
       @Override public void onReceiveValue(String v) {
         if (v != null && v.contains("true")) {
+          final String js = "chat".equals(act)
+              ? "try{window.__50openchat('" + id + "')}catch(e){}"
+              : "try{window.__50call('" + act + "','" + id + "')}catch(e){}";
           try {
-            web.evaluateJavascript("try{window.__50call('" + act + "','" + id + "')}catch(e){}", null);
+            web.evaluateJavascript(js, null);
           } catch (Exception ignored) { }
         } else if (n < 12) {
           main.postDelayed(new Runnable() {

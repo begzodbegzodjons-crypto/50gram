@@ -231,7 +231,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v77"
+const BUILD_V = "v78"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -1268,6 +1268,33 @@ async function pushUnsubscribe(c: C) {
   if (ep) await c.db.run("DELETE FROM push_subs WHERE endpoint_hash=? AND user_id=?", [await sha256(ep), c.uid])
   else await c.db.run("DELETE FROM push_subs WHERE user_id=?", [c.uid])
   return json({ ok: true })
+}
+
+// FON XABAR SUMMASI (v78) — APK KeepAliveService har ~20s so'raydi (Web Push WebView'da
+// ishlamaydi — Android xizmati o'zi o'qilmagan xabarlarni tekshiradi). Ovoz uchirilgan
+// chatlar, push'ni butunlay o'chirgan foydalanuvchi va o'chirilgan xabarlar chiqariladi.
+// Javob: {n: nechta chatda o'qilmagan, last: eng yangi xabar sarlavhasi} yoki {n:0}.
+async function notifyUnread(c: C) {
+  try {
+    const pr = await c.db.one("SELECT prefs FROM users WHERE id=?", [c.uid])
+    try { if (JSON.parse(String(pr?.prefs || "{}")).push === 0) return json({ n: 0 }) } catch {}
+    const rows = await c.db.q(
+      `SELECT m.chat_id, m.kind, m.body, m.created_at, u.first_name, u.last_name, ch.type AS chtype, ch.title AS chtitle
+       FROM messages m
+       JOIN chat_members cm ON cm.chat_id=m.chat_id AND cm.user_id=? AND cm.status='active' AND cm.muted=0
+       JOIN chats ch ON ch.id=m.chat_id
+       LEFT JOIN users u ON u.id=m.sender_id
+       WHERE m.id>cm.last_read AND m.sender_id<>? AND m.deleted=0
+       ORDER BY m.id DESC LIMIT 40`, [c.uid, c.uid]) as any[]
+    if (!rows || !rows.length) return json({ n: 0 })
+    const chats = new Set(rows.map((r) => r.chat_id))
+    const last = rows[0]
+    const nm = ((last.first_name || "") + " " + (last.last_name || "")).trim() || "Foydalanuvchi"
+    const prev = last.kind === "text" ? String(last.body || "") : (PUSH_PREVIEW[last.kind] || "Yangi xabar")
+    const title = last.chtype === "direct" ? nm : (last.chtitle || "Guruh")
+    const body = last.chtype === "group" ? `${nm}: ${prev}` : prev
+    return json({ n: chats.size, chat_id: last.chat_id, t: title.slice(0, 80), b: body.slice(0, 240) })
+  } catch { return json({ n: 0 }) }
 }
 // Yangi xabarni offline a'zolarga push qilish (ovoz uchirilganlar va push o'chirganlar chiqariladi)
 async function pushChatMsg(c: C, chatId: number, ch: any, m: any) {
@@ -3349,6 +3376,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/push/vapid", async (c) => json({ key: c.env.VAPID_PUBLIC_KEY || "" }), true],
   ["POST", "/push/subscribe", pushSubscribe],
   ["POST", "/push/unsubscribe", pushUnsubscribe],
+  ["GET", "/notify/unread", notifyUnread],
   ["GET", "/ice", ice],
   ["POST", "/calls", startCall],
   ["GET", "/calls/pending", callPending],

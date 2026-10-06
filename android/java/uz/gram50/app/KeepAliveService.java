@@ -47,6 +47,7 @@ public class KeepAliveService extends Service {
   public static volatile String token = null;
   private static volatile boolean polling = false;
   static String lastShown = null;
+  static String lastMsg = null; // v2.9: oxirgi ko'rsatilgan xabar kaliti (chat_id + matn boshi)
 
   final Handler h = new Handler(Looper.getMainLooper());
   PowerManager.WakeLock wl;
@@ -56,6 +57,7 @@ public class KeepAliveService extends Service {
   final Runnable loop = new Runnable() {
     @Override public void run() {
       try { pollPending(); } catch (Exception ignored) { }
+      try { pollUnread(); } catch (Exception ignored) { } // v2.9: o'qilmagan xabarlar (fon bildirishnomasi)
       h.postDelayed(this, MainActivity.visible ? POLL_MS * 2 : POLL_MS);
     }
   };
@@ -177,6 +179,41 @@ public class KeepAliveService extends Service {
         // Qo'ng'iroq tugadi (javob berildi/rad/otib ketdi) — bildirishnomani yopamiz
         if (lastShown != null) { CallAlert.cancel(this); lastShown = null; }
       }
+    } catch (Exception ignored) {
+    } finally {
+      if (c != null) try { c.disconnect(); } catch (Exception ignored) { }
+    }
+  }
+
+  /** /notify/unread: o'qilmagan xabar bor bo'lsa — XABAR bildirishnomasi chiqadi (v2.9).
+   *  Web Push WebView'da ishlamaydi — Android xizmati polling zaxira yo'li (JS bridge
+   *  Android50.pushNotify WS tirik bo'lsa DARHOL ko'rsatadi; bu — WS o'lsa ham ishlaydi). */
+  void pollUnread() {
+    String t = token;
+    if (t == null || MainActivity.visible || !online()) return;
+    HttpURLConnection c = null;
+    try {
+      c = (HttpURLConnection) new URL(API_BASE + "/notify/unread").openConnection();
+      c.setConnectTimeout(9000);
+      c.setReadTimeout(9000);
+      c.setRequestProperty("Authorization", "Bearer " + t);
+      int code = c.getResponseCode();
+      if (code != 200) return;
+      InputStream in = c.getInputStream();
+      StringBuilder sb = new StringBuilder();
+      byte[] buf = new byte[4096];
+      int n;
+      while ((n = in.read(buf)) > 0) sb.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+      try { in.close(); } catch (Exception ignored) { }
+      JSONObject o = new JSONObject(sb.toString());
+      int cnt = o.optInt("n", 0);
+      if (cnt <= 0) { lastMsg = null; return; }
+      String chatId = String.valueOf(o.optLong("chat_id", 0));
+      String b = o.optString("b", "");
+      String key = chatId + "|" + (b.length() > 40 ? b.substring(0, 40) : b);
+      if (key.equals(lastMsg)) return; // allaqachon ko'rsatilgan — bezovta qilmaymiz
+      lastMsg = key;
+      G50Notify.show(this, o.optString("t", "50 Gram"), b, chatId);
     } catch (Exception ignored) {
     } finally {
       if (c != null) try { c.disconnect(); } catch (Exception ignored) { }

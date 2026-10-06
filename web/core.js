@@ -144,6 +144,24 @@ async function initPush() {
     await pushSubscribeNow()
   } catch {}
 }
+// v78: birinchi kirishda push'ni O'ZI yoqadi (bir marta so'raydi — rad etilsa boshqa so'ralmaydi)
+async function g50AutoPush() {
+  try {
+    if (window.Android50) return // APK: WebView'da PushManager yo'q — fon xizmati ishlaydi
+    if (S.prefs.push === 0) return // foydalanuvchi ataylab o'chirgan
+    if (!(await pushCapable())) return
+    if (Notification.permission === 'denied') return
+    const asked = localStorage.getItem('g50_pushasked') === '1'
+    if (Notification.permission === 'default') {
+      if (asked) return
+      localStorage.setItem('g50_pushasked', '1')
+      const p = await Notification.requestPermission().catch(() => 'default')
+      if (p !== 'granted') return
+    }
+    if (localStorage.getItem('g50_push') !== '1') localStorage.setItem('g50_push', '1')
+    await pushSubscribeNow().catch(() => {})
+  } catch {}
+}
 function fmtSize(b) { return b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(0) + ' KB' : (b / 1048576).toFixed(1) + ' MB' }
 function lastSeen(u) {
   if (!u) return ''
@@ -933,6 +951,11 @@ async function startApp() {
   post('/ping').catch(() => {})
   // APK: token'ni native tomonga beramiz — fon xizmati qo'ng'iroqlarni polling bilan oladi (v2.5)
   try { window.Android50 && window.Android50.setToken && window.Android50.setToken(S.token) } catch {}
+  // v78 PUSH AVTO-YOQISH: avval push FAQAT sozlamalardan qo'lda yoqilardi — hech kim
+  // yoqmasdi, ilova fonda turganda xabar/qo'ng'iroqdan HECH NARSA ko'rinmasdi. Endi birinchi
+  // kirishda BIR MARTA muloyim so'raladi (Telegram-uslubi) — rad etilsa boshqa so'ralmaydi.
+  // APK'da PushManager bo'lmaydi (WebView) — u yerda fon xizmati polling bilan ishlaydi.
+  try { g50AutoPush() } catch {}
   // Avtomatik ruxsat: birinchi bosishda kamera/mikrofonni bir marta so'raymiz —
   // shundan keyin qo'ng'iroqlar va ovozli xabarlar oynasiz ishlaydi (rtc.js)
   try { window.__50warmup && window.__50warmup() } catch {}
@@ -996,7 +1019,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v77'
+window.__50BUILD = 'v78'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
@@ -1053,9 +1076,31 @@ async function handleHash() {
   } catch (e) { toast('⚠️ ' + e.message) }
 }
 function notifyLocal(title, body, chatId) {
-  if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-    try { const n = new Notification(title, { body: S.prefs.preview ? body : 'Yangi xabar', icon: 'icon-192.png', tag: 'c' + chatId }); n.onclick = () => { window.focus(); openChat(chatId); n.close() } } catch {}
-  }
+  // v78: FONDA KO'RINADIGAN BILDIRISHNOMA — 3 qatlamli zanjir:
+  // 1) APK (Android50): WebView'da web Notification ISHLAMAYDI (Illegal constructor) —
+  //    avvalgi kod shu yerda jim o'lgurdi → fonda xabardan HECH NARSA ko'rinar edi.
+  //    Endi native bildirishnoma (tozamonaviy kanal, tap → chat ochiladi).
+  // 2) Chrome/PWA: ServiceWorker showNotification (Android'da new Notification() taqiqlangan).
+  // 3) Desktop brauzer: klassik new Notification() zaxira.
+  if (!document.hidden) return
+  const b = S.prefs.preview === false ? 'Yangi xabar' : (body || 'Yangi xabar')
+  try {
+    if (window.Android50 && typeof window.Android50.pushNotify === 'function') {
+      window.Android50.pushNotify(String(title || '50 Gram'), b, String(chatId || ''))
+      return
+    }
+  } catch {}
+  try {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then((reg) => reg.showNotification(String(title || '50 Gram'), {
+        body: b, icon: 'icon-192.png', badge: 'icon-192.png', tag: 'g50loc' + (chatId || 0),
+        renotify: true, silent: !S.prefs.sounds, vibrate: S.prefs.sounds ? [80, 40, 80] : undefined,
+        data: { chat_id: chatId || 0 },
+      })).catch(() => {})
+      return
+    }
+  } catch {}
+  try { const n = new Notification(title, { body: b, icon: 'icon-192.png', tag: 'c' + chatId }); n.onclick = () => { window.focus(); openChat(chatId); n.close() } } catch {}
 }
 let audioCtx = null
 function beep(freq = 880, dur = 0.12, vol = 0.05) {

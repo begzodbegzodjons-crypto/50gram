@@ -227,7 +227,12 @@ function markRead(id) {
   c.last_read = last; c.unread = 0
   scheduleChats()
   post(`/chats/${id}/read`, { last_id: last }).catch(() => {})
+  // v78: chat o'qilganda shu chatning fon bildirishnomasi ham yopiladi (APK)
+  try { window.Android50 && window.Android50.clearNotify && window.Android50.clearNotify(String(id)) } catch {}
 }
+
+// v78: APK xabar-bildirishnomasi tap → shu chat ochiladi (MainActivity 'chat' intenti)
+window.__50openchat = (id) => { try { openChat(+id) } catch {} }
 
 // ---------------- Xabarlarni chizish ----------------
 // OPTIMIZATSIYA: to'liq innerHTML o'rniga faqat o'zgargan qatorlar DOM'da almashtiriladi

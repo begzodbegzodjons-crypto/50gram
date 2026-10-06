@@ -81,6 +81,13 @@ MY_IG = ""
 # IG serveri Cloudflare IP'larini bloklasa — foydalanuvchi brauzeridan olingan 'sessionid'
 # cookie qiymatini secret qilib qo'shish kerak: npx wrangler secret put MY_IG_COOKIE
 
+# WEB PUSH (VAPID, RFC 8292) — FON REJIMI BILDIRISHNOMALARINING KALITI (v78).
+# Bu kalitlar bo'lmasa /push/vapid bo'sh qaytaradi va klient UMUMAN obuna bo'lolmasdi —
+# «ilova fonda turganda xabar/qo'ng'iroqdan HECH NARSA ko'rinmasdi» ning asosiy ildizi.
+# public = base64url(65-baytli P-256 nuqta), private = base64url(JSON {kty,crv,d,x,y})
+VAPID_PUBLIC_KEY = "BES66PXc-cZGCBHS7nXQTwlsINic6XjL8skPCtrt7644syBiZycR2S4_xLON1SdmTHjDiex5895Pf-PPMRAy__g"
+VAPID_PRIVATE_KEY = "eyJrdHkiOiJFQyIsImNydiI6IlAtMjU2IiwiZCI6Ijk5NnZBeGJBQTlrQ2JibjFWOVZJTnNQa2xPRDd2ZGxDTW9LU2toTzhIM28iLCJ4IjoiUkxybzlkejV4a1lJRWRMdWRkQlBDV3dnMkp6cGVNdnl5UThLMnUzdnJqZyIsInkiOiJzeUJpWnljUjJTNF94TE9OMVNkbVRIakRpZXg1ODk1UGYtUFBNUkF5X19nIn0"
+
 # Secretlar (terminalda bir marta):
 #   npx wrangler secret put DATABASE_URL     # TiDB Cloud -> Connect -> Serverless Driver URL
 #   npx wrangler secret put JWT_SECRET       # kamida 32 ta tasodifiy belgi

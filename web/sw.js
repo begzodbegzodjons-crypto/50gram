@@ -1,5 +1,5 @@
 // 50 Gram service worker: ilova qobig'ini keshlaydi (oflayn ochiladi) + Telegram-uslubidagi Web Push.
-const V = '50gram-v77'
+const V = '50gram-v78'
 const SHELL = ['./', 'index.html', 'style.css', 'config.js', 'core.js', 'p2p.js', 'storage.js', 'chat.js', 'manage.js', 'social.js', 'rtc.js', 'logo.png', 'icon-192.png', 'icon-512.png', 'maskable-192.png', 'maskable-512.png', 'apple-touch-icon.png', 'favicon.png', 'manifest.json',
   // Task 29: Manrope shrifti + animatsiyali stiker paketlari + sovg'alar
   'fonts/manrope-latin.woff2', 'fonts/manrope-latin-ext.woff2',
@@ -79,14 +79,16 @@ self.addEventListener('push', (e) => {
     if (prefs.push === false) return // foydalanuvchi push'ni o'chirgan
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     const vis = all.filter((c) => c.visibilityState === 'visible')
-    if (vis.length && !d.call) {
-      // Ilova ekranda: tizim bildirishnomasi shart emas — ilovaga topshiramiz (jonli WS allaqachon ko'rsatadi)
-      for (const c of vis) { try { c.postMessage({ type: 'pushmsg', data: d }) } catch {} }
-      return
-    }
-    try {
-      if (d.call) {
-        // QO'NG'IROQ: Telegram-uslubidagi qo'ng'iroq bildirishnomasi — Javob berish / Rad etish
+    if (d.call) {
+      // QO'NG'IROQ (v78): sahifa EKRANDA bo'lsa — tizim bildirishnomasi CHIQMAYDI
+      // (in-app rington bilan ikki ovoz bo'lardi), sahifaga 'pushcall' yuboriladi —
+      // ilova o'zi jiringlaydi va qo'ng'iroq oynasini chiqaradi.
+      if (vis.length) {
+        for (const c of vis) { try { c.postMessage({ type: 'pushcall', data: d }) } catch {} }
+        return
+      }
+      // QO'NG'IROQ: Telegram-uslubidagi qo'ng'iroq bildirishnomasi — Javob berish / Rad etish
+      try {
         await self.registration.showNotification(d.t, {
           body: d.b || '',
           icon: 'icon-192.png',
@@ -95,12 +97,19 @@ self.addEventListener('push', (e) => {
           renotify: true,
           requireInteraction: true,
           silent: false,
-          vibrate: [400, 120, 400, 120, 400],
+          vibrate: [400, 120, 400, 120, 400, 120, 400, 800, 400, 120, 400],
           data: { call: 1, call_id: String(d.tag || '').replace('g50call', '') },
           actions: [{ action: 'answer', title: '📞 Javob berish' }, { action: 'decline', title: 'Rad etish' }],
         })
-        return
-      }
+      } catch {}
+      return
+    }
+    if (vis.length) {
+      // Ilova ekranda: tizim bildirishnomasi shart emas — ilovaga topshiramiz (jonli WS allaqachon ko'rsatadi)
+      for (const c of vis) { try { c.postMessage({ type: 'pushmsg', data: d }) } catch {} }
+      return
+    }
+    try {
       await self.registration.showNotification(d.t, {
         body: prefs.preview === false ? 'Yangi xabar' : (d.b || ''),
         icon: 'icon-192.png',
