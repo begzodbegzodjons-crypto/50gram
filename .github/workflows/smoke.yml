@@ -86,8 +86,13 @@ jobs:
           cmp -s /tmp/c0 /tmp/d0 && cmp -s /tmp/c1 /tmp/d1 || { echo "FAIL media roundtrip (baytlar mos emadi)"; exit 1; }
           echo "fayl roundtrip: OK ($FID)"
           # ============ ICE E2E — v79: TURN javobda borligi ============
-          curl -s -A "$UA" -H "$AUTH" "$BASE/api/ice" | grep -q 'turn:' || { echo "FAIL ice (TURN yo'q)"; exit 1; }
-          echo "ice (TURN bor): OK"
+          # v79: bepul openrelay har javobda BOR. CLOUDFLARE TURN (TURN_KEY_ID/TURN_KEY_TOKEN
+          # secretlari) qo'shilgach — javobda turn.cloudflare.com ham chiqadi.
+          # QAT'IY: CF TURN yo'q bo'lsa FAIL — «TURN yoqildi» da'vosi faqat isbot bilan.
+          ICE=$(curl -s -A "$UA" -H "$AUTH" "$BASE/api/ice")
+          echo "$ICE" | grep -q 'turn:' || { echo "FAIL ice (TURN umuman yo'q): $ICE"; exit 1; }
+          echo "$ICE" | grep -q 'turn.cloudflare.com' || { echo "FAIL CLOUDFLARE TURN javobda YO'Q (faqat openrelay) — TURN_KEY_ID/TURN_KEY_TOKEN secretlari qo'shilmagan yoki noto'g'ri (nom xato yoki Deploy bosilmagan). Worker jurnalida 'TURN creds:' xatosini tekshir"; echo "ICE javob: $ICE"; exit 1; }
+          echo "ice: TURN bor + CLOUDFLARE TURN FAOL: OK"
           # ============ QO'NG'IROQ SIGNALING E2E (LOCK — qayta buzilmasin) ============
           # Ikki akkaunt bilan to'liq signalizatsiya zanjiri: yaratish → yetkazish (pending)
           # → offer (navbat orqali — WS o'lsa ham KAFOLAT) → statuslar. Qo'ng'iroq qatlami
