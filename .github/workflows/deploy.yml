@@ -16,18 +16,36 @@ jobs:
       - name: O'rnatish
         working-directory: worker
         run: npm install
-      # v79: R2 bucket mavjudligini kafolatlash (birinchi deploy'da yaratiladi, keyin
-      # «allaqachon bor» bo'lib o'tadi). Token R2 ruxsatiga ega bo'lmasa — deploy BARIBIR
-      # uriniladi: worker kodi BUCKET binding bo'lmasa eski D1-yo'liga o'zi qaytadi.
-      - name: R2 bucket kafolati (50gram-files)
+      # v79 R2 KAFOLATI: bucket mavjud bo'lsa (yoki yaratilsa) — R2 BILAN deploy;
+      # bo'lmasa (masalan, hisobda R2 hali Dashboard'da yoqilmagan) — o'zi D1-rejimda
+      # deploy qiladi (worker kodi BUCKET yo'qligini sezib eski yo'lda ishlaydi).
+      # R2 yoqilgach keyingi har qanday push AVTOMATIK R2'ga o'tadi.
+      - name: R2 bucket holati (50gram-files)
         working-directory: worker
-        run: npx wrangler r2 bucket create 50gram-files || echo "bucket allaqachon bor yoki ruxsat yo'q"
+        id: r2
+        run: |
+          if npx wrangler r2 bucket create 50gram-files >/dev/null 2>&1; then
+            echo "r2=ha" >> "$GITHUB_OUTPUT"; echo "R2 bucket yaratildi"
+          elif npx wrangler r2 bucket list 2>/dev/null | grep -q "50gram-files"; then
+            echo "r2=ha" >> "$GITHUB_OUTPUT"; echo "R2 bucket allaqachon bor"
+          else
+            echo "r2=yo'q" >> "$GITHUB_OUTPUT"; echo "R2 hali yoqilmagan (Dashboard → R2 → Enable) — D1-rejim"
+          fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      - name: Cloudflare'ga joylash
+      - name: Cloudflare'ga joylash (R2 holatiga qarab)
         working-directory: worker
-        run: npx wrangler deploy
+        run: |
+          if [ "${{ steps.r2.outputs.r2 }}" = "ha" ]; then
+            cp wrangler.toml wrangler.r2.toml
+            printf '\n[[r2_buckets]]\nbinding = "BUCKET"\nbucket_name = "50gram-files"\n' >> wrangler.r2.toml
+            npx wrangler deploy --config wrangler.r2.toml
+            echo "DEPLOY REJIMI: R2 (fayllar R2'ga yoziladi)"
+          else
+            npx wrangler deploy
+            echo "DEPLOY REJIMI: D1 (R2 yoqilmaguncha eski yo'l)"
+          fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

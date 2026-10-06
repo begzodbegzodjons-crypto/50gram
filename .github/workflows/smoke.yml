@@ -67,21 +67,24 @@ jobs:
           curl -s -A "$UA" -H "$AUTH" "$BASE/api/wallet" | grep -q '"coins"' || { echo "FAIL wallet"; exit 1; }
           curl -s -A "$UA" -H "$AUTH" "$BASE/api/users/$MYUID" | grep -q '"id"' || { echo "FAIL user"; exit 1; }
           echo "messages/chats/me/stories/lives/search/discover/wallet/user: OK"
-          # ============ FAYL (R2) E2E — v79: yuklash→R2→o'qish roundtrip ============
-          # mediaPut javobidagi "r2":true baytlar R2'ga YOZILGANINI isbotlaydi (D1'da faqat
-          # bo'sh marker qoladi). So'ng binary roundtrip byte-by-byte solishtiriladi.
+          # ============ FAYL E2E — v79: yuklash→o'qish roundtrip ============
+          # mediaPut javobidagi "r2":true baytlar R2'ga yozilganini ko'rsatadi; R2 hali
+          # yoqilmagan bo'lsa r2:false bo'ladi va fayl D1'ga yoziladi — IKKALASI HAM ISHLAYDI.
+          # QAT'IY talab: roundtrip (yozilgan baytlar = o'qilgan baytlar).
           python3 -c "import os;open('/tmp/c0','wb').write(os.urandom(700000));open('/tmp/c1','wb').write(os.urandom(537))"
           F=$(curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/media" -H 'content-type: application/json' -d '{"mime":"application/octet-stream","name":"smoke.bin","size":700537,"chunks":2}')
           FID=$(echo "$F" | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])")
           [ -n "$FID" ] && [ "$FID" != "None" ] || { echo "FAIL media create: $F"; exit 1; }
-          curl -s -A "$UA" -H "$AUTH" -X PUT "$BASE/api/media/$FID/0" -H 'content-type: application/octet-stream' --data-binary @/tmp/c0 | grep -q '"r2":true' || { echo "FAIL media put r2:true (R2 binding ishlamayapti)"; exit 1; }
-          curl -s -A "$UA" -H "$AUTH" -X PUT "$BASE/api/media/$FID/1" -H 'content-type: application/octet-stream' --data-binary @/tmp/c1 | grep -q '"r2":true' || { echo "FAIL media put2 r2:true"; exit 1; }
+          R0=$(curl -s -A "$UA" -H "$AUTH" -X PUT "$BASE/api/media/$FID/0" -H 'content-type: application/octet-stream' --data-binary @/tmp/c0)
+          echo "$R0" | grep -q '"ok":true' || { echo "FAIL media put0: $R0"; exit 1; }
+          echo "$R0" | grep -q '"r2":true' && echo "R2 ASOSIY YO'L: faol" || echo "R2 hali yoqilmagan — fayl D1-rejimda (Dashboard → R2 → Enable)"
+          curl -s -A "$UA" -H "$AUTH" -X PUT "$BASE/api/media/$FID/1" -H 'content-type: application/octet-stream' --data-binary @/tmp/c1 | grep -q '"ok":true' || { echo "FAIL media put1"; exit 1; }
           curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/media/$FID/done" -H 'content-type: application/json' -d '{"sha":"abababababababababababababababababababababababababababababababab"}' | grep -q '"ok":true' || { echo "FAIL media done"; exit 1; }
           curl -s -A "$UA" -H "$AUTH" "$BASE/api/media/$FID" | grep -q '"complete":1' || { echo "FAIL media meta"; exit 1; }
           curl -s -A "$UA" -H "$AUTH" -H 'accept: application/octet-stream' "$BASE/api/media/$FID/0" -o /tmp/d0
           curl -s -A "$UA" -H "$AUTH" -H 'accept: application/octet-stream' "$BASE/api/media/$FID/1" -o /tmp/d1
           cmp -s /tmp/c0 /tmp/d0 && cmp -s /tmp/c1 /tmp/d1 || { echo "FAIL media roundtrip (baytlar mos emadi)"; exit 1; }
-          echo "fayl (R2) roundtrip: OK ($FID)"
+          echo "fayl roundtrip: OK ($FID)"
           # ============ ICE E2E — v79: TURN javobda borligi ============
           curl -s -A "$UA" -H "$AUTH" "$BASE/api/ice" | grep -q 'turn:' || { echo "FAIL ice (TURN yo'q)"; exit 1; }
           echo "ice (TURN bor): OK"

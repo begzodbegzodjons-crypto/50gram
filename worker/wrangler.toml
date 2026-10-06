@@ -39,13 +39,13 @@ crons = ["*/30 * * * *"]
 binding = "AI"
 
 # R2 FAYL OMBORI (v79) — fayllarning ASOSIY manbasi (P2P esa ZAXIRA qoladi).
-# Fayllar shu bucket'ga shifrlangan holda yoziladi (klient AES-GCM bilan shifrlaydi —
-# server kalitni BILMAYDI). Bucket CI'da avtomatik yaratiladi (deploy.yml 1-qadam):
-#   npx wrangler r2 bucket create 50gram-files
+# ⚠️ SHART: Cloudflare Dashboard → R2 → «Enable R2» (bir martalik bepul amal — API orqali
+# qilib bo'lmaydi, shu sababli binding asosiy config'da TURMAYDI).
+# MEXANIZM: deploy.yml bucket mavjudligini tekshiradi — bo'lsa wrangler.r2.toml'ni
+# (shu fayl + [[r2_buckets]]) generatsiya qilib R2 BILAN deploy qiladi; bo'lmasa
+# shu fayl bilan deploy qiladi (kod BUCKET yo'qligini o'zi sezib D1-rejimda ishlaydi).
+# R2 yoqilgandan keyin KEYINGI push avtomatik R2'ga o'tadi — boshqa hech narsa tahrirlanmaydi.
 # Bepul limit: 10 GB xotira (Class A/B operatsiyalar ham bepul planda yetarli).
-[[r2_buckets]]
-binding = "BUCKET"
-bucket_name = "50gram-files"
 
 [observability]
 enabled = true
