@@ -120,7 +120,7 @@ try {
     return { imgs: imgs.length, loaded: imgs.filter((i) => i.complete && i.naturalWidth > 0).length, prog, msgCount: document.querySelectorAll('#msgs .m').length }
   })
   log('A holati:', JSON.stringify(aState), '| PUT chunklar:', mediaPuts, '(r2:' + r2Puts + ')')
-  if (!aState.imgs.length) throw new Error('A da rasm elementi UMUMAN paydo bo\'lmadi')
+  if (!aState.imgs) throw new Error('A da rasm elementi UMUMAN paydo bo\'lmadi')
   if (aState.prog > 0) throw new Error('A da yuklash PROGRESSI hali turgan (upload qotgan)')
   if (!aState.loaded) throw new Error('A da rasm yuklanmadi (naturalWidth=0)')
 
