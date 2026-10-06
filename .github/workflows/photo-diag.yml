@@ -1,0 +1,35 @@
+name: Foto E2E tashxisi (vaqtinchalik)
+on:
+  workflow_dispatch:
+concurrency:
+  group: testlar-zanjiri
+  cancel-in-progress: false
+jobs:
+  foto:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Playwright o'rnatish (chromium)
+        run: |
+          cd scripts
+          npm init -y >/dev/null 2>&1 || true
+          npm i playwright@1.63.0 --no-audit --no-fund >/dev/null
+          npx playwright install chromium
+          npx playwright install-deps chromium >/dev/null || sudo npx playwright install-deps chromium
+      - name: Foto yuborish E2E (jonli saytga qarshi)
+        env:
+          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+        run: node scripts/photo_diag.mjs
+      - name: Skrinshotlar (fail holati)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: foto-diag-skrinshotlar
+          path: |
+            /tmp/foto-fail-A.png
+            /tmp/foto-fail-B.png
+          if-no-files-found: ignore
