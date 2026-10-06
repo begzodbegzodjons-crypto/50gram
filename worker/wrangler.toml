@@ -38,6 +38,15 @@ crons = ["*/30 * * * *"]
 [ai]
 binding = "AI"
 
+# R2 FAYL OMBORI (v79) — fayllarning ASOSIY manbasi (P2P esa ZAXIRA qoladi).
+# Fayllar shu bucket'ga shifrlangan holda yoziladi (klient AES-GCM bilan shifrlaydi —
+# server kalitni BILMAYDI). Bucket CI'da avtomatik yaratiladi (deploy.yml 1-qadam):
+#   npx wrangler r2 bucket create 50gram-files
+# Bepul limit: 10 GB xotira (Class A/B operatsiyalar ham bepul planda yetarli).
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "50gram-files"
+
 [observability]
 enabled = true
 

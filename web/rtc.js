@@ -41,10 +41,17 @@
 'use strict'
 // ─────────────────────────────── ICE / MEDIA ───────────────────────────────
 let iceCache = null, iceAt = 0
+// OFFLINE ZAXIRA (v79): server /ice javob bermasa ham TURN bo'lsin — STUN yolg'iz
+// NAT ostidagi ikki xil tarmoqni (Wi-Fi ↔ mobil) ko'pincha bog'lay olmaydi
+const ICE_FALLBACK = [
+  { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] },
+  { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:8080'], username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: ['turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
+]
 async function iceServers(force) {
   // KESH 10 daqiqa: TURN cred muddati tugasa 'failed'da force bilan DARHOL yangilanadi
   if (!force && iceCache && Date.now() - iceAt < 10 * 60000) return iceCache
-  try { iceCache = (await api('/ice')).iceServers; iceAt = Date.now() } catch { iceCache = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }] }
+  try { iceCache = (await api('/ice')).iceServers; iceAt = Date.now() } catch { iceCache = ICE_FALLBACK }
   return iceCache
 }
 const sig = (to, data) => post('/signal', { to, data }).catch(() => {})

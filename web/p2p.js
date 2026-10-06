@@ -14,7 +14,7 @@ const P2P = (() => {
 
   async function ice() {
     if (iceCache && Date.now() - iceAt < 3600e3) return iceCache
-    try { iceCache = (await api('/ice')).iceServers; iceAt = Date.now() } catch { iceCache = [{ urls: 'stun:stun.l.google.com:19302' }] }
+    try { iceCache = (await api('/ice')).iceServers; iceAt = Date.now() } catch { iceCache = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' }] }
     return iceCache
   }
   async function sha256Hex(blob) {

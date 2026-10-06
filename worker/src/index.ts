@@ -45,6 +45,10 @@ export interface Env {
   __db?: Db
   // Statik assetlar binlash (wrangler.toml [assets] binding) — APK yuklab olish uchun
   ASSETS?: { fetch: (req: Request) => Promise<Response> }
+  // R2 FAYL OMBORI (v79): fayllarning ASOSIY manbasi — D1 bazada faqat bo'sh "marker"
+  // qoladi (hisob-kitob uchun), baytlar R2'da. Binding yo'q bo'lsa kod avtomatik eski
+  // D1-yo'liga qaytadi (deploy muhitida bucket bo'lmasa ham ilova ishlashda davom etadi).
+  BUCKET?: { get: (k: string) => Promise<{ bodyUsed: boolean; arrayBuffer: () => Promise<ArrayBuffer>; writeHttpMetadata: (h: Headers) => void } | null>; put: (k: string, v: ArrayBuffer | Uint8Array | string) => Promise<unknown>; delete: (k: string) => Promise<unknown>; list?: (o: any) => Promise<{ objects: { key: string }[] }> }
 }
 
 type C = {
@@ -231,7 +235,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v78"
+const BUILD_V = "v79"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -1343,17 +1347,29 @@ async function mediaPut(c: C) {
   if (!(idx >= 0 && idx < m.chunks)) fail("Bo‘lak raqami noto‘g‘ri")
   // Yangi mijozlar binary (33% kam trafik, tezroq), eski mijozlar base64 text — ikkalasi ham qo‘llanadi
   let data: string
+  let bytes: Uint8Array | null = null
   const ct = c.req.headers.get("content-type") || ""
   if (ct.includes("octet-stream")) {
     const ab = await c.req.arrayBuffer()
     if (ab.byteLength > 1_200_000) fail("Bo‘lak juda katta")
-    data = abToB64(new Uint8Array(ab))
+    bytes = new Uint8Array(ab)
+    data = abToB64(bytes)
   } else {
     data = await c.req.text()
     if (data.length > 1_100_000 || !/^[A-Za-z0-9+/=]*$/.test(data.slice(0, 200))) fail("Bo‘lak noto‘g‘ri")
   }
-  await c.db.run("REPLACE INTO media_chunks(media_id,idx,data) VALUES(?,?,?)", [c.p.id, idx, data])
-  return json({ ok: true })
+  // v79 R2 ASOSIY YO'L: baytlar R2'ga (kalit m/<id>/<idx>), D1'ga faqat bo'sh MARKER —
+  // bazaning hajmi fayllar bilan o'smaydi (TiDB posboni endi bo'lmaydi). R2 yozuvi
+  // muvaffaqiyatsiz bo'lsa yoki binding bo'lmasa — eski D1-yo'li ishlaydi (zaxira).
+  let r2ok = false
+  if (c.env.BUCKET && bytes) {
+    try {
+      await c.env.BUCKET.put(`m/${c.p.id}/${idx}`, bytes)
+      r2ok = true
+    } catch (e) { jurnalYoz(c.env, "mediaPut", c.uid, "r2", String(e).slice(0, 200)) }
+  }
+  await c.db.run("REPLACE INTO media_chunks(media_id,idx,data) VALUES(?,?,?)", [c.p.id, idx, r2ok ? "" : data])
+  return json({ ok: true, r2: r2ok })
 }
 async function mediaDone(c: C) {
   const m = await c.db.one("SELECT owner_id,chunks FROM media WHERE id=?", [c.p.id])
@@ -1370,12 +1386,25 @@ async function mediaMeta(c: C) {
   return json(m)
 }
 async function mediaChunk(c: C) {
+  const cc = { "cache-control": "private, max-age=31536000, immutable", ...CORS }
+  const wantBin = (c.req.headers.get("accept") || "").includes("octet-stream")
+  // v79 R2 ASOSIY YO'L: yangi bo'laklar R2'da (D1'da marker ''). Eski fayllar D1'da
+  // base64 — ikkalasi ham o'qiladi (klient Accept sarlavhasi bo'yicha binary/base64).
+  if (c.env.BUCKET) {
+    try {
+      const obj = await c.env.BUCKET.get(`m/${c.p.id}/${+c.p.idx}`)
+      if (obj) {
+        const ab = await obj.arrayBuffer()
+        if (wantBin) return new Response(ab, { headers: { "content-type": "application/octet-stream", ...cc } })
+        return new Response(abToB64(new Uint8Array(ab)), { headers: { "content-type": "text/plain", ...cc } })
+      }
+    } catch (e) { jurnalYoz(c.env, "mediaChunk", c.uid, "r2", String(e).slice(0, 200)) }
+  }
   const r = await c.db.one("SELECT data FROM media_chunks WHERE media_id=? AND idx=?", [c.p.id, +c.p.idx])
   if (!r) fail("Topilmadi", 404)
-  const cc = { "cache-control": "private, max-age=31536000, immutable", ...CORS }
-  if ((c.req.headers.get("accept") || "").includes("octet-stream")) {
-    return new Response(b64ToU8(String(r.data)), { headers: { "content-type": "application/octet-stream", ...cc } })
-  }
+  // Bo'sh marker = R2'da bo'lishi kerak edi lekin topilmadi (bucket tozalangan) — yo'q
+  if (!String(r.data || "").length) fail("Bo‘lak R2 omborida yo‘q", 404)
+  if (wantBin) return new Response(b64ToU8(String(r.data)), { headers: { "content-type": "application/octet-stream", ...cc } })
   return new Response(r.data, { headers: { "content-type": "text/plain", ...cc } })
 }
 
@@ -2671,7 +2700,26 @@ async function deleteComment(c: C) {
 
 // ------------------------- Qo'ng'iroqlar (WebRTC signalizatsiya) -------------------------
 async function ice(c: C) {
-  const servers: any[] = [{ urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }]
+  // v79 TURN: STUN faqat "ko'cha manzilini" beradi — NAT ostidagi ikki telefon (biri Wi-Fi,
+  // biri mobil) ko'pincha faqat TURN relay orqali bog'lanadi. Shuning uchun ENDI doimiy
+  // bepul TURN (openrelay — Metered'ning ochiq xizmati, ro'yxatdan o'tishsiz) har javobda
+  // BOR. Cloudflare TURN kalitlari (TURN_KEY_ID/TURN_KEY_TOKEN secretlari) qo'shilsa —
+  // ularning creds'lari ham ustiga qo'shiladi (sifatliroq relay).
+  const srv = {
+    urls: [
+      "turn:openrelay.metered.ca:80",
+      "turn:openrelay.metered.ca:8080",
+      "turn:openrelay.metered.ca:443",
+      "turn:openrelay.metered.ca:443?transport=tcp",
+    ],
+    username: "openrelayproject",
+    credential: "openrelayproject",
+  }
+  const servers: any[] = [
+    { urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] },
+    { urls: srv.urls.slice(0, 2), username: srv.username, credential: srv.credential },
+    { urls: srv.urls.slice(2, 4), username: srv.username, credential: srv.credential },
+  ]
   if (c.env.TURN_KEY_ID && c.env.TURN_KEY_TOKEN) {
     try {
       // TIMEOUT 3.5s: rtc.live.cloudflare.com javob bermasa /ice ABADIY osilib qolmasin —
@@ -3436,6 +3484,22 @@ async function cleanup(env: Env) {
   // MIGRATSIYA-HIMOYA: eskirgan qisqa-TTL yozishmalar (eski versiya qoldiqlari) tasodifan tozalanib qolmasin.
   await db.run("UPDATE messages SET expires_at=? WHERE expires_at>0 AND expires_at<?", [t + 100 * 365 * DAY, t + 30 * DAY])
   await db.run("UPDATE media SET expires_at=?, keep=1, next_check=0 WHERE expires_at>0 AND expires_at<? AND dropped=0 AND gone=0 AND (keep=1 OR chat_id>0)", [t + 100 * 365 * DAY, t + 30 * DAY])
+  // v79: R2'dagi o'lik bo'laklarni ham o'chirish (D1'da o'chirilishidan OLDIN — aks holda
+  // id yo'qoladi va R2 obyektlari yetim qolardi). Har yugurishda 100 faylgacha; qolganlari
+  // keyingi yugurishda (shart o'z-o'zidan qoladi). Fayl ≤80 bo'lak — parallel emas, ketma-ket.
+  try {
+    if (env.BUCKET) {
+      const dead = await db.q("SELECT id, chunks FROM media WHERE ((expires_at>0 AND expires_at<?) OR dropped=1) AND gone=0 LIMIT 100", [t])
+      let n = 0
+      for (const drow of dead) {
+        const keys: string[] = []
+        for (let i = 0; i < Math.min(80, +drow.chunks || 1); i++) keys.push(`m/${drow.id}/${i}`)
+        await Promise.all(keys.map((k) => env.BUCKET!.delete(k).catch(() => {})))
+        n += keys.length
+      }
+      if (n) console.log("R2 tozalash:", n, "bo'lak o'chirildi")
+    }
+  } catch (e) { console.log("R2 tozalash xatosi", String(e)) }
   await db.run("DELETE FROM media_chunks WHERE media_id IN (SELECT id FROM media WHERE ((expires_at>0 AND expires_at<?) OR dropped=1) AND gone=0)", [t])
   await db.run("DELETE FROM media WHERE expires_at>0 AND expires_at<? AND keep=0", [t])
   await db.run("DELETE FROM media WHERE dropped=1 AND created_at<? AND id NOT IN (SELECT media_id FROM peer_have)", [t - 30 * DAY])
@@ -3454,13 +3518,14 @@ async function cleanup(env: Env) {
   // Xato-jurnali gigiyenasi: 14 kundan eski server-xatolar o'chadi (jurnal abadiy o'smaydi)
   await db.run("DELETE FROM err_jurnal WHERE ts<?", [t - 14 * DAY])
   await db.run("UPDATE lives SET ended_at=? WHERE ended_at=0 AND started_at<?", [t, t - 12 * 3600000])
-  // TiDB XOTIRA POSBONI (Task 39): server — faqat ko'prik. Asosiy xotira — foydalanuvchilar
+  // TiDB/R2 XOTIRA POSBONI (Task 39 + v79): server — faqat ko'prik. Asosiy xotira — foydalanuvchilar
   // qurilmalari (planReplicas kamida 15 nusxa yig'adi, P2P o'rgimchak to'ri yetkazadi).
-  // Serverdagi shifrlangan media keshi chegaradan oshsa — eng eski va kamida 2 ta qurilmada
-  // ishonchli nusxasi bor fayllar serverdan bo'shatiladi (dropped=1 → chunklar sweep'da o'chadi).
-  // Keyin ham fayl qurilmalar orasidan topiladi; server joyi abadiy o'smaydi.
+  // v79: baytlar R2'da (D1'da faqat markarlar) — chegara R2 bepul limitiga (10 GB) moslab
+  // 8 GB bo'ldi. Chegaradan oshsa — eng eski va kamida 2 ta qurilmada ishonchli nusxasi
+  // bor fayllar serverdan bo'shatiladi (dropped=1 → sweep R2+D1'dan o'chadi). Keyin ham
+  // fayl qurilmalar orasidan topiladi; server joyi abadiy o'smaydi.
   try {
-    const MEDIA_KEEP_BYTES = 2.5 * 1024 * 1024 * 1024 // ~2.5 GB — TiDB bepul limit xavfsiz zonasida
+    const MEDIA_KEEP_BYTES = env.BUCKET ? 8 * 1024 * 1024 * 1024 : 2.5 * 1024 * 1024 * 1024
     const msz = await db.one("SELECT COALESCE(SUM(size),0) AS n FROM media WHERE dropped=0 AND gone=0 AND keep=1")
     if (Number(msz?.n || 0) > MEDIA_KEEP_BYTES) {
       const cands = await db.q("SELECT id FROM media WHERE dropped=0 AND gone=0 AND keep=1 AND replicas>=2 ORDER BY created_at LIMIT 100")
