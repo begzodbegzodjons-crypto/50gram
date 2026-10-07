@@ -235,7 +235,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v88"
+const BUILD_V = "v89"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -2808,7 +2808,9 @@ async function signalQueue(c: C) {
   // WS uzilgan bo'lsa ham signallar yetib boradi: fetch-and-delete navbat.
   // `since` — klient ko'rgan eng katta sid (qayta yuklab stale signallarni olmaslik uchun).
   const since = Math.max(0, +(c.url.searchParams.get("since") || 0))
-  const rows = await c.db.q("SELECT id, from_uid, body FROM call_signals WHERE to_uid=? AND id>? ORDER BY id ASC LIMIT 60", [c.uid, since])
+  // v89: O'QISHDA YOSH FILTRI — 2 daqiqadan eski signallar qaytarilmaydi (davriy tozalash
+  // (sweeper) kechiksa ham eski hangup/busy yangi qo'ng'iroqni hech qachon o'ldira olmaydi)
+  const rows = await c.db.q("SELECT id, from_uid, body FROM call_signals WHERE to_uid=? AND id>? AND created_at>? ORDER BY id ASC LIMIT 60", [c.uid, since, now() - 2 * 60000])
   if (rows.length) {
     await c.db.run("DELETE FROM call_signals WHERE id IN (" + ph(rows.map((r) => r.id)) + ")", rows.map((r) => r.id))
   }

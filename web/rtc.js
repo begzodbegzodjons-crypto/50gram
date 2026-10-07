@@ -927,7 +927,16 @@ async function handleSignalEv(ev) {
     return
   }
   if (d.call_id && C.id && String(C.id) !== String(d.call_id)) { logSig('DROP call_id', 'k=' + d.k + ' kelgan=' + d.call_id + ' bizniki=' + C.id); return }
-  if (d.call_id && !C.id) C.id = d.call_id // accept/offer kelganda call_id hali yozilmagan bo'lsa — qabul
+  if (d.call_id && !C.id) {
+    // v89 HAL QILUVCHI TUZATISH: yakunlovchi signallar (hangup/busy/call_closed) yangi
+    // qo'ng'iroqning id'sini O'ZLASHTIRMAYDI. AVVALGI XATO: yangi chaqiruv C.id=0 holatda
+    // navbatdagi ESKI hangup'ning call_id'ini o'zlashtirib olardi (C.id = eski call) va
+    // shu zaharli signal o'zini-o'zi 'sameCall' bilan O'LDIRARDI. Isbot: E2E 16:38/16:48 —
+    // yangi chaqiruv 0.8s'da 9 daqiqalik eski hangup'dan o'ldi; foydalanuvchining
+    // 16:02–16:03 'pc=new' o'limlari — xuddi shu ildiz (tez qayta urinishlar zahari).
+    if (d.k === 'hangup' || d.k === 'busy' || d.k === 'call_closed') { logSig('eski-juvon tashlandi', 'k=' + d.k + ' (yangi chaqiruv, id hali yo\u2018q — navbat zahari)'); return }
+    C.id = d.call_id
+  }
   try {
     // ── YAKUNLOVCHI SIGNALLAR — eski-juvon himoyasi (jurnal-isbot 09:56:42) ──
     const sameCall = !d.call_id || !C.id || String(C.id) === String(d.call_id)
