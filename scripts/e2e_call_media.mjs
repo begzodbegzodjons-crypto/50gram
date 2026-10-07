@@ -305,6 +305,9 @@ try {
   }
 
   // JS xatolari — qo'ng'iroq oynasidagi crash'lar (endCall tashxis jurnali ham chop etiladi)
+  // v88: BOSHI ham chop etiladi — A erta o'limi (getMedia/camFail) oxirgi 14 tada yo'qolib qolardi
+  log('A konsol BOSHI:', JSON.stringify(A_.page.__errs.slice(0, 12)))
+  log('B konsol BOSHI:', JSON.stringify(B_.page.__errs.slice(0, 12)))
   log('A konsol oxiri:', JSON.stringify(A_.page.__errs.slice(-14)))
   log('B konsol oxiri:', JSON.stringify(B_.page.__errs.slice(-14)))
   const errA = A_.page.__errs.filter((e) => /^(error|warning|pageerror|HTTP)/.test(e) && !/favicon|sourcemap/i.test(e))
