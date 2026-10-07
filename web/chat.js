@@ -347,9 +347,9 @@ $('msgs').addEventListener('click', async (e) => {
   const m = row && findMsg(row.dataset.mid)
   const g = t.closest('[data-goto]')
   if (g) { const el = qs(`.mrow[data-mid="${g.dataset.goto}"]`, $('msgs')); if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.style.transition = 'background .6s'; el.style.background = 'var(--asos-och)'; setTimeout(() => (el.style.background = ''), 900) } else toast('Xabar qurilmada topilmadi'); return }
-  const v = t.closest('[data-view]'); if (v && v.src) return viewImage(v.src)
+  const v = t.closest('[data-view]'); if (v) return viewTap(v)
   const f = t.closest('[data-file]')
-  if (f && f.dataset.file) { try { toast('⬇️ Yuklanmoqda…'); const u = await mediaUrl(f.dataset.file); const a = document.createElement('a'); a.href = u; a.download = f.dataset.name || 'fayl'; document.body.appendChild(a); a.click(); a.remove() } catch (er) { toast('⚠️ ' + er.message) } return }
+  if (f && f.dataset.file) { try { await openFile(f.dataset.file, f.dataset.name || 'fayl') } catch (er) { toast('⚠️ ' + (er.message || 'Ochilmadi')) } return }
   const rd = t.closest('[data-round]')
   if (rd) { const vd = qs('video', rd); if (vd.paused) { qsa('[data-round] video').forEach((x) => x !== vd && x.pause()); vd.muted = false; vd.play().catch(() => {}) } else vd.pause(); return }
   const vc = t.closest('[data-voice]')
@@ -378,11 +378,47 @@ function playVoice(vc) {
     au.onpause = () => { pb.textContent = '▶' }
   } else au.pause()
 }
-function viewImage(src, isVideo) {
+// v86: MEDIA SAQLASH — Android WebView'da <a download> ko'pincha ISHLAMAYDI (blob URL +
+// download atributi WebView'da kafolatlanmagan — «kelgan faylni saqlab bo'lmayapti»).
+// Universal yo'l: Web Share Level 2 (navigator.share files) — tizim «Saqlash/Ulashish"
+// oynasi (Gallereya/Fayllar/Drive) — APK WebView'da ham ishlaydi. Ishlamasa <a download> zaxira.
+async function saveMedia(u, name) {
+  const b = await (await fetch(u)).blob()
+  const f = new File([b], name, { type: b.type || 'application/octet-stream' })
+  if (navigator.canShare && navigator.canShare({ files: [f] })) {
+    try { await navigator.share({ files: [f], title: name }); return } catch (er) { if (er && er.name === 'AbortError') return }
+  }
+  const a = document.createElement('a'); a.href = u; a.download = name
+  document.body.appendChild(a); a.click(); a.remove()
+}
+// v86: rasm HALI yuklanmagan (src bo'sh) bo'lsa ham bosish JIM qolmasin — mediaUrl
+// orqali yuklab, to'liq ekran ko'rish oynasida ko'rsatamiz (avval jim o'lik bosish edi)
+async function viewTap(el) {
+  try {
+    if (el.src && el.complete) return viewImage(el.src, el.tagName === 'VIDEO')
+    const id = el.dataset.view || el.dataset.media
+    if (!id) return
+    toast('⏳ Yuklanmoqda…')
+    viewImage(await mediaUrl(id))
+  } catch (er) { toast('⚠️ ' + (er.message || 'Ochilmadi')) }
+}
+// v86: KELGAN FAYLNI OCHIB KO'RISH — rasm/video bo'lsa TO'LIQ EKRAN ko'rish oynasi
+// (ichida saqlash tugmasi), boshqa turlar (pdf/doc/zip…) — tizim saqlash oynasi yoki yuklab olish
+async function openFile(id, name) {
+  toast('⬇️ Yuklanmoqda…')
+  const u = await mediaUrl(id)
+  const b = await (await fetch(u)).blob()
+  if (b.type && b.type.startsWith('image/')) return viewImage(u, false, name)
+  if (b.type && b.type.startsWith('video/')) return viewImage(u, true, name)
+  await saveMedia(u, name)
+}
+function viewImage(src, isVideo, name) {
   const o = document.createElement('div')
   o.className = 'over imgview'
-  o.innerHTML = `<button class="xb">✕</button><a class="dl" href="${src}" download="50gram" style="display:flex;align-items:center;justify-content:center;text-decoration:none">⬇️</a>${isVideo ? `<video src="${src}" controls autoplay playsinline></video>` : `<img src="${src}" alt="">`}`
+  const nm = name || '50gram-rasm.jpg' // ilova rasmlari resizeImage orqali JPEG — .jpg to'g'ri
+  o.innerHTML = `<button class="xb">✕</button><button class="dl" title="Saqlash">⬇️</button>${isVideo ? `<video src="${src}" controls autoplay playsinline></video>` : `<img src="${src}" alt="">`}`
   o.onclick = (e) => { if (!e.target.closest('.dl') && e.target.tagName !== 'VIDEO') o.remove() }
+  qs('.dl', o).onclick = async () => { try { await saveMedia(src, nm); toast('⬇️ Saqlandi') } catch (er) { toast('⚠️ ' + (er.message || 'Saqlanmadi')) } }
   document.body.appendChild(o)
 }
 async function loadOlder() {
@@ -499,7 +535,7 @@ function ctxMenu(m, x, y) {
     if (k === 'sel') enterSel(m)
     if (k === 'clear') clearChatConfirm(c)
     if (k === 'pin') { try { const r2 = await post(`/messages/${m.id}/pin`, { on: S.chats.get(S.cur)?.pinned_id !== m.id }); S.chats.get(S.cur).pinned_id = r2.pinned_id; renderPinned(); toast(r2.pinned_id ? '📌 Xabar qadaldi' : 'Qadash olindi') } catch (er) { toast('⚠️ ' + er.message) } }
-    if (k === 'save') { try { const u = await mediaUrl(m.meta.media_id); const a = document.createElement('a'); a.href = u; a.download = m.meta.name || ('50gram-' + m.id); document.body.appendChild(a); a.click(); a.remove() } catch (er) { toast('⚠️ ' + er.message) } }
+    if (k === 'save') { try { toast('⬇️ Yuklanmoqda…'); await saveMedia(await mediaUrl(m.meta.media_id), m.meta.name || ('50gram-' + m.id)); toast('⬇️ Saqlandi') } catch (er) { toast('⚠️ ' + (er.message || 'Saqlanmadi')) } }
     if (k === 'del') {
       if (!(await confirmBox(c.type === 'direct' ? 'Xabar ikkala tomonda ham o‘chirilsinmi?' : 'Xabar hamma uchun o‘chirilsinmi?', 'O‘chirish'))) return
       try { const r2 = await del('/messages/' + m.id); if (m.meta?.media_id) Store.remove([String(m.meta.media_id)]); merge(S.cur, [r2]); renderMsgs(); saveChatLocal(S.cur) } catch (er) { toast('⚠️ ' + er.message) }

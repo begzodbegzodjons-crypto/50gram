@@ -145,6 +145,24 @@ try {
   log('B holati:', JSON.stringify(bState))
   if (!bState.loaded) throw new Error('B rasmni qabul qilib KO\'RSATMADI (decrypt/render yoki mediaChunk yo\'lida xato)')
 
+  // v86: B rasmga BOSADI — TO'LIQ EKRAN KO'RISH oynasi ochilishi kerak (ochib ko'rish yo'li)
+  await pageB.evaluate(() => { const im = [...document.querySelectorAll('#msgs img.media')].find((x) => x.complete && x.naturalWidth > 0); if (im) im.click() })
+  await sleep(1500)
+  const view = await pageB.evaluate(() => {
+    const o = document.querySelector('.imgview')
+    const im = o && o.querySelector('img')
+    return { open: !!o, loaded: !!(im && im.complete && im.naturalWidth > 0), dl: !!(o && o.querySelector('.dl')), xb: !!(o && o.querySelector('.xb')) }
+  })
+  log('B toliq-ekran korish:', JSON.stringify(view))
+  if (!view.open) throw new Error('B rasmni OCHIB KO\'RISH ishlamadi (.imgview ochilmadi)')
+  if (!view.loaded) throw new Error('korish oynasida rasm yuklanmadi (naturalWidth=0)')
+  if (!view.dl) throw new Error('korish oynasida SAQLASH tugmasi yo\'q')
+  await pageB.evaluate(() => { const x = document.querySelector('.imgview .xb'); if (x) x.click() })
+  await sleep(500)
+  const closed = await pageB.evaluate(() => !document.querySelector('.imgview'))
+  if (!closed) throw new Error('korish oynasi YOPILMADI (✕ ishlamadi)')
+  log('B korish oynasi ochildi-yopildi: OK')
+
   // TOZALASH: test xabarini o'chirish (test akkauntlar chati toza qolsin)
   if (msgId) {
     await page.evaluate(async (id) => { try { await fetch('/api/messages/' + id, { method: 'DELETE', headers: { authorization: 'Bearer ' + localStorage.g50_token } }) } catch {} }, msgId)
