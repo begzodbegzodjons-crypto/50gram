@@ -165,7 +165,10 @@ function clog(tag, extra) {
 }
 function shipClog() {
   if (!clogBuf.length || !S.token) return
-  const lines = clogBuf.splice(0, 14)
+  // v87: har POSTga 6 qator (avval 14 edi) — worker bitta xabarni 3000 belgigacha oladi,
+  // 14 qator birlashganda 900+ belgi bo'lib OXIRGI qatorlar (stat/endCall!) KESILIB QOLARDI
+  // — jurnalda «B tomon stat yo'q» muammosining ildizi shu edi.
+  const lines = clogBuf.splice(0, 6)
   try {
     fetch(API + '/clog', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + S.token }, body: JSON.stringify({ c: String(clogLastId || (CALL && CALL.id) || ''), m: lines.join(' ¦ ') }), keepalive: true }).catch(() => {})
   } catch {}
@@ -413,7 +416,8 @@ async function flipCam() {
 const QA_LV = [
   { br: 1200000, sc: 1, fps: 30 },
   { br: 600000, sc: 2, fps: 30 },
-  { br: 300000, sc: 4, fps: 20 },
+  { br: 220000, sc: 4, fps: 15 }, // v87: L2 yengillashtirildi (300k/20fps → 220k/15fps)
+  { br: 140000, sc: 6, fps: 10 }, // v87: YANGI L3 — juda zaif tarmoq: muzlash o'rniga ravon past-sifat
 ]
 function applyVideoLevel(C) {
   try {
@@ -456,6 +460,19 @@ function rmsPct(C, stream, key) {
     return Math.min(100, Math.round(Math.sqrt(sum / buf.length) * 400))
   } catch { return -1 }
 }
+// v87: UZLUKSIZ RMS NAMUNAVCHI — avvalgi o'lchov BITTA 32ms snapshot edi: gap paytida
+// olingan snapshot 0% qaytarardi → «k=0%» dalili NOTO'G'RI bo'lardi (shikoyat paytida
+// k=0% ko'rilgan). Endi har 250ms o'lchaymiz va 5s oyna ICHIDA HECH BO'LMASA BIR marta
+// eshitilgan MAKSIMUM darajani saqlaymiz — evalStats shu maksimumni o'qiydi: «bu oynada
+// ovoz bo'lganmi?» degan ISHONCHLI javob (gaplar yolg'on nol bermaydi).
+setInterval(() => {
+  const C = CALL
+  if (!C || !C.ctx || C.ctx.state !== 'running') return
+  try {
+    if (C.remote || C.remoteA) { const v = rmsPct(C, C.remoteA || C.remote, 'in'); if (v >= 0) C.inWin = Math.max(C.inWin || -1, v) }
+    if (C.local) { const v = rmsPct(C, C.local, 'out'); if (v >= 0) C.outWin = Math.max(C.outWin || -1, v) }
+  } catch {}
+}, 250)
 // FAQAT-OVOZ rejimi: chiquvchi video TARMODA UMUMAN YURIMAYDI (replaceTrack(null) —
 // renegotiation yo'q), masofa-video yashiriladi, ovoz davom etadi. Qarshi tomonda ham
 // avtomatik yoqiladi (signal orqali) — ikkala tomonda trafik tejaladi.
@@ -662,7 +679,7 @@ function endCall(status = 'ended', report = true, msg) {
   qs('.cbar', C.el).innerHTML = ''
   setTimeout(() => C.el.remove(), msg ? 3200 : 1200)
   try { window.__50buildCheck && window.__50buildCheck() } catch {}
-  for (let i = 0; i < 6 && clogBuf.length; i++) shipClog()
+  for (let i = 0; i < 12 && clogBuf.length; i++) shipClog()
 }
 // ───────────────────────────── QO'NG'IROQ OQIMLARI ─────────────────────────────
 // CHAQIRUVCHI (offerer): qo'ng'iroq AVVAL yuboriladi — qarshi tomon DARHOL jiringlaydi,
@@ -1024,25 +1041,27 @@ function evalStats(C, st) {
   // ── v82.1: OVOZ DARAJASI (RMS) — «kim jim» savoliga aniq javob ──
   // v84: kiruvchi o'lchov remoteA (faqat-audio oqim) bilan — an_in eski/bo'sh trekka
   // bog'lanib qolmasligi uchun audio-trek o'zgarganda null qilinadi (ontrack)
-  let inR = -1, outR = -1
+  // v87: namunovchining 5s OYNA MAKSIMUMI (bitta snapshot emas!) — -1 = o'lchanmadi
+  let inR = C.inWin === undefined ? -1 : C.inWin
+  let outR = C.outWin === undefined ? -1 : C.outWin
+  C.inWin = -1; C.outWin = -1
   const at = C.local && C.local.getAudioTracks()[0]
   const rat = C.remote && C.remote.getAudioTracks()[0]
   try {
     if (C.ctx && C.ctx.state !== 'running') C.ctx.resume().catch(() => {})
-    if (C.ctx && C.ctx.state === 'running') {
-      if (C.remote) inR = rmsPct(C, C.remoteA || C.remote, 'in')
-      if (C.local) outR = rmsPct(C, C.local, 'out')
-    }
     if (C.audioMode === 'wa' && C.ctx && C.ctx.state === 'suspended') {
       C.waSusp = (C.waSusp || 0) + 1
       if (C.waSusp >= 3) { C.waSusp = 0; clog('ovoz-wa-qotdi', 'AudioContext 15s suspended — element yo‘liga o‘tilyapti'); playRemote(C, true) }
     } else if (C.ctx) C.waSusp = 0
   } catch {}
-  if (C.statN % 3 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode}${C.audioBlocked ? '(blok)' : ''} k=${inR}% ch=${outR}% mik=${at ? (at.enabled ? 'on' : 'O‘CHIRILGAN') : 'yo‘q'} rmut=${rat ? (rat.muted ? 'ha' : 'yo‘q') : '?'} rb=${C.reboundOnce ? 1 : 0} | turn=${C.relay === undefined ? '?' : C.relay}`)
+  // v87: stat har 2-oynada (10s — avval 15s edi, 29s'lik qo'ng'iroqlarda 1 tagina chiqardi)
+  if (C.statN % 2 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode}${C.audioBlocked ? '(blok)' : ''} k=${inR}% ch=${outR}% mik=${at ? (at.enabled ? 'on' : 'O‘CHIRILGAN') : 'yo‘q'} rmut=${rat ? (rat.muted ? 'ha' : 'yo‘q') : '?'} rb=${C.reboundOnce ? 1 : 0} vx=${C.qaLvl || 0} | turn=${C.relay === undefined ? '?' : C.relay}`)
   // ── v84: WA-O'LIK QOROVULI — paketlar kelayapti (dInA>0) lekin WebAudio masofa
   // oqimidan 15s JIM (k=0): ba'zi WebView'larda remote-stream source tuguni jim
   // ishlaydi. BIR MARTA element yo'liga o'tamiz — element ovozi kafolatlangan.
-  if (C.audioMode === 'wa' && dInA > 0 && inR === 0) {
+  // v87: nol tekshiruvi endi OYNA MAKSIMUMI bilan — inR<1 (0 yoki deyarli-jim) va
+  // o'lchanadigan holatda (-1 = AudioContext ishlamayapti — bu holda dalil yo'q, aralashmaymiz)
+  if (C.audioMode === 'wa' && dInA > 0 && inR !== -1 && inR < 1) {
     C.waZero = (C.waZero || 0) + 1
     if (C.waZero >= 3 && !C.waDeadOnce) {
       C.waDeadOnce = 1; C.waZero = 0
@@ -1050,7 +1069,7 @@ function evalStats(C, st) {
       C.audioMode = 'ra'
       playRemote(C)
     }
-  } else if (inR > 0) C.waZero = 0
+  } else if (inR > 0 || inR === -1) C.waZero = 0
   // ── v85: ELEMENT-YO'LI JIMLIK QOROVULI — v84'dagi eng KATTA TESHIOK ──
   // v84 'ra'ni ASOSIY yo'l qildi, lekin k=0 narvoni FAQAT 'wa' rejimi uchun edi:
   // element yo'li jim qotsa (paketlar bor, trek tirik, lekin ijro jim) uni
@@ -1058,7 +1077,7 @@ function evalStats(C, st) {
   // k=0% rmut=yo'q inA=+14996 — baytlar oqyapti, ovoz chiqmayapti, hech kim
   // yordam bermagan. Narvon: (1) qayta bog'lash — eng ko'p davolovchi, (2) 'v',
   // (3) 'wa'. Har bosqich jurnalga yoziladi — keyingi jurnal isbot beradi.
-  if (C.audioMode !== 'wa' && dInA > 0 && inR === 0) {
+  if (C.audioMode !== 'wa' && dInA > 0 && inR !== -1 && inR < 1) {
     C.raZero = (C.raZero || 0) + 1
     if (C.raZero === 2 && !C.reboundOnce) {
       C.reboundOnce = 1
@@ -1072,7 +1091,7 @@ function evalStats(C, st) {
       clog('ovoz-ra-jim', 'k=0 davom — WebAudio yo‘liga o‘tilmoqda (bosqich 3)')
       C.audioMode = 'wa'; playRemote(C)
     }
-  } else if (inR > 0) C.raZero = 0
+  } else if (inR > 0 || inR === -1) C.raZero = 0
   // ── KIRUVCHI OVOZ o'lgan — narvon: 3-oyna elementlarni jonlantir, 5-oynada tiklash ──
   if (dInA === 0) {
     C.inDead = (C.inDead || 0) + 1
@@ -1087,15 +1106,15 @@ function evalStats(C, st) {
   // ── CHIQUVCHI OVOZ o'lgan — mikrofonni OS musodara qilgan: replaceTrack (renegotiation YO'Q)
   if (dOutA === 0 && at && at.readyState === 'live' && at.enabled) {
     C.outDead = (C.outDead || 0) + 1
-    if (C.outDead >= 4 && (C.heals || 0) < 3) { C.outDead = 0; C.heals = (C.heals || 0) + 1; healOutgoing(C, 'audio') }
+    if (C.outDead >= 4 && (C.heals || 0) < 4) { C.outDead = 0; C.heals = (C.heals || 0) + 1; healOutgoing(C, 'audio') }
   } else C.outDead = 0
-  // ── v82.1: MIKROFON-JIM davolash — tarmoqqa yuborilyapti (outA>0) lekin mikrofon
-  // oqimi 30s JIM (RMS=0): WebView capture-pipelini qotishi. replaceTrack bilan
-  // yangi mikrofon oqimi ochiladi (renegotiation yo'q) — «B ovozi kelmayapti»ning
-  // bittomonlama ildizi.
-  if (outR === 0 && dOutA > 0 && at && at.readyState === 'live' && at.enabled) {
+  // ── v82.1+v87: MIKROFON-JIM davolash — tarmoqga yuborilyapti (outA>0) lekin mikrofon
+  // oqimi 15s JIM (oyna-max RMS<1%): WebView capture-pipelini qotishi. AVVALGI XATO:
+  // 30s (6-oyna) kutilardi — 29s'lik qo'ng'iroqda UMUMAN ulgurmagan! Endi 15s (3-oyna)
+  // va 4 martagacha davolaydi. replaceTrack — renegotiation yo'q.
+  if (outR !== -1 && outR < 1 && dOutA > 0 && at && at.readyState === 'live' && at.enabled) {
     C.silN = (C.silN || 0) + 1
-    if (C.silN >= 6 && (C.heals || 0) < 3) { C.silN = 0; C.heals = (C.heals || 0) + 1; clog('mikro-jim', 'mikrofon jimga oqmoqda (RMS=0) — qayta ochilmoqda #' + C.heals); healOutgoing(C, 'audio') }
+    if (C.silN >= 3 && (C.heals || 0) < 4) { C.silN = 0; C.heals = (C.heals || 0) + 1; clog('mikro-jim', 'mikrofon 15s jim oqmoqda (oyna-max<1%) — qayta ochilmoqda #' + C.heals); healOutgoing(C, 'audio') }
   } else C.silN = 0
   // ── CHIQUVCHI VIDEO o'lgan (faqat-ovoz rejimida video ataylab yuborilmaydi) ──
   const vt = C.local && C.local.getVideoTracks()[0]
@@ -1124,7 +1143,7 @@ function evalStats(C, st) {
       if (bad >= 2) { C.qBadN = (C.qBadN || 0) + 1; C.qGoodN = 0 }
       else if (bad === 0) { C.qGoodN = (C.qGoodN || 0) + 1; C.qBadN = 0 }
       else { C.qBadN = 0; C.qGoodN = 0 }
-      if (C.qBadN >= 2 && C.qaLvl < 2 && now - (C.qaAt || 0) > 10000) {
+      if (C.qBadN >= 2 && C.qaLvl < 3 && now - (C.qaAt || 0) > 10000) {
         C.qaLvl++; C.qaAt = now; C.qBadN = 0
         applyVideoLevel(C)
         clog('sifat-pasaydi', 'L' + C.qaLvl + ' — tarmoq sekin, video yengillashtirildi (bad=' + bad + ')')

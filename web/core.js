@@ -952,6 +952,10 @@ async function startApp() {
   // «ochiq ko'rinib» turgan holda HAMMA real-vaqt hodisasi (qo'ng'iroq, signal, xabar)
   // yo'qolardi. Bu «avval ishlar, keyin o'zi buzilar edi»ning yashirin ildizi.
   wsConnect()
+  // v87: ISHGA-TUSHDI MAYAGI — har qurilma ilova ochilganda jurnalda KO'RINADI
+  // («brauzerda umuman ishlamadi» endi ko'rinmay qolmaydi — build/UA/tarmoq yoziladi)
+  setTimeout(() => g50Beacon('ishga-tushdi'), 2500)
+  try { navigator.serviceWorker?.getRegistration?.().then((r) => { if (!r) g50Beacon('sw-yoq') }).catch(() => {}) } catch {}
   if (!S.me.first_name) { $('auth').classList.remove('hide'); $('main').classList.add('hide'); step('a-prof'); return }
   post('/ping').catch(() => {})
   // APK: token'ni native tomonga beramiz — fon xizmati qo'ng'iroqlarni polling bilan oladi (v2.5)
@@ -1024,7 +1028,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v86'
+window.__50BUILD = 'v87'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
@@ -1062,6 +1066,34 @@ function g50ReloadNew() {
   } catch {}
 }
 window.addEventListener('hashchange', handleHash)
+// ─────────────── v87: ISHGA-TUSHDI MAYAGI + JS-XATO HISOBOTCHISI ───────────────
+// MUAMMO: «brauzerda umuman qo'ng'iroq bog'lanmadi» shikoyatida jurnalda HECH QANDAY
+// iz yo'q edi — brauzer qurilma qaysi sahifa ochgani, qaysi build ekanligi, JS xatosi
+// bo'lgani — HECH NARSA ma'lum emasdi, tashxis IMKONSIZ edi. Endi:
+// 1) har ilova ochilganda BITTA qator jurnalga yoziladi (build, apk, tarmoq, UA)
+// 2) ushlanmagan JS xatolar ham yoziladi (bir sahifada max 3 ta)
+let g50BeaconN = 0
+function g50Beacon(tag) {
+  try {
+    if (!S.token || g50BeaconN >= 8) return
+    g50BeaconN++
+    const m = tag + ' | build=' + window.__50BUILD + ' | apk=' + (window.Android50 ? 1 : 0)
+      + ' | on=' + (navigator.onLine ? 1 : 0) + ' | hid=' + document.visibilityState
+      + ' | ua=' + String(navigator.userAgent || '').slice(-70)
+    fetch(API + '/clog', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + S.token }, body: JSON.stringify({ c: 'diag', m }), keepalive: true }).catch(() => {})
+  } catch {}
+}
+let g50ErrN = 0
+function g50ShipErr(kind, msg) {
+  try {
+    if (!S.token || g50ErrN >= 3) return
+    g50ErrN++
+    const m = kind + ' | ' + String(msg || '?').replace(/\s+/g, ' ').slice(0, 300) + ' | build=' + window.__50BUILD
+    fetch(API + '/clog', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + S.token }, body: JSON.stringify({ c: 'diag', m }), keepalive: true }).catch(() => {})
+  } catch {}
+}
+try { window.addEventListener('error', (e) => g50ShipErr('js-xato', (e.message || '?') + ' @' + String(e.filename || '').split('/').pop() + ':' + e.lineno)) } catch {}
+try { window.addEventListener('unhandledrejection', (e) => g50ShipErr('js-rad', e.reason && (e.reason.message || e.reason))) } catch {}
 async function handleHash() {
   const h = decodeURIComponent(location.hash.slice(1))
   if (!h || !S.token || !S.me?.first_name) return

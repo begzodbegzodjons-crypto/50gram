@@ -235,7 +235,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v86"
+const BUILD_V = "v87"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -2794,9 +2794,11 @@ async function signal(c: C) {
 // Cloudflare'da SAQLANMAYDI — haqiqiy qurilmadagi «video qotdi / ovoz kelmayapti /
 // qo'ng'iroq qotib qoldi» holatlari avval LOG'SIZ yo'qolardi. Endi klient har qo'ng'iroq
 // hayotiy siklini (chaqirish→javob→offer→answer→ICE→media→yopilish) shu yerga yozadi.
-// Best-effort: o'z xatosi javobni hech qachon buzmaydi. So'roviga ≤900 belgi.
+// Best-effort: o'z xatosi javobni hech qachon buzmaydi. So'roviga ≤3000 belgi (v87).
 async function callLog(c: C) {
-  const msg = String(c.b?.m || "").replace(/\s+/g, " ").trim().slice(0, 900)
+  // v87: 900 → 3000 belgi — klient 6 qatorni birlashtirib yuboradi; avval 900 belgi
+  // OXIRGI qatorlarni (stat/endCall!) kesib tashlab, jurnal dalillari YO'QOLARDI
+  const msg = String(c.b?.m || "").replace(/\s+/g, " ").trim().slice(0, 3000)
   if (!msg) return json({ ok: true })
   const path = "call:" + String(c.b?.c || "").slice(0, 24)
   c.wait(jurnalYoz(c.env, path, c.uid, "klient", msg))
