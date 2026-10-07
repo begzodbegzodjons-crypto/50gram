@@ -371,6 +371,27 @@ function playRemote(C, escalate, depth) {
   if (pill) pill.classList.toggle('hide', !C.audioBlocked)
   if (C.audioPrev !== mode) { C.audioPrev = mode; clog('ovoz-yol', mode + ' (turn=' + (C.relay === undefined ? '?' : C.relay) + ')') }
 }
+// v85: AUDIO ELEMENTINI MAJBURIY QAYTA BOGLASH — jurnal-isbot (call 1791367548875607,
+// A tomon): ovoz=ra + k=0% lekin inA=+14996 bayt oqyapti va rmut=yo'q. Ya'ni masofa
+// ovozi BAYTLAR BILAN KELYAPTI, trek TIRIK — lekin element JIM ijro etmoqda. Ildiz:
+// playRemote faqat srcObject OBYEKTI o'zgarganda qayta bog'laydi (a.srcObject !== aOnly) —
+// remoteA ICHIGA keyin qo'silgan trek obyektni o'zgartirmaydi. Eski WebView'da bo'sh
+// MediaStream'ga bog'langan element keyin qo'silgan audio-trekni ABADIY KO'RMAYDI.
+// Davo: srcObject=null → qayta bog'lash → play() — element o'z ijrochisini yangilaydi.
+function rebindRemoteAudio(C) {
+  try {
+    if (!C?.el || CALL !== C) return
+    const a = qs('.ra', C.el)
+    if (!a) return
+    const st = C.remoteA || C.remote
+    if (!st || !st.getAudioTracks().length) return // trek hali yo'q — ontrack yana chaqiradi
+    a.srcObject = null
+    a.srcObject = st
+    if (!C.spkMuted) a.muted = false
+    if (C.audioMode === 'ra') tryEl(a, 0, 'ra')
+    clog('ovoz-qayta-boglash', 'audio element yangidan bog‘landi (trek=' + st.getAudioTracks().length + ', turn=' + (C.relay === undefined ? '?' : C.relay) + ')')
+  } catch (e) { clog('ovoz-qayta-boglash-xato', String((e && e.message) || e).slice(0, 100)) }
+}
 async function flipCam() {
   const C = CALL; if (!C?.local) return
   C.facing = C.facing === 'environment' ? 'user' : 'environment'
@@ -538,6 +559,12 @@ async function setupPC(C) {
           // (k=0 jimlik ildizi) — tugunlarni tozalaymiz, playRemote darhol qayta yaratadi.
           try { if (C.waSrc) { C.waSrc.disconnect(); C.waSrc = null } } catch {}
           try { C.an_in = null } catch {}
+          // v85: audio trek keldi — element BO'SH oqimga erta bog'langan bo'lishi mumkin
+          // (eski WebView: bo'sh MediaStream bilan bog'langan <audio> keyin qo'silgan
+          // trekni ko'rmaydi — abadiy jimlik). 400ms debounce bilan majburiy qayta
+          // bog'laymiz — trek allaqachon remoteA ichida, element endi uni ko'radi.
+          clearTimeout(C.aRebindT)
+          C.aRebindT = setTimeout(() => { if (CALL === C) rebindRemoteAudio(C) }, 400)
         }
       } catch {}
       clog('masofa-trek', e.track.kind + ' ready=' + e.track.readyState)
@@ -601,6 +628,7 @@ function recover(C, why) {
   C.recTries = (C.recTries || 0) + 1
   if (C.recTries > 3) { endCall('missed', true, 'Aloqa yo‘q — internetni tekshirib, qayta urinib ko‘ring'); return }
   setCallState('Qayta ulanmoqda…')
+  C.raZero = 0; C.waZero = 0; C.reboundOnce = 0 // v85: yangi PC — qayta-bog'lash narvoni yana tayyor
   clog('tiklash', why + ' #' + C.recTries + ' (' + (C.role === 'offerer' ? 'o\'zim restart' : 'needice so\'rov') + ')')
   if (C.role === 'offerer') restartIce(C)
   else sigTo(C.peer.id, { k: 'needice', call_id: C.id }, 3, 900)
@@ -1010,7 +1038,7 @@ function evalStats(C, st) {
       if (C.waSusp >= 3) { C.waSusp = 0; clog('ovoz-wa-qotdi', 'AudioContext 15s suspended — element yo‘liga o‘tilyapti'); playRemote(C, true) }
     } else if (C.ctx) C.waSusp = 0
   } catch {}
-  if (C.statN % 3 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode}${C.audioBlocked ? '(blok)' : ''} k=${inR}% ch=${outR}% mik=${at ? (at.enabled ? 'on' : 'O‘CHIRILGAN') : 'yo‘q'} rmut=${rat ? (rat.muted ? 'ha' : 'yo‘q') : '?'} | turn=${C.relay === undefined ? '?' : C.relay}`)
+  if (C.statN % 3 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode}${C.audioBlocked ? '(blok)' : ''} k=${inR}% ch=${outR}% mik=${at ? (at.enabled ? 'on' : 'O‘CHIRILGAN') : 'yo‘q'} rmut=${rat ? (rat.muted ? 'ha' : 'yo‘q') : '?'} rb=${C.reboundOnce ? 1 : 0} | turn=${C.relay === undefined ? '?' : C.relay}`)
   // ── v84: WA-O'LIK QOROVULI — paketlar kelayapti (dInA>0) lekin WebAudio masofa
   // oqimidan 15s JIM (k=0): ba'zi WebView'larda remote-stream source tuguni jim
   // ishlaydi. BIR MARTA element yo'liga o'tamiz — element ovozi kafolatlangan.
@@ -1023,6 +1051,28 @@ function evalStats(C, st) {
       playRemote(C)
     }
   } else if (inR > 0) C.waZero = 0
+  // ── v85: ELEMENT-YO'LI JIMLIK QOROVULI — v84'dagi eng KATTA TESHIOK ──
+  // v84 'ra'ni ASOSIY yo'l qildi, lekin k=0 narvoni FAQAT 'wa' rejimi uchun edi:
+  // element yo'li jim qotsa (paketlar bor, trek tirik, lekin ijro jim) uni
+  // QUTQARADIGAN qorovul YO'Q edi. Jurnal-isbot (call 875607, A tomon): ovoz=ra
+  // k=0% rmut=yo'q inA=+14996 — baytlar oqyapti, ovoz chiqmayapti, hech kim
+  // yordam bermagan. Narvon: (1) qayta bog'lash — eng ko'p davolovchi, (2) 'v',
+  // (3) 'wa'. Har bosqich jurnalga yoziladi — keyingi jurnal isbot beradi.
+  if (C.audioMode !== 'wa' && dInA > 0 && inR === 0) {
+    C.raZero = (C.raZero || 0) + 1
+    if (C.raZero === 2 && !C.reboundOnce) {
+      C.reboundOnce = 1
+      clog('ovoz-ra-jim', 'paketlar bor, k=0 — audio element qayta bog‘lanmoqda (bosqich 1)')
+      rebindRemoteAudio(C)
+    } else if (C.raZero === 5) {
+      clog('ovoz-ra-jim', 'k=0 davom — video-element yo‘liga o‘tilmoqda (bosqich 2)')
+      C.audioMode = 'v'; playRemote(C)
+    } else if (C.raZero === 8 && !C.waDeadOnce) {
+      C.waDeadOnce = 1
+      clog('ovoz-ra-jim', 'k=0 davom — WebAudio yo‘liga o‘tilmoqda (bosqich 3)')
+      C.audioMode = 'wa'; playRemote(C)
+    }
+  } else if (inR > 0) C.raZero = 0
   // ── KIRUVCHI OVOZ o'lgan — narvon: 3-oyna elementlarni jonlantir, 5-oynada tiklash ──
   if (dInA === 0) {
     C.inDead = (C.inDead || 0) + 1

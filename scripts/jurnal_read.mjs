@@ -38,7 +38,7 @@ console.log('=== JURNAL (' + rows.length + ' yozuv) ===')
 if (!rows.length) { console.log('jurnal BO\'SH — serverda hech qanday xato yozuvi yo\'q (toza holat)') }
 for (const w of rows) {
   const t = new Date(+(w.ts || 0)).toISOString().slice(5, 16).replace('T', ' ')
-  console.log(`[${t}] ${w.src || '?'} ${w.path || ''} uid=${w.uid || 0} :: ${String(w.msg || '').slice(0, 260)}`)
+  console.log(`[${t}] ${w.src || '?'} ${w.path || ''} uid=${w.uid || 0} :: ${String(w.msg || '').slice(0, 3000)}`)
 }
 // logout — raqam «band» qolmasin
 try { await fetch(BASE + '/api/auth/logout', { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': UA, authorization: 'Bearer ' + v.token }, body: '{}' }) } catch {}
