@@ -255,9 +255,9 @@ function callUI(peer, video, state) {
   document.body.appendChild(el)
   // R3: qo'ng'iroq oynasida HAR bosish — ovoz zanjirini tiklashga urinish
   // (autoplay bloki / fonga kirish ovozi o'chgan bo'lsa — tekkanida QAYTADI)
-  el.addEventListener('pointerdown', () => { const C = CALL; if (C && C.el === el) { unlockAudio(C); playRemote(C) } })
+  el.addEventListener('pointerdown', () => { const C = CALL; if (C && C.el === el) { unlockAudio(C); if (C.audioBlocked) { C.audioMode = 'ra'; C.audioBlocked = false } playRemote(C) } })
   const pill = qs('.l-un', el)
-  if (pill) pill.onclick = (e) => { e.stopPropagation(); const C = CALL; if (C && C.el === el) { unlockAudio(C); playRemote(C) } }
+  if (pill) pill.onclick = (e) => { e.stopPropagation(); const C = CALL; if (C && C.el === el) { unlockAudio(C); if (C.audioBlocked) { C.audioMode = 'ra'; C.audioBlocked = false } playRemote(C) } }
   return el
 }
 function callButtons(kind) {
@@ -300,26 +300,36 @@ function unlockAudio(C) {
 }
 function connectWA(C) {
   try {
+    // v84 ILDIZ-TUZATISH: WebAudio tuguni FAQAT AUDIO-trekli oqim (remoteA) bilan
+    // yaratiladi va audio trek bo'lmasa UMUMAN ulanmaydi. MediaStreamAudioSourceNode
+    // yaratilish paytidagi trekka bog'lanadi — keyinchalik qo'shilgan trekkni KO'RMAYDI
+    // (video trek birinchi kelib tugun audio-treksiz yaratilsa — abadiy jimlik;
+    // jurnal isboti: call 1791365978038092, A tomon ovoz=wa k=0% ch=2%).
+    const st = C.remoteA || C.remote
+    if (!st || !st.getAudioTracks().length) return false
     const ctx = C.ctx
     if (!ctx || ctx.state !== 'running') { unlockAudio(C) }
     if (!C.ctx) return false
     if (!C.waSrc) {
-      C.waSrc = C.ctx.createMediaStreamSource(C.remote)
+      C.waSrc = C.ctx.createMediaStreamSource(st)
       C.waGain = C.ctx.createGain(); C.waGain.gain.value = 1
       C.waSrc.connect(C.waGain); C.waGain.connect(C.ctx.destination)
-      clog('ovoz-wa', 'WebAudio zanjiri ulandi (turn=' + (C.relay === undefined ? '?' : C.relay) + ')')
+      clog('ovoz-wa', 'WebAudio zanjiri ulandi (audio-trek=' + st.getAudioTracks().length + ', turn=' + (C.relay === undefined ? '?' : C.relay) + ')')
     }
     if (C.ctx.state === 'suspended') C.ctx.resume().catch(() => {})
     return C.ctx.state === 'running' || C.ctx.state === 'suspended'
   } catch (e) { clog('ovoz-wa-xato', String((e && e.message) || e).slice(0, 100)); return false }
 }
-function tryEl(el) {
+function tryEl(el, depth, fromMode) {
   let p; try { p = el.play() } catch { return false }
-  if (p && p.then) p.catch(() => { try { const C = CALL; if (C) playRemote(C, true) } catch {} }) // bloklandi — keyingi qatlam
+  // bloklandi — keyingi qatlam (faqat rejim o'zgarmagan bo'lsa — boshqa yo'l allaqachon
+  // ishlagan bo'lsa eski rad-etilish bekor bo'lishi kerak)
+  if (p && p.then) p.catch(() => { try { const C = CALL; if (C && (!fromMode || C.audioMode === fromMode)) playRemote(C, true, (depth || 0) + 1) } catch {} })
   return true // buyruq qabul qilindi — natijasi promise orqali kuzatiladi
 }
-function playRemote(C, escalate) {
+function playRemote(C, escalate, depth) {
   if (!C?.el || CALL !== C || !C.remote) return
+  depth = depth || 0
   const { v, a, pill } = callEls(C)
   if (!v || !a) return
   // R2: oqim DOIM xuddi shu obyekt — bir marta bog'lanadi, hech qachon almashtirilmaydi
@@ -334,26 +344,28 @@ function playRemote(C, escalate) {
     if (pill) pill.classList.add('hide')
     return
   }
-  // v82.1: Android WebView'da WebAudio ASOSIY yo'l — element play() «muvaffaqiyatli»
-  // bo'lib JIM qolishi mumkin; WebAudio grafida bunday xato yo'q. AudioContext
-  // foydalanuvchi bosishi ichida ochilgan (unlockAudio) — autoplay qulfi yo'q.
-  if (!C.audioMode) C.audioMode = window.Android50 ? 'wa' : 'ra'
+  // v84: ELEMENT yo'li ASOSIY (barcha platformalarda) — WebAudio faqat ZAXIRA.
+  // Jurnal isboti (call 1791365978038092): A tomon ovoz=wa'da qotgan — k=0% (WebAudio
+  // remote-tuguni jim) va elementlar muted edi. Element — eng standart, kafolatlangan yo'l.
+  if (!C.audioMode) C.audioMode = 'ra'
   if (escalate) {
-    const ord = window.Android50 ? ['wa', 'ra', 'v'] : ['ra', 'v', 'wa']
+    const ord = ['ra', 'v', 'wa']
     const i = ord.indexOf(C.audioMode)
     C.audioMode = ord[(i + 1 + ord.length) % ord.length]
   }
   const mode = C.audioMode
   let ok
-  if (mode === 'ra') { v.muted = true; a.muted = false; ok = tryEl(a) }
-  else if (mode === 'v') { a.muted = true; v.muted = false; ok = tryEl(v) }
+  if (mode === 'ra') { v.muted = true; a.muted = false; ok = tryEl(a, depth, 'ra') }
+  else if (mode === 'v') { a.muted = true; v.muted = false; ok = tryEl(v, depth, 'v') }
   else { a.muted = true; v.muted = true; ok = connectWA(C) }
-  if (!ok) { // bu yo'l ishlamadi — navbatdagi qatlamga o'tamiz
-    if (mode === 'ra' || mode === 'v') return playRemote(C, true)
-    // 'wa' ham ishlamadi — pill ko'rsatamiz (har bosish qayta urinadi)
-    C.audioBlocked = true
-    if (pill) pill.classList.remove('hide')
-    return
+  if (!ok) { // bu yo'l ishlamadi — navbatdagi qatlamga o'tamiz (3 qatlamdan keyin pill)
+    if (depth >= 2) {
+      // hech bir yo'l buyruqni qabul qilmadi — «Ovozni yoqish» pill (har bosish qayta urinadi)
+      C.audioBlocked = true
+      if (pill) pill.classList.remove('hide')
+      return
+    }
+    return playRemote(C, true, depth + 1)
   }
   if (mode !== 'wa') C.audioBlocked = false
   if (pill) pill.classList.toggle('hide', !C.audioBlocked)
@@ -481,6 +493,7 @@ async function healOutgoing(C, kind) {
     if (!nt) throw new Error('yangi trek bo\'sh')
     await snd.replaceTrack(nt)
     try { C.local.addTrack(nt); qs('.local', C.el).srcObject = C.local } catch {}
+    if (kind === 'audio') { try { C.an_out = null } catch {} } // v84: o'lchov tuguni yangi trekga qayta yaratiladi
     C['h_' + kind] = (C['h_' + kind] || 0) + 1
     clog('chiqish-tiklandi', kind + ' yangi trek #' + C['h_' + kind] + ' (turn=' + (C.relay === undefined ? '?' : C.relay) + ')')
   } catch (e) {
@@ -520,6 +533,11 @@ async function setupPC(C) {
           if (!C.remoteA) C.remoteA = new MediaStream()
           for (const o of C.remoteA.getTracks()) if (o !== t) { try { C.remoteA.removeTrack(o) } catch {} }
           if (!C.remoteA.getTracks().includes(t)) C.remoteA.addTrack(t)
+          // v84 ILDIZ-TUZATISH: WebAudio tugunlari yaratilish paytidagi trekka bog'lanadi.
+          // Yangi audio trek keldi — eski tugun eski/bo'sh trekga bog'langan bo'lishi mumkin
+          // (k=0 jimlik ildizi) — tugunlarni tozalaymiz, playRemote darhol qayta yaratadi.
+          try { if (C.waSrc) { C.waSrc.disconnect(); C.waSrc = null } } catch {}
+          try { C.an_in = null } catch {}
         }
       } catch {}
       clog('masofa-trek', e.track.kind + ' ready=' + e.track.readyState)
@@ -626,7 +644,7 @@ async function callUser(uid, video) {
   if (uid === S.me.id) return
   let peer = S.users.get(uid)
   if (!peer) try { peer = await api('/users/' + uid); S.users.set(uid, peer) } catch (e) { return toast('⚠️ ' + e.message) }
-  CALL = { id: 0, peer, video: !!video, outgoing: true, role: 'offerer', audioMode: window.Android50 ? 'wa' : 'ra', ice: [], el: callUI(peer, video, 'Chaqirilmoqda…'), t0: Date.now(), ringMode: 'out' }
+  CALL = { id: 0, peer, video: !!video, outgoing: true, role: 'offerer', audioMode: 'ra', ice: [], el: callUI(peer, video, 'Chaqirilmoqda…'), t0: Date.now(), ringMode: 'out' } // v84: element yo'li asosiy
   unlockAudio(CALL) // FOYDALANUVCHI BOSISHI ICHIDA: AudioContext ochiladi (autoplay qulfidan chiqish)
   clog('chaqirildi', 'to=' + uid + ' video=' + !!video)
   startSigPoll()
@@ -784,7 +802,7 @@ function incomingCall(ev, force) {
   }
   S.users.set(ev.from.id, { ...(S.users.get(ev.from.id) || {}), ...ev.from })
   const peer = S.users.get(ev.from.id)
-  CALL = { id: ev.call_id, peer, video: !!ev.video, outgoing: false, role: 'answerer', audioMode: window.Android50 ? 'wa' : 'ra', ice: [], el: callUI(peer, ev.video, ev.video ? 'Video qo‘ng‘iroq…' : 'Qo‘ng‘iroq…'), t0: Date.now(), ringMode: 'in' }
+  CALL = { id: ev.call_id, peer, video: !!ev.video, outgoing: false, role: 'answerer', audioMode: 'ra', ice: [], el: callUI(peer, ev.video, ev.video ? 'Video qo‘ng‘iroq…' : 'Qo‘ng‘iroq…'), t0: Date.now(), ringMode: 'in' } // v84: element yo'li asosiy
   clog('kirish-qo\'ng\'iroq', 'call=' + ev.call_id + ' from=' + ev.from.id + ' video=' + !!ev.video)
   startSigPoll()
   CALL.el.classList.add('incoming')
@@ -976,11 +994,15 @@ function evalStats(C, st) {
   C.st0 = { t: now, inA, inV, outA, outV, fr, fd, lostV, recvV, lostA, recvA }
   C.statN = (C.statN || 0) + 1
   // ── v82.1: OVOZ DARAJASI (RMS) — «kim jim» savoliga aniq javob ──
+  // v84: kiruvchi o'lchov remoteA (faqat-audio oqim) bilan — an_in eski/bo'sh trekka
+  // bog'lanib qolmasligi uchun audio-trek o'zgarganda null qilinadi (ontrack)
   let inR = -1, outR = -1
+  const at = C.local && C.local.getAudioTracks()[0]
+  const rat = C.remote && C.remote.getAudioTracks()[0]
   try {
     if (C.ctx && C.ctx.state !== 'running') C.ctx.resume().catch(() => {})
     if (C.ctx && C.ctx.state === 'running') {
-      if (C.remote) inR = rmsPct(C, C.remote, 'in')
+      if (C.remote) inR = rmsPct(C, C.remoteA || C.remote, 'in')
       if (C.local) outR = rmsPct(C, C.local, 'out')
     }
     if (C.audioMode === 'wa' && C.ctx && C.ctx.state === 'suspended') {
@@ -988,7 +1010,19 @@ function evalStats(C, st) {
       if (C.waSusp >= 3) { C.waSusp = 0; clog('ovoz-wa-qotdi', 'AudioContext 15s suspended — element yo‘liga o‘tilyapti'); playRemote(C, true) }
     } else if (C.ctx) C.waSusp = 0
   } catch {}
-  if (C.statN % 3 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode}${C.audioBlocked ? '(blok)' : ''} k=${inR}% ch=${outR}% | turn=${C.relay === undefined ? '?' : C.relay}`)
+  if (C.statN % 3 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode}${C.audioBlocked ? '(blok)' : ''} k=${inR}% ch=${outR}% mik=${at ? (at.enabled ? 'on' : 'O‘CHIRILGAN') : 'yo‘q'} rmut=${rat ? (rat.muted ? 'ha' : 'yo‘q') : '?'} | turn=${C.relay === undefined ? '?' : C.relay}`)
+  // ── v84: WA-O'LIK QOROVULI — paketlar kelayapti (dInA>0) lekin WebAudio masofa
+  // oqimidan 15s JIM (k=0): ba'zi WebView'larda remote-stream source tuguni jim
+  // ishlaydi. BIR MARTA element yo'liga o'tamiz — element ovozi kafolatlangan.
+  if (C.audioMode === 'wa' && dInA > 0 && inR === 0) {
+    C.waZero = (C.waZero || 0) + 1
+    if (C.waZero >= 3 && !C.waDeadOnce) {
+      C.waDeadOnce = 1; C.waZero = 0
+      clog('ovoz-wa-jim', 'WebAudio k=0 (paketlar bor) — element yo‘liga o‘tilmoqda')
+      C.audioMode = 'ra'
+      playRemote(C)
+    }
+  } else if (inR > 0) C.waZero = 0
   // ── KIRUVCHI OVOZ o'lgan — narvon: 3-oyna elementlarni jonlantir, 5-oynada tiklash ──
   if (dInA === 0) {
     C.inDead = (C.inDead || 0) + 1
@@ -1001,7 +1035,6 @@ function evalStats(C, st) {
     if (C.vDead >= 5) { C.vDead = 3; recover(C, 'video-kelmadi') }
   } else C.vDead = 0
   // ── CHIQUVCHI OVOZ o'lgan — mikrofonni OS musodara qilgan: replaceTrack (renegotiation YO'Q)
-  const at = C.local && C.local.getAudioTracks()[0]
   if (dOutA === 0 && at && at.readyState === 'live' && at.enabled) {
     C.outDead = (C.outDead || 0) + 1
     if (C.outDead >= 4 && (C.heals || 0) < 3) { C.outDead = 0; C.heals = (C.heals || 0) + 1; healOutgoing(C, 'audio') }
