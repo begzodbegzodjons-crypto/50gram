@@ -543,6 +543,26 @@ body.dark .sheet .grab{background:linear-gradient(90deg,#31415F,#42527A);box-sha
 .call.vid .cinfo{position:absolute;top:calc(20px + env(safe-area-inset-top));left:16px;margin:0;text-align:left;z-index:3}
 .call.vid .cinfo h2{font-size:19px;margin:0}
 .call.vid .cinfo .av,.call.vid .cinfo .avw{display:none}
+/* v82: aloqa sifati ko'rsatkichi (yuqori markaz, 3 ustunli signal) */
+.call .qi{position:absolute;top:calc(12px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);display:flex;gap:3px;align-items:flex-end;z-index:5;background:rgba(0,0,0,.32);border-radius:10px;padding:7px 9px}
+.call .qi i{display:block;width:4.5px;border-radius:2px;background:rgba(255,255,255,.24)}
+.call .qi i:nth-child(1){height:6px}.call .qi i:nth-child(2){height:10px}.call .qi i:nth-child(3){height:14px}
+.call .qi.lv0 i{background:#38E07B}
+.call .qi.lv1 i:nth-child(-n+2){background:#FFB020}
+.call .qi.lv2 i:nth-child(1){background:#FF5D5D}
+.call .qi.hide{display:none}
+/* v82: «Faqat ovoz» rejimi — videolar yashirinadi, avatar markazda, badge chiqadi */
+.call .aom{display:none;background:rgba(255,176,32,.16);border:1px solid rgba(255,176,32,.5);color:#FFD98A;font-size:13px;font-weight:700;padding:6px 14px;border-radius:16px;margin-top:12px}
+.call.aud-only .remote,.call.aud-only .local{display:none!important}
+.call.aud-only .aom{display:inline-block}
+.call.vid.aud-only .cinfo{position:relative;top:auto;left:auto;margin-top:-80px;text-align:center}
+.call.vid.aud-only .cinfo h2{font-size:27px;margin:16px 0 5px}
+.call.vid.aud-only .cinfo .av,.call.vid.aud-only .cinfo .avw{display:inline-block}
+/* v82: video qo'ng'iroqda 6 ta tugma — ixcham o'lcham */
+.call.vid .cb{width:60px;height:60px}
+.call.vid .cb svg{width:26px;height:26px}
+.call.vid .cbtn span{font-size:11.5px}
+.call.vid .cbar{gap:15px}
 .live{background:#000}
 .live video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .live .lhd{position:absolute;top:calc(12px + env(safe-area-inset-top));left:12px;right:12px;display:flex;align-items:center;gap:8px;z-index:3}

@@ -239,7 +239,8 @@ const IC = {
   cam: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z"/></svg>',
   camOff: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 6.5l-4 4V7a1 1 0 0 0-1-1H9.82L21 17.18V6.5zM3.27 2L2 3.27 4.73 6H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12c.21 0 .39-.08.54-.18L19.73 21 21 19.73 3.27 2z"/></svg>',
   spk: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05A4.47 4.47 0 0 0 16.5 12zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>',
-  flip: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 5h-3.17L15 3H9L7.17 5H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm-8 13a5 5 0 1 1 5-5c0 .72-.16 1.4-.43 2.02L18 13.5v5h-5l1.48-1.48c-.62.27-1.3.43-2.02.43z" transform="scale(0.9) translate(1.3,1.3)"/><path d="M12 8.5a4.5 4.5 0 1 0 4.5 4.5H12V8.5z" opacity="0"/></svg>'
+  flip: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 5h-3.17L15 3H9L7.17 5H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm-8 13a5 5 0 1 1 5-5c0 .72-.16 1.4-.43 2.02L18 13.5v5h-5l1.48-1.48c-.62.27-1.3.43-2.02.43z" transform="scale(0.9) translate(1.3,1.3)"/><path d="M12 8.5a4.5 4.5 0 1 0 4.5 4.5H12V8.5z" opacity="0"/></svg>',
+  aonly: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1c-4.97 0-9 4.03-9 9v7c0 1.66 1.34 3 3 3h3v-8H5v-2c0-3.87 3.13-7 7-7s7 3.13 7 7v2h-4v8h3c1.66 0 3-1.34 3-3v-7c0-4.97-4.03-9-9-9z"/></svg>'
 }
 function callUI(peer, video, state) {
   const el = document.createElement('div')
@@ -247,8 +248,9 @@ function callUI(peer, video, state) {
   // OVOZ: faqat BITTA element ovoz chiqaradi (playRemote zanjiri boshqaradi —
   // 'ra' audio → 'v' video → 'wa' WebAudio). .local doim jimsiz (mikrofon qaytishi yo'q).
   el.innerHTML = `<video class="remote" autoplay playsinline muted></video><video class="local" autoplay playsinline muted></video><audio class="ra" autoplay></audio>
+    <div class="qi hide" title="Aloqa sifati"><i></i><i></i><i></i></div>
     <button class="l-un hide" type="button">🔊 Ovozni yoqish</button>
-    <div class="cinfo">${avHTML(peer, 120, { noStory: true })}<h2>${esc(uname(peer))}</h2><div class="cst">${state}</div></div>
+    <div class="cinfo">${avHTML(peer, 120, { noStory: true })}<h2>${esc(uname(peer))}</h2><div class="cst">${state}</div><div class="aom">🔊 Faqat ovoz rejimi</div></div>
     <div class="cbar"></div>`
   document.body.appendChild(el)
   // R3: qo'ng'iroq oynasida HAR bosish — ovoz zanjirini tiklashga urinish
@@ -265,7 +267,7 @@ function callButtons(kind) {
     b.innerHTML = wrap('end', IC.end, 'Rad etish', 'decline') + wrap('ok', CALL.video ? IC.cam : IC.phone, 'Javob berish', 'accept')
   } else {
     b.innerHTML = `<div class="cbtn mic"><button class="cb" data-c="mic">${IC.mic}</button><span>Mikrofon</span></div>`
-      + (CALL.video ? `<div class="cbtn cam"><button class="cb" data-c="cam">${IC.cam}</button><span>Kamera</span></div><div class="cbtn"><button class="cb" data-c="flip">${IC.flip}</button><span>Almashtirish</span></div>` : ``)
+      + (CALL.video ? `<div class="cbtn cam"><button class="cb" data-c="cam">${IC.cam}</button><span>Kamera</span></div><div class="cbtn"><button class="cb" data-c="flip">${IC.flip}</button><span>Almashtirish</span></div><div class="cbtn"><button class="cb" data-c="aonly">${IC.aonly}</button><span>Faqat ovoz</span></div>` : ``)
       + `<div class="cbtn spk"><button class="cb" data-c="spk">${IC.spk}</button><span>Dinamik</span></div>`
       + wrap('end', IC.end, 'Tugatish', 'hang')
   }
@@ -279,6 +281,7 @@ function callButtons(kind) {
     if (k === 'mic') { const tr = C?.local?.getAudioTracks()[0]; if (tr) { tr.enabled = !tr.enabled; t.classList.toggle('off', !tr.enabled); t.innerHTML = tr.enabled ? IC.mic : IC.micOff } }
     if (k === 'cam') { const tr = C?.local?.getVideoTracks()[0]; if (tr) { tr.enabled = !tr.enabled; t.classList.toggle('off', !tr.enabled); t.innerHTML = tr.enabled ? IC.cam : IC.camOff } }
     if (k === 'flip') flipCam()
+    if (k === 'aonly') { const C2 = CALL; if (C2) { C2.aOnly = !C2.aOnly; applyAudioOnly(C2, true) } }
     if (k === 'spk') { if (C) { C.spkMuted = !C.spkMuted; t.classList.toggle('off', C.spkMuted); playRemote(C); try { window.Android50 && window.Android50.speaker && window.Android50.speaker(!C.spkMuted) } catch {} } }
   }
 }
@@ -358,6 +361,62 @@ async function flipCam() {
     qs('.local', C.el).srcObject = C.local
   } catch { toast('Kamera almashtirilmadi') }
 }
+// ═══ v82: AVTOMATIK SIFAT MOSLASHUVI + SIFAT KO'RSATKICHI + FAQAT-OVOZ REJIMI ═══
+// Darajalar: L0 = to'liq sifat (1.2Mbps, HD), L1 = o'rta (600k, yarmi aniqlik),
+// L2 = yengil (300k, chorak aniqlik, 20fps). Tarmoq sekinlashsa AVTOMATIK pasayadi
+// (muzlagan o'rniga ravon past sifat), tiklanganda ko'tariladi. AUDIO HECH QACHON
+// cheklanmaydi — eng yomon tarmoqda ham ovoz boradi.
+const QA_LV = [
+  { br: 1200000, sc: 1, fps: 30 },
+  { br: 600000, sc: 2, fps: 30 },
+  { br: 300000, sc: 4, fps: 20 },
+]
+function applyVideoLevel(C) {
+  try {
+    const snd = C.sndV || (C.pc && C.pc.getSenders().find((x) => x.track?.kind === 'video'))
+    if (!snd) return
+    const lv = QA_LV[C.qaLvl || 0]
+    const p = snd.getParameters()
+    if (!p.encodings || !p.encodings.length) p.encodings = [{}]
+    p.encodings[0].maxBitrate = lv.br
+    try { p.encodings[0].scaleResolutionDownBy = lv.sc } catch {}
+    try { p.encodings[0].maxFramerate = lv.fps } catch {}
+    snd.setParameters(p).catch(() => {})
+  } catch {}
+}
+// Sifat ko'rsatkichi — qo'ng'iroq oynasi yuqorisida 3 ustunli signal
+function setQualityUI(C, lvl) {
+  try {
+    if (!C?.el) return
+    const q = qs('.qi', C.el)
+    if (q) { q.className = 'qi lv' + lvl; q.title = lvl === 0 ? 'Aloqa yaxshi' : lvl === 1 ? 'Aloqa o\u02bcrta' : 'Aloqa yomon' }
+  } catch {}
+}
+// FAQAT-OVOZ rejimi: chiquvchi video TARMODA UMUMAN YURIMAYDI (replaceTrack(null) —
+// renegotiation yo'q), masofa-video yashiriladi, ovoz davom etadi. Qarshi tomonda ham
+// avtomatik yoqiladi (signal orqali) — ikkala tomonda trafik tejaladi.
+function applyAudioOnly(C, send) {
+  try {
+    if (!C || !C.el) return
+    const on = !!C.aOnly
+    const vt = C.local && C.local.getVideoTracks()[0]
+    const snd = C.sndV || (C.pc && C.pc.getSenders().find((x) => x.track?.kind === 'video'))
+    if (on) {
+      if (vt && snd) snd.replaceTrack(null).catch(() => { try { vt.enabled = false } catch {} })
+      else if (vt) { try { vt.enabled = false } catch {} }
+    } else {
+      if (vt && snd) snd.replaceTrack(vt).catch(() => {})
+      else if (vt) { try { vt.enabled = true } catch {} }
+      C.vDead = 0; C.ovDead = 0; C.outDead = 0
+      if (C.video && C.started) applyVideoLevel(C)
+    }
+    C.el.classList.toggle('aud-only', on)
+    const b = qs('.cb[data-c="aonly"]', C.el)
+    if (b) b.classList.toggle('off', on)
+    clog('faqat-ovoz', (send ? 'men yoqdim' : 'qarshi tomon') + ' → ' + (on ? 'YOQILDI' : 'OCHILDI') + ' (turn=' + (C.relay === undefined ? '?' : C.relay) + ')')
+    if (send) sig(C.peer.id, { k: 'aonly', call_id: C.id, on: on ? 1 : 0 })
+  } catch (e) { clog('faqat-ovoz-xato', String((e && e.message) || e).slice(0, 100)) }
+}
 function limitBitrate(pc, max) {
   const s = pc.getSenders().find((x) => x.track?.kind === 'video'); if (!s) return
   try {
@@ -411,7 +470,10 @@ async function setupPC(C) {
   try {
     C.pc = await newPC((c) => sig(C.peer.id, { k: 'ice', call_id: C.id, c }))
     for (const t of C.local.getTracks()) C.pc.addTrack(t, C.local)
-    limitBitrate(C.pc, 1200000)
+    C.sndV = C.pc.getSenders().find((x) => x.track?.kind === 'video') || null
+    C.qaLvl = 0
+    applyVideoLevel(C)
+    if (C.aOnly) applyAudioOnly(C, false) // «Faqat ovoz» oldin yoqilgan bo'lsa — yangi sender'ga darhol qo'llanadi
     // R2 — HAL QILUVCHI TUZATISH: BITTA doimiy masofa-oqim. ontrack faqat treklar
     // QO'SHADI; .remote/.ra elementlari srcObject bilan BIR MARTA bog'lanadi va
     // hech qachon almashtirilmaydi — «oxirgi trek hodisasi boshqa turdagi ovozi
@@ -435,6 +497,7 @@ async function setupPC(C) {
         clog('ulanildi', 'turn=' + (C.relay === undefined ? '?' : C.relay) + ' | audio=' + (C.audioMode || '?') + (C.audioBlocked ? '(blok)' : ''))
         C.recTries = 0; C.recAt = 0
         playRemote(C)
+        try { const qi = qs('.qi', C.el); if (qi) qi.classList.remove('hide') } catch {}
         try { holdWake(true) } catch {}
         // APK: video qo'ng'iroqda ovoz KARNAYGA chiqsin
         try { if (C.video && window.Android50) { window.Android50.keepScreen && window.Android50.keepScreen(true); window.Android50.speaker && window.Android50.speaker(true) } } catch {}
@@ -793,6 +856,12 @@ async function handleSignalEv(ev) {
       if (C.pc && !C.restaring) restartIce(C)
       return
     }
+    // ── aonly: qarshi tomon «Faqat ovoz» rejimini yoqdi/o'chirdi (v82) ──
+    if (d.k === 'aonly') {
+      C.aOnly = !!d.on
+      applyAudioOnly(C, false)
+      return
+    }
     // ── offer: FAQAT offerer yaratadi (qabul qiluvchi faqat JAVOB beradi) ──
     if (d.k === 'offer') {
       if (!C.pc) { // EARLY-OFFER PARKING: pc hali tayyor emas (getMedia ishlayapti)
@@ -846,13 +915,16 @@ on('call_closed', (ev) => {
 // Avvalgi 6 xil taymer/qsorovul o'rniga BITTA mustaqil halqa: har 5s holatni tekshirib
 // TO'G'RILAYDI. Tiklash rollarga bo'lingan (R1): offerer o'zi restart, answerer so'raydi.
 function evalStats(C, st) {
-  let inA = 0, inV = 0, outA = 0, outV = 0, fr = 0
+  let inA = 0, inV = 0, outA = 0, outV = 0, fr = 0, fd = 0, lostV = 0, recvV = 0, lostA = 0, recvA = 0, rtt = -1
   st.forEach((r) => {
     // TURN relay belgisi — «mobil tarmoqda media yo'q» deganda birinchi savolga javob
-    if (r.type === 'candidate-pair' && r.state === 'succeeded') C.relay = (r.localCandidateType === 'relay' || r.remoteCandidateType === 'relay') ? 1 : 0
+    if (r.type === 'candidate-pair' && r.state === 'succeeded') {
+      C.relay = (r.localCandidateType === 'relay' || r.remoteCandidateType === 'relay') ? 1 : 0
+      if (typeof r.currentRoundTripTime === 'number') rtt = r.currentRoundTripTime
+    }
     if (r.type === 'inbound-rtp' && !r.isRemote) {
-      if (r.kind === 'audio') inA += r.bytesReceived || 0
-      if (r.kind === 'video') { inV += r.bytesReceived || 0; fr = r.framesDecoded || 0 }
+      if (r.kind === 'audio') { inA += r.bytesReceived || 0; lostA = r.packetsLost || 0; recvA = r.packetsReceived || 0 }
+      if (r.kind === 'video') { inV += r.bytesReceived || 0; fr = r.framesDecoded || 0; fd = r.framesDropped || 0; lostV = r.packetsLost || 0; recvV = r.packetsReceived || 0 }
     }
     if (r.type === 'outbound-rtp') {
       if (r.kind === 'audio') outA += r.bytesSent || 0
@@ -860,10 +932,11 @@ function evalStats(C, st) {
     }
   })
   const now = Date.now(), s = C.st0
-  if (!s) { C.st0 = { t: now, inA, inV, outA, outV, fr }; return }
+  if (!s) { C.st0 = { t: now, inA, inV, outA, outV, fr, fd, lostV, recvV, lostA, recvA }; return }
   if (now - s.t < 4500) return // ~5s oynada bir marta
+  const dts = Math.max(1, (now - s.t) / 1000)
   const dInA = inA - s.inA, dInV = inV - s.inV, dOutA = outA - s.outA, dOutV = outV - s.outV
-  C.st0 = { t: now, inA, inV, outA, outV, fr }
+  C.st0 = { t: now, inA, inV, outA, outV, fr, fd, lostV, recvV, lostA, recvA }
   C.statN = (C.statN || 0) + 1
   if (C.statN % 3 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode}${C.audioBlocked ? '(blok)' : ''} | turn=${C.relay === undefined ? '?' : C.relay}`)
   // ── KIRUVCHI OVOZ o'lgan — narvon: 3-oyna elementlarni jonlantir, 5-oynada tiklash ──
@@ -872,8 +945,8 @@ function evalStats(C, st) {
     if (C.inDead === 3) { clog('ovoz-yoq', 'kiruvchi ovoz ~15s to‘xtadi — elementlar jonlantiriladi'); playRemote(C) }
     if (C.inDead >= 5) { C.inDead = 3; recover(C, 'audio-kelmadi') }
   } else { C.inDead = 0; C.recTries = 0; C.recAt = 0 }
-  // ── KIRUVCHI VIDEO o'lgan (video qo'ng'iroqda) ──
-  if (C.video && dInV === 0) {
+  // ── KIRUVCHI VIDEO o'lgan (video qo'ng'iroqda; faqat-ovoz rejimida kutilgan holat) ──
+  if (C.video && dInV === 0 && !C.aOnly) {
     C.vDead = (C.vDead || 0) + 1
     if (C.vDead >= 5) { C.vDead = 3; recover(C, 'video-kelmadi') }
   } else C.vDead = 0
@@ -883,12 +956,44 @@ function evalStats(C, st) {
     C.outDead = (C.outDead || 0) + 1
     if (C.outDead >= 4 && (C.heals || 0) < 3) { C.outDead = 0; C.heals = (C.heals || 0) + 1; healOutgoing(C, 'audio') }
   } else C.outDead = 0
-  // ── CHIQUVCHI VIDEO o'lgan ──
+  // ── CHIQUVCHI VIDEO o'lgan (faqat-ovoz rejimida video ataylab yuborilmaydi) ──
   const vt = C.local && C.local.getVideoTracks()[0]
-  if (C.video && dOutV === 0 && dOutA > 0 && vt && vt.readyState === 'live' && vt.enabled) {
+  if (C.video && !C.aOnly && dOutV === 0 && dOutA > 0 && vt && vt.readyState === 'live' && vt.enabled) {
     C.ovDead = (C.ovDead || 0) + 1
     if (C.ovDead >= 4 && (C.heals || 0) < 3) { C.ovDead = 0; C.heals = (C.heals || 0) + 1; healOutgoing(C, 'video') }
   } else C.ovDead = 0
+  // ── v82: SIFAT BAHOSI (ko'rsatkich) + AVTOMATIK MOSLASHUV ──
+  try {
+    let bad = 0
+    if (rtt >= 0 && rtt > 0.45) bad++ // kechikish >450ms
+    const useV = !C.aOnly
+    const lp = useV ? (recvV - (s.recvV || 0)) : (recvA - (s.recvA || 0))
+    const ll = useV ? (lostV - (s.lostV || 0)) : (lostA - (s.lostA || 0))
+    if (lp + ll > 40 && ll / (lp + ll) > 0.08) bad++ // paket yo'qotish >8%
+    const dFr = fr - (s.fr || 0), dFd = fd - (s.fd || 0)
+    if (useV && dFr + dFd > 60 && dFd / (dFr + dFd) > 0.5) bad++ // kadrlar yarmidan ko'p tashlanmoqda
+    if (C.video && useV && C.statN >= 2) {
+      if (dInV * 8 / dts / 1000 < 50) bad++ // kiruvchi video juda sekin (muzlash)
+      const vt2 = C.local && C.local.getVideoTracks()[0]
+      if (vt2 && vt2.readyState === 'live' && vt2.enabled && dOutV * 8 / dts / 1000 < 50) bad++ // chiquvchi video to'silgan
+    }
+    setQualityUI(C, bad === 0 ? 0 : bad === 1 ? 1 : 2)
+    if (C.video && useV && C.started) {
+      C.qaLvl = C.qaLvl || 0
+      if (bad >= 2) { C.qBadN = (C.qBadN || 0) + 1; C.qGoodN = 0 }
+      else if (bad === 0) { C.qGoodN = (C.qGoodN || 0) + 1; C.qBadN = 0 }
+      else { C.qBadN = 0; C.qGoodN = 0 }
+      if (C.qBadN >= 2 && C.qaLvl < 2 && now - (C.qaAt || 0) > 10000) {
+        C.qaLvl++; C.qaAt = now; C.qBadN = 0
+        applyVideoLevel(C)
+        clog('sifat-pasaydi', 'L' + C.qaLvl + ' — tarmoq sekin, video yengillashtirildi (bad=' + bad + ')')
+      } else if (C.qGoodN >= 4 && C.qaLvl > 0 && now - (C.qaAt || 0) > 15000) {
+        C.qaLvl--; C.qaAt = now; C.qGoodN = 0
+        applyVideoLevel(C)
+        clog('sifat-oshdi', 'L' + C.qaLvl + ' — tarmoq yaxshi, sifat tiklandi')
+      }
+    }
+  } catch {}
 }
 setInterval(() => {
   const C = CALL
