@@ -101,7 +101,9 @@ async function getMedia(video) {
     }
   }
   if (last && (last.name === 'NotAllowedError' || last.name === 'SecurityError')) {
-    throw new Error('Kamera va mikrofonga ruxsat berilmagan — Sozlamalarda ilova ruxsatlaridan Kamera va Mikrofoni yoqing')
+    // v88: brauzer va APK uchun HAR XIL ko'rsatma — brauzerda ruxsat manzil-satrida beriladi
+    if (window.Android50) throw new Error('Kamera va mikrofonga ruxsat berilmagan — Sozlamalarda ilova ruxsatlaridan Kamera va Mikrofoni yoqing')
+    throw new Error('Kamera/mikrofonga ruxsat berilmagan — manzil satridagi 🎥/🎤 ikonkani bosib “Ruxsat berish”ni tanlang (yoki sahifani yangilab, so‘rovga rozi bo‘ling)')
   }
   if (last && last.name === 'MediaHangError') {
     throw new Error('Kamera javob bermadi — yana bir marta bosing; ishlamasa ilovani to‘liq yopib qayta oching')
@@ -1079,8 +1081,10 @@ function evalStats(C, st) {
   // (3) 'wa'. Har bosqich jurnalga yoziladi — keyingi jurnal isbot beradi.
   if (C.audioMode !== 'wa' && dInA > 0 && inR !== -1 && inR < 1) {
     C.raZero = (C.raZero || 0) + 1
-    if (C.raZero === 2 && !C.reboundOnce) {
+    if (C.raZero >= 1 && !C.reboundOnce) {
       C.reboundOnce = 1
+      // v88: 1-oynadayoq (5s) qayta bog'laymiz — avval 2-oyna (10s) edi; real qo'ng'iroqda
+      // (call 1791388832980421, 16:00) qayta bog'lash ovozni tikkaldi lekin 15s KUTGANDI.
       clog('ovoz-ra-jim', 'paketlar bor, k=0 — audio element qayta bog‘lanmoqda (bosqich 1)')
       rebindRemoteAudio(C)
     } else if (C.raZero === 5) {
