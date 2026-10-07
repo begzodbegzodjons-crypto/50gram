@@ -324,14 +324,25 @@ function playRemote(C, escalate) {
   if (!v || !a) return
   // R2: oqim DOIM xuddi shu obyekt — bir marta bog'lanadi, hech qachon almashtirilmaydi
   if (v.srcObject !== C.remote) v.srcObject = C.remote
-  if (a.srcObject !== C.remote) a.srcObject = C.remote
+  // v82.1: <audio> elementga FAQAT AUDIO-trekli oqim. Ba'zi Android WebView'larida
+  // audio-element + VIDEO-trekli oqim = JIMLIK (tarmoqda ovoz bor, eshitilmaydi —
+  // jurnal isboti: inA>0, ovoz=ra, «ovoz bormayapti»). Klassik xato sinfi.
+  const aOnly = C.remoteA || C.remote
+  if (a.srcObject !== aOnly) a.srcObject = aOnly
   if (C.spkMuted) { // «Dinamik» bilan ataylab o'chirilgan — zanjirga qo'l tekkizmaymiz
     v.muted = true; a.muted = true
     if (pill) pill.classList.add('hide')
     return
   }
-  if (!C.audioMode) C.audioMode = 'ra'
-  if (escalate) C.audioMode = C.audioMode === 'ra' ? 'v' : C.audioMode === 'v' ? 'wa' : 'ra'
+  // v82.1: Android WebView'da WebAudio ASOSIY yo'l — element play() «muvaffaqiyatli»
+  // bo'lib JIM qolishi mumkin; WebAudio grafida bunday xato yo'q. AudioContext
+  // foydalanuvchi bosishi ichida ochilgan (unlockAudio) — autoplay qulfi yo'q.
+  if (!C.audioMode) C.audioMode = window.Android50 ? 'wa' : 'ra'
+  if (escalate) {
+    const ord = window.Android50 ? ['wa', 'ra', 'v'] : ['ra', 'v', 'wa']
+    const i = ord.indexOf(C.audioMode)
+    C.audioMode = ord[(i + 1 + ord.length) % ord.length]
+  }
   const mode = C.audioMode
   let ok
   if (mode === 'ra') { v.muted = true; a.muted = false; ok = tryEl(a) }
@@ -391,6 +402,26 @@ function setQualityUI(C, lvl) {
     const q = qs('.qi', C.el)
     if (q) { q.className = 'qi lv' + lvl; q.title = lvl === 0 ? 'Aloqa yaxshi' : lvl === 1 ? 'Aloqa o\u02bcrta' : 'Aloqa yomon' }
   } catch {}
+}
+// v82.1: oqim ovoz darajasi (RMS 0–100%). O'lchov shoxi CHIQISHGA ULANMAYDI —
+// ovozga ta'sir qilmaydi. -1 = o'lcha olmadi (AudioContext yo'q/jim).
+function rmsPct(C, stream, key) {
+  try {
+    if (!C.ctx || C.ctx.state !== 'running' || !stream) return -1
+    if (!C['an_' + key]) {
+      const src = C.ctx.createMediaStreamSource(stream)
+      const an = C.ctx.createAnalyser()
+      an.fftSize = 512
+      src.connect(an) // destination'ga ULANMAYDI — faqat o'lchov
+      C['an_' + key] = an
+    }
+    const an = C['an_' + key]
+    const buf = C['ab_' + key] || (C['ab_' + key] = new Float32Array(an.fftSize))
+    an.getFloatTimeDomainData(buf)
+    let sum = 0
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
+    return Math.min(100, Math.round(Math.sqrt(sum / buf.length) * 400))
+  } catch { return -1 }
 }
 // FAQAT-OVOZ rejimi: chiquvchi video TARMODA UMUMAN YURIMAYDI (replaceTrack(null) —
 // renegotiation yo'q), masofa-video yashiriladi, ovoz davom etadi. Qarshi tomonda ham
@@ -484,6 +515,12 @@ async function setupPC(C) {
         const t = e.track
         for (const o of C.remote.getTracks()) if (o.kind === t.kind && o !== t) { try { C.remote.removeTrack(o) } catch {} }
         if (!C.remote.getTracks().includes(t)) C.remote.addTrack(t)
+        // v82.1: audio uchun ALOHIDA audio-trekli oqim — <audio> element shuni eshitadi
+        if (t.kind === 'audio') {
+          if (!C.remoteA) C.remoteA = new MediaStream()
+          for (const o of C.remoteA.getTracks()) if (o !== t) { try { C.remoteA.removeTrack(o) } catch {} }
+          if (!C.remoteA.getTracks().includes(t)) C.remoteA.addTrack(t)
+        }
       } catch {}
       clog('masofa-trek', e.track.kind + ' ready=' + e.track.readyState)
       e.track.onunmute = () => { const C2 = CALL; if (C2 === C) { clog('trek-tirik', e.track.kind); playRemote(C2) } }
@@ -589,7 +626,7 @@ async function callUser(uid, video) {
   if (uid === S.me.id) return
   let peer = S.users.get(uid)
   if (!peer) try { peer = await api('/users/' + uid); S.users.set(uid, peer) } catch (e) { return toast('⚠️ ' + e.message) }
-  CALL = { id: 0, peer, video: !!video, outgoing: true, role: 'offerer', audioMode: 'ra', ice: [], el: callUI(peer, video, 'Chaqirilmoqda…'), t0: Date.now(), ringMode: 'out' }
+  CALL = { id: 0, peer, video: !!video, outgoing: true, role: 'offerer', audioMode: window.Android50 ? 'wa' : 'ra', ice: [], el: callUI(peer, video, 'Chaqirilmoqda…'), t0: Date.now(), ringMode: 'out' }
   unlockAudio(CALL) // FOYDALANUVCHI BOSISHI ICHIDA: AudioContext ochiladi (autoplay qulfidan chiqish)
   clog('chaqirildi', 'to=' + uid + ' video=' + !!video)
   startSigPoll()
@@ -747,7 +784,7 @@ function incomingCall(ev, force) {
   }
   S.users.set(ev.from.id, { ...(S.users.get(ev.from.id) || {}), ...ev.from })
   const peer = S.users.get(ev.from.id)
-  CALL = { id: ev.call_id, peer, video: !!ev.video, outgoing: false, role: 'answerer', audioMode: 'ra', ice: [], el: callUI(peer, ev.video, ev.video ? 'Video qo‘ng‘iroq…' : 'Qo‘ng‘iroq…'), t0: Date.now(), ringMode: 'in' }
+  CALL = { id: ev.call_id, peer, video: !!ev.video, outgoing: false, role: 'answerer', audioMode: window.Android50 ? 'wa' : 'ra', ice: [], el: callUI(peer, ev.video, ev.video ? 'Video qo‘ng‘iroq…' : 'Qo‘ng‘iroq…'), t0: Date.now(), ringMode: 'in' }
   clog('kirish-qo\'ng\'iroq', 'call=' + ev.call_id + ' from=' + ev.from.id + ' video=' + !!ev.video)
   startSigPoll()
   CALL.el.classList.add('incoming')
@@ -938,7 +975,20 @@ function evalStats(C, st) {
   const dInA = inA - s.inA, dInV = inV - s.inV, dOutA = outA - s.outA, dOutV = outV - s.outV
   C.st0 = { t: now, inA, inV, outA, outV, fr, fd, lostV, recvV, lostA, recvA }
   C.statN = (C.statN || 0) + 1
-  if (C.statN % 3 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode}${C.audioBlocked ? '(blok)' : ''} | turn=${C.relay === undefined ? '?' : C.relay}`)
+  // ── v82.1: OVOZ DARAJASI (RMS) — «kim jim» savoliga aniq javob ──
+  let inR = -1, outR = -1
+  try {
+    if (C.ctx && C.ctx.state !== 'running') C.ctx.resume().catch(() => {})
+    if (C.ctx && C.ctx.state === 'running') {
+      if (C.remote) inR = rmsPct(C, C.remote, 'in')
+      if (C.local) outR = rmsPct(C, C.local, 'out')
+    }
+    if (C.audioMode === 'wa' && C.ctx && C.ctx.state === 'suspended') {
+      C.waSusp = (C.waSusp || 0) + 1
+      if (C.waSusp >= 3) { C.waSusp = 0; clog('ovoz-wa-qotdi', 'AudioContext 15s suspended — element yo‘liga o‘tilyapti'); playRemote(C, true) }
+    } else if (C.ctx) C.waSusp = 0
+  } catch {}
+  if (C.statN % 3 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode}${C.audioBlocked ? '(blok)' : ''} k=${inR}% ch=${outR}% | turn=${C.relay === undefined ? '?' : C.relay}`)
   // ── KIRUVCHI OVOZ o'lgan — narvon: 3-oyna elementlarni jonlantir, 5-oynada tiklash ──
   if (dInA === 0) {
     C.inDead = (C.inDead || 0) + 1
@@ -956,6 +1006,14 @@ function evalStats(C, st) {
     C.outDead = (C.outDead || 0) + 1
     if (C.outDead >= 4 && (C.heals || 0) < 3) { C.outDead = 0; C.heals = (C.heals || 0) + 1; healOutgoing(C, 'audio') }
   } else C.outDead = 0
+  // ── v82.1: MIKROFON-JIM davolash — tarmoqqa yuborilyapti (outA>0) lekin mikrofon
+  // oqimi 30s JIM (RMS=0): WebView capture-pipelini qotishi. replaceTrack bilan
+  // yangi mikrofon oqimi ochiladi (renegotiation yo'q) — «B ovozi kelmayapti»ning
+  // bittomonlama ildizi.
+  if (outR === 0 && dOutA > 0 && at && at.readyState === 'live' && at.enabled) {
+    C.silN = (C.silN || 0) + 1
+    if (C.silN >= 6 && (C.heals || 0) < 3) { C.silN = 0; C.heals = (C.heals || 0) + 1; clog('mikro-jim', 'mikrofon jimga oqmoqda (RMS=0) — qayta ochilmoqda #' + C.heals); healOutgoing(C, 'audio') }
+  } else C.silN = 0
   // ── CHIQUVCHI VIDEO o'lgan (faqat-ovoz rejimida video ataylab yuborilmaydi) ──
   const vt = C.local && C.local.getVideoTracks()[0]
   if (C.video && !C.aOnly && dOutV === 0 && dOutA > 0 && vt && vt.readyState === 'live' && vt.enabled) {
