@@ -102,7 +102,9 @@ async function newApp(browser, acc, label) {
     await openChat(Pa.page); await openChat(Pb.page)
     log('chatlar ochildi')
 
-    // ---------- 1-SENARIY: RASM ----------
+    // ---------- 1-SENARIY: RASM (faqat YANGI xabarga qaraladi) ----------
+    const imgA0 = await Pa.page.locator('#msgs .mrow img').count()
+    const imgB0 = await Pb.page.locator('#msgs .mrow img').count()
     log('RASM yuborilmoqda (A)...')
     const [fc] = await Promise.all([
       Pa.page.waitForEvent('filechooser', { timeout: 15000 }),
@@ -112,37 +114,38 @@ async function newApp(browser, acc, label) {
     await Pa.page.waitForSelector('#cap-s', { timeout: 10000 })
     await Pa.page.fill('#cap-i', 'e2e rasm izohi')
     await Pa.page.click('#cap-s')
-    await Pa.page.waitForSelector('#msgs .mrow img', { timeout: 30000 })
-    log('A: rasm bubble korindi')
-    const decoded = await Pb.page.waitForFunction(() => {
+    const decoded = await Pb.page.waitForFunction((n) => {
       const imgs = [...document.querySelectorAll('#msgs .mrow img')]
-      return imgs.some((im) => im.complete && im.naturalWidth > 0)
-    }, { timeout: 45000 }).then(() => true).catch(() => false)
-    ok(decoded, 'B: rasm yuklab olindi + DEKRIPT + DEKODLANDI (naturalWidth>0)')
-    const decodedA = await Pa.page.waitForFunction(() => {
+      return imgs.length > n && imgs[imgs.length - 1].complete && imgs[imgs.length - 1].naturalWidth > 0
+    }, imgB0, { timeout: 45000 }).then(() => true).catch(() => false)
+    ok(decoded, 'B: YANGI rasm yuklab olindi + DEKRIPT + DEKODLANDI (naturalWidth>0)')
+    const decodedA = await Pa.page.waitForFunction((n) => {
       const imgs = [...document.querySelectorAll('#msgs .mrow img')]
-      return imgs.some((im) => im.complete && im.naturalWidth > 0)
-    }, { timeout: 30000 }).then(() => true).catch(() => false)
+      return imgs.length > n && imgs[imgs.length - 1].complete && imgs[imgs.length - 1].naturalWidth > 0
+    }, imgA0, { timeout: 30000 }).then(() => true).catch(() => false)
     ok(decodedA, "A: o'z rasmini koradi (kesh)")
 
-    // ---------- 2-SENARIY: FAYL ----------
+    // ---------- 2-SENARIY: FAYL (oxirgi fayl bilan ishlaydi) ----------
+    const fileB0 = await Pb.page.locator('#msgs .file[data-file]').count()
     log('FAYL yuborilmoqda (A)...')
     const [fc2] = await Promise.all([
       Pa.page.waitForEvent('filechooser', { timeout: 15000 }),
       Pa.page.click('#b-attach').then(() => Pa.page.click('[data-a="file"]')),
     ])
     await fc2.setFiles(filePath)
-    await Pb.page.waitForSelector('#msgs .file[data-file]', { timeout: 30000 })
-    ok(true, 'B: fayl bubble korindi')
-    try {
-      const [dl] = await Promise.all([
-        Pb.page.waitForEvent('download', { timeout: 30000 }),
-        Pb.page.click('#msgs .file[data-file]'),
-      ])
-      const got = readFileSync(await dl.path(), 'utf8')
-      ok(got === fileBody, 'B: fayl mazmuni BAYT-BAYT MOS', got.slice(0, 40))
-    } catch (e) {
-      ok(false, 'B: fayl yuklab olish (download hodisasi)', String(e).slice(0, 120))
+    const arrived = await Pb.page.waitForFunction((n) => document.querySelectorAll('#msgs .file[data-file]').length > n, fileB0, { timeout: 30000 }).then(() => true).catch(() => false)
+    ok(arrived, 'B: YANGI fayl bubble korindi')
+    if (arrived) {
+      try {
+        const [dl] = await Promise.all([
+          Pb.page.waitForEvent('download', { timeout: 30000 }),
+          Pb.page.locator('#msgs .file[data-file]').last().click(),
+        ])
+        const got = readFileSync(await dl.path(), 'utf8')
+        ok(got === fileBody, 'B: fayl mazmuni BAYT-BAYT MOS', got.slice(0, 40))
+      } catch (e) {
+        ok(false, 'B: fayl yuklab olish (download hodisasi)', String(e).slice(0, 120))
+      }
     }
 
     console.log(fails === 0 ? '\n=== MEDIA E2E PASS ===' : '\n=== MEDIA E2E FAIL (' + fails + ') ===')
