@@ -160,3 +160,19 @@ Stage Summary:
 - ASOSIY MAQSAD BAJARILDI: 50gram.uz ildizi endi ilovani beradi (mustaqil tarmoqdan isbotlangan).
 - QOLGAN ISH: foydalanuvchi wildcard route'ni qayta qo'shishi kerak (*.50gram.uz/* — xuddi shu oynada) — www ham shu bilan qaytadi.
 - Mening IP FW blokda (30 kun) — keyingi API tekshiruvlar CI orqali (toza IP + brauzer UA).
+
+---
+Task ID: 40
+Agent: Super Z (asosiy)
+Task: SSL qulf + Google qidiruvga chiqarish (SEO)
+
+Work Log:
+- SSL: tashxis — sertifikat yaroqli (https 200), lekin always_use_https=off (CI GET tasdiqladi); token settings PATCH'ga ruxsatsiz (10000/9109). Foydalanuvchiga SSL/TLS -> Edge Certificates -> Always Use HTTPS yo'riqnomasi berildi. Foydalanuvchi yoqdi ("juda ham a'lo").
+- SEO tayyorlov: web/robots.txt (Allow / + Disallow /api/ va apk + Sitemap ko'rsatkichi), web/sitemap.xml (https://50gram.uz/), index.html'ga canonical + robots meta + Open Graph (og:image=logo.png 512) + twitter:card + JSON-LD WebApplication (offers 0 UZS, downloadUrl apk) qo'shildi. JSON-LD python bilan validatsiya qilindi.
+- domen.yml tekshir rejimiga robots.txt va sitemap.xml tekshiruvi qo'shildi.
+- Push -> Deploy run 37757655499 SUCCESS. Mustaqil CI tekshiruv: 50gram.uz 200 + ilova, robots.txt LIVE, sitemap 200, /api/health {"ok":true} 200 (domen orqali API toza IP'dan ishlayapti!), core v92, apk 200. www hali 403 (wildcard route qayta qo'shilmagan).
+- Izoh: mening box IP'im FW'da blokda — /api tekshiruvlar CI orqali.
+
+Stage Summary:
+- Sayt texnik jihatdan Google'ga to'liq tayyor (robots+sitemap+meta+JSON-LD+https redirect).
+- Qolgan: (1) foydalanuvchi wildcard route *.50gram.uz/* qayta qo'shishi (www 403 hali); (2) GSC: domain property + DNS TXT verify + sitemap submit + Request indexing — yo'riqnoma foydalanuvchiga berildi (bajarilishi kutilmoqda).
