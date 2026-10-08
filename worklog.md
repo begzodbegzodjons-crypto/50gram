@@ -89,3 +89,34 @@ Stage Summary:
 - Simptom: video qo'ng'iroqda bir tomon ovozi chiqmaydi (APK qurilmalar). Ildiz: APK 2.6'da speaker ko'prigi yo'q → Chromium comm-rejim ovozi quloqchiga → video'da ko'rinmaydi; + v90 wa-qaytish qorovuli tap-yolg'onida ishlayotgan karnay yo'lini buzardi.
 - v91: APK video qo'ng'iroqda ovoz endi WebAudio (KARNAY) orqali; tap yolg'oni yo'lni buzolmaydi (alv-gated); qutqaruv hech qachon to'xtamaydi (aylanish); Dinamik WebAudio'ni boshqaradi; APK 3.0 audioKick/routeInfo bilan rebuild-ga tayyor.
 - Kutilayotgan isbot: foydalanuvchi video qo'ng'iroq qiladi → jurnal'da ovoz=wa + alv>0 + eshitish tasdiqlanadi.
+
+---
+Task ID: 37
+Agent: Super Z (asosiy)
+Task: v92 — «bir qarasang ishlaydi, bir qarasang ishlamaydi» — ovoz tizimining TASODIFIYLIGINI yo'q qilish (foydalanuvchi: butkul yangidan qil)
+
+Work Log:
+- Foydalanuvchi shikoyati: video qo'ng'iroq ba'zan ishlaydi, ba'zan ishlamaydi; avval boshida ishlagan. Butunlay yangidan qilishni so'radi.
+- rtc.js 2055 qatori to'liq o'qildi; evalStats qutqaruv tizimida 3 ta TASODIFIYLIK manbasi topildi:
+  (1) v91 wa-qorovuli dInA>0 bilan ishlar edi — Opus SUKUTI ham paket yuboradi (dInA>0, ~10x kam): qarshi tomon 15s gapirmasa audioLevel=0 → ISHLAYOTGAN karnay yo'li 'ra'ga (quloqchi) almashtirilardi → video'da jim. SUKUT O'ZI YO'LNI BUZARDI — har qo'ng'iroqda sukut payti boshqacha = tasodif.
+  (2) alv mavjud bo'lmasa + AudioContext suspended — qutqaruv umuman ishlamasdi.
+  (3) AudioContext har qo'ng'iroqda close() qilinib qayta ochilardi — natija noaniq (suspended qolishi mumkin edi).
+- v92 tuzatishlar (rtc.js):
+  (a) routeFor(C) — ANIQLANGAN yo'nalish: APK spkOn?'wa':'ra'; browser 'ra'. Default: video→karnay, audio→quloqchi. modeOrd() o'chirildi.
+  (b) JIMLIK-QUTQARUVCHI endi NUTQ DALILI bilan: faqat dInA>8000 (faol gapirish; Opus sukuti bunday bo'lolmaydi) VA eshitish dalili yo'q (alv<1 VA k<1). Sukutda (dInA≤8000) yo'l HECH QACHON o'zgartirilmaydi. Bosqichlar: z1 o'z-yo'li-tiklash → z3 fizik yo'l almashtirish (wa↔ra) → z4 elementlar 0-dan → z5 nativeKick → z6+ aylanish.
+  (c) unlockAudio — GLOBAL window.__50actx: bir marta ochiladi (bosish ichida; __50warmup birinchi bosishida ham), hech qachon yopilmaydi (endCall endi ctx.close() qilmaydi).
+  (d) connectWA — suspended = ISHLAMAYDI (pill chiqadi; avval suspended=OK deb qaraldi — yashirin jimlik); waGain'dan KEYIN analyser (C.waAn) qo'shildi.
+  (e) rmsWa(C) + namunovchi: 'wa' rejimida ijro-zanjiri metrikasi (waGain'dan keyin — oqim-tap yolg'onlari chetlab o'tiladi); boshqa rejimlarda oqim-tap.
+  (f) tryEl/playRemote — kaskad YO'Q: play() rad etilsa «Ovozni yoqish» pill; ijro dalili kelganda pill o'zi yashirinadi.
+  (g) «Dinamik» APK'da = KARNAY↔QULOQCHI (spkOn; WebAudio APK 2.6'da ham karnayga chiqaradi — ko'prik kerak emas); browserda eski jim/ochiq.
+  (h) stat satriga eshit= (everHeard) va sil= (silN) maydonlari.
+- Versiya v92: worker BUILD_V + core.js __50BUILD + sw.js V (3-yo'qlik). node --check rtc.js OK.
+- Commit 9019c82 → deploy run 37750606718 SUCCESS (Current Version ID 4d175c50).
+- ISBOT (CI): smoke run 37750597966 SUCCESS — health {"ok":true}, «versiyalar: sw=v92 core=v92 worker=v92», «3-yo'qlik versiya qulfi: OK (v92)», jonli /api/build v92 tasdiqlandi.
+- ISBOT (CI): MEDIA E2E run 37751555952 SUCCESS — A: inA=51645 inV=728277 fr=334; B: inA=61309 inV=732045 fr=395; ikkala audio currentTime 3.2s adv, muted=false — IKKALA TOMON ovoz+video oqadi va ijro etiladi.
+
+Stage Summary:
+- Tasodifiylik ildizlari yo'q qilindi: sukut endi yo'lni buza olmaydi (nutq-dalilli qutqaruv), AudioContext barqaror (global), ijro metrikasi haqiqiy zanjirdan olinadi.
+- E2E da ikkala tomonda audio+video aqiqiy oqishi isbotlandi (server/browser qismi).
+- APK qurilmalarda (WebView quloqchi-tuzoq) yakuniy isbot foydalanuvchining REAL video qo'ng'irog'i bilan bo'ladi — jurnalda ovoz=wa + alv>0 + eshit=1 kutiladi.
+- Eslatma: domen line (Task 35) hali ham kutish rejimida — zona pending.
