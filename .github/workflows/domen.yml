@@ -1,0 +1,147 @@
+name: domen
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "zona | yozuvlar | ulash | tekshir | hammasi"
+        required: true
+        default: "zona"
+permissions:
+  contents: read
+
+env:
+  DOMEN: 50gram.uz
+  SKRIP: 50gram
+
+jobs:
+  domen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cloudflare API ishlari (zona / yozuvlar / ulash)
+        if: ${{ inputs.mode != 'tekshir' }}
+        env:
+          CF: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACC: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, urllib.request, urllib.error
+
+          API   = 'https://api.cloudflare.com/client/v4'
+          CF    = os.environ['CF']
+          ACC   = os.environ['ACC']
+          MODE  = (os.environ.get('MODE') or 'zona').strip()
+          DOMEN = '50gram.uz'
+          WWW   = 'www.50gram.uz'
+          SKRIP = '50gram'
+
+          def req(method, path, body=None):
+              r = urllib.request.Request(
+                  API + path, method=method,
+                  data=json.dumps(body).encode() if body is not None else None,
+                  headers={'Authorization': 'Bearer ' + CF,
+                           'Content-Type': 'application/json'})
+              try:
+                  with urllib.request.urlopen(r, timeout=30) as resp:
+                      return json.load(resp)
+              except urllib.error.HTTPError as e:
+                  try:
+                      return json.load(e)
+                  except Exception:
+                      return {'success': False, 'errors': [{'message': str(e)}]}
+              except Exception as e:
+                  return {'success': False, 'errors': [{'message': str(e)}]}
+
+          def show(tag, res):
+              ok = res.get('success')
+              print(f'== {tag}: {"OK" if ok else "XATO"}')
+              if not ok:
+                  print('   xatolar:', json.dumps(res.get('errors'), ensure_ascii=False))
+              return ok
+
+          # ---------- ZONA ----------
+          def zona():
+              z = req('GET', '/zones?name=' + DOMEN)
+              items = z.get('result') or []
+              if items:
+                  zid = items[0]['id']
+                  print('ZONA_ALLAQACHON_BOR:', zid, '| holati:', items[0].get('status'))
+                  ns = items[0].get('name_servers') or []
+                  if ns:
+                      print('NS_SERVERLAR:', ' va '.join(ns))
+                  return zid
+              c = req('POST', '/zones', {'name': DOMEN, 'account': {'id': ACC}, 'type': 'full'})
+              if not show('zona-yaratish', c):
+                  print('ZONA_TOKEN_RUXSATI_YOQ — Dashboard orqali qoshish kerak')
+                  sys.exit(3)
+              zid = c['result']['id']
+              ns = c['result'].get('name_servers') or []
+              print('ZONA_YARATILDI:', zid, '| holati:', c['result'].get('status'))
+              print('NS_SERVERLAR:', ' va '.join(ns) if ns else '(keyinroq korinadi)')
+              return zid
+
+          # ---------- YOZUVLAR (pochta/xosting saqlanadi) ----------
+          def yozuvlar(zid):
+              REC = [
+                  ('A',   'mail.50gram.uz',    '45.138.159.4',                 None, False, 14400),
+                  ('A',   'webmail.50gram.uz', '45.138.159.4',                 None, False, 14400),
+                  ('A',   'ftp.50gram.uz',     '45.138.159.4',                 None, False, 14400),
+                  ('MX',  '50gram.uz',         'mail.50gram.uz',                10,   False, 3600),
+                  ('TXT', '50gram.uz',         'v=spf1 +a +mx +ipv4:45.138.159.4 ~all', None, False, 3600),
+                  ('TXT', '_dmarc.50gram.uz',  'v=DMARC1; p=none;',             None, False, 3600),
+              ]
+              for t, name, content, prio, prox, ttl in REC:
+                  ex = req('GET', f'/zones/{zid}/dns_records?type={t}&name={name}')
+                  got = ex.get('result') or []
+                  found = [r for r in got if r.get('content', '').strip().strip('"') == content.strip()]
+                  if found:
+                      print(f'BOR: {t} {name} -> {content}')
+                      continue
+                  body = {'type': t, 'name': name, 'content': content, 'ttl': ttl, 'proxied': prox}
+                  if prio is not None:
+                      body['priority'] = prio
+                  show(f'yozuv {t} {name}', req('POST', f'/zones/{zid}/dns_records', body))
+
+          # ---------- ULASH (worker custom domain) ----------
+          def ulash(zid):
+              req('PUT', f'/zones/{zid}/activation_check')  # tezroq tekshiruv
+              st = (req('GET', f'/zones/{zid}').get('result') or {})
+              stat = st.get('status')
+              print('ZONA_HOLATI:', stat)
+              if stat != 'active':
+                  print('ZONA_HALI_ACTIVE_EMAS — registrar NS almashtirilgach qayta urinib koring')
+                  sys.exit(4)
+              for hn in (DOMEN, WWW):
+                  lst = req('GET', f'/zones/{zid}/dns_records?name={hn}')
+                  for r in (lst.get('result') or []):
+                      if r.get('type') in ('A', 'AAAA', 'CNAME'):
+                          show(f"ziddiyat-ochirish {r['type']} {hn}",
+                               req('DELETE', f"/zones/{zid}/dns_records/{r['id']}"))
+                  a = req('PUT', f'/accounts/{ACC}/workers/domains',
+                          {'zone_id': zid, 'hostname': hn, 'service': SKRIP, 'environment': 'production'})
+                  if show(f'domen-ulash {hn}', a):
+                      print(f'   {hn} -> {SKRIP} (production) ulandi')
+
+          mode = MODE if MODE != 'hammasi' else 'hammasi'
+          zid = None
+          if mode in ('zona', 'hammasi', 'yozuvlar', 'ulash'):
+              zid = zona()
+          if mode in ('yozuvlar', 'hammasi') and zid:
+              yozuvlar(zid)
+          if mode in ('ulash', 'hammasi') and zid:
+              ulash(zid)
+          print('DOMEN_ISH_TUGADI')
+          PY
+
+      - name: Sayt tekshiruvi (tekshir / hammasi)
+        if: ${{ inputs.mode == 'tekshir' || inputs.mode == 'hammasi' }}
+        run: |
+          for u in https://50gram.uz/ https://www.50gram.uz/; do
+            echo "== $u"
+            curl -sS -o /tmp/sahifa -D - --max-time 25 "$u" | head -8 || echo "ULANMADI"
+            head -c 160 /tmp/sahifa 2>/dev/null; echo; echo
+          done
+          echo "== core.js build belgisi"
+          curl -sS --max-time 25 https://50gram.uz/core.js | grep -o "__50BUILD = '[^']*'" || echo "BUILD BELGISI TOPILMADI"
+          echo "== /50gram.apk"
+          curl -sS -o /dev/null --max-time 30 -w "apk: %{http_code} | %{size_download} bayt\n" https://50gram.uz/50gram.apk || true
