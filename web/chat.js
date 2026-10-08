@@ -662,7 +662,10 @@ async function sendFile(file, kind, extra = {}, chatId0) {
     if (kind === 'photo' && file.type !== 'image/gif') {
       // v81 ZAXIRA: siqish ishlamasa (HEIC/qamra formati/eski WebView decode qilolmaydi) —
       // avval BUTUN yuborish buzilardi. Endi ASL fayl o'z holida yuboriladi (yuborish baribir ishlaydi).
-      try { blob = await resizeImage(file, 1600, 0.85) } catch (e) { mediaLog('resize-zaxira', e, { kind, size: file.size, mime: file.type || '?' }); blob = file }
+      // v90: SIQISH OSILIB QOLSA HAM zaxira ishlaydi — eski WebView'da katta rasm decode'i
+      // ba'zan ABADIY qotadi (xato ham bermaydi) — «rasm tanlandi, keyin hech narsa bo'lmadi»
+      // belgisining izsiz turi. 20s timeout: osilsa — ASL fayl yuboriladi.
+      try { blob = await Promise.race([resizeImage(file, 1600, 0.85), new Promise((_, rej) => setTimeout(() => rej(new Error('siqish 20s osildi — asl fayl yuboriladi')), 20000))]) } catch (e) { mediaLog('resize-zaxira', e, { kind, size: file.size, mime: file.type || '?' }); blob = file }
     }
     const id = await upload(blob, file.name || kind, (p) => {
       const bar = qs(`[data-cid="${temp.client_id}"] .prog i`)
