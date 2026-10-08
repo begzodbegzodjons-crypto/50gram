@@ -54,6 +54,25 @@
    rejim → rejim → elementlarni-0dan-qurish → native-kick → AYLANISH (abadiy jimlik
    mumkin emas); (4) «Dinamik» WebAudio'ni ham o'chiradi/tiklaydi; (5) APK 3.0:
    audioKick/routeInfo ko'priklari + to'g'ri marshrut tartibi.
+
+   v92 (ANIQLANGAN OVOZ — TASODIFIYLIK YO'Q QILINDI): «bir qarasang ishlaydi, bir
+   qarasang ishlamaydi» degan shikoyatning ildizi — QUTQARUV TIZIMINING O'ZI
+   tasodifiy edi. 3 ta manba topildi va yo'q qilindi:
+   a) v91 wa-qorovuli dInA>0 bilan ishlar edi — lekin Opus SUKUTI ham paket yuboradi
+      (dInA>0, ~10x kam). Ya'ni qarshi tomon 15s GAPIRMASA — audioLevel=0 bo'lardi →
+      ISHLAYOTGAN karnay yo'li 'ra'ga (quloqchi) almashtirilardi → video'da jim.
+      SUKUT O'ZI YO'LNI BUZARDI — har qo'ng'iroqda sukut payti boshqacha → tasodif.
+   b) alv ishlamasa + AudioContext suspended bo'lsa — qutqaruv UMUMAN ishlamardi.
+   c) AudioContext har qo'ng'iroqda yopilib qayta ochilardi — natija noaniq.
+   v92 QOIDALARI (hammasi aniqlangan — xuddi shu sharoitda xuddi shu natija):
+   (1) YO'NALISH faqat 3 narsaga bog'liq: platforma + qo'ng'iroq turi + «Dinamik».
+   (2) Qutqaruv FAQAT «qarshi tomon NUTQ ko'chirmoqda (dInA>8KB/5s — sukuti bunday
+       bo'lolmaydi) LEKIN eshitish dalili YO'Q (alv/k<1)» bo'lsa ishlaydi. Sukutda
+       yo'l HECH QACHON o'zgartirilmaydi.
+   (3) AudioContext GLOBAL — bir marta ochiladi (bosish ichida), HECH QACHON
+       yopilmaydi; 'wa' yo'lida ijro metrikasi waGain'DAN KEYIN o'lchanadi (oqim-tap
+       yolg'onlari chetlab o'tiladi).
+   (4) play() rad etilsa — «Ovozni yoqish» tugmasi (kaskad qayta urinishlar YO'Q).
    ═══════════════════════════════════════════════════════════════════════════ */
 'use strict'
 // ─────────────────────────────── ICE / MEDIA ───────────────────────────────
@@ -151,6 +170,10 @@ window.__50warmup = async () => {
   if ((cam && cam.state === 'denied') || (mic && mic.state === 'denied')) return
   if (cam && mic && cam.state === 'granted' && mic.state === 'granted') return
   document.addEventListener('pointerdown', () => {
+    // v92: birinchi bosishda GLOBAL AudioContext ham ochiladi — qo'ng'iroqsiz ilova
+    // ishlatilganda ham ovoz-qulfi tayyor bo'ladi
+    try { if (!window.__50actx || window.__50actx.state === 'closed') window.__50actx = new (window.AudioContext || window.webkitAudioContext)() } catch {}
+    try { if (window.__50actx && window.__50actx.state === 'suspended') window.__50actx.resume().catch(() => {}) } catch {}
     let ws = null
     const p = navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user', width: { ideal: 640 } } })
       .then((s) => { ws = s; s.getTracks().forEach((t) => t.stop()) }).catch(() => {})
@@ -277,9 +300,9 @@ function callUI(peer, video, state) {
   document.body.appendChild(el)
   // R3: qo'ng'iroq oynasida HAR bosish — ovoz zanjirini tiklashga urinish
   // (autoplay bloki / fonga kirish ovozi o'chgan bo'lsa — tekkanida QAYTADI)
-  el.addEventListener('pointerdown', () => { const C = CALL; if (C && C.el === el) { unlockAudio(C); if (C.audioBlocked) { C.audioMode = 'ra'; C.audioBlocked = false } playRemote(C) } })
+  el.addEventListener('pointerdown', () => { const C = CALL; if (C && C.el === el) { unlockAudio(C); playRemote(C) } })
   const pill = qs('.l-un', el)
-  if (pill) pill.onclick = (e) => { e.stopPropagation(); const C = CALL; if (C && C.el === el) { unlockAudio(C); if (C.audioBlocked) { C.audioMode = 'ra'; C.audioBlocked = false } playRemote(C) } }
+  if (pill) pill.onclick = (e) => { e.stopPropagation(); const C = CALL; if (C && C.el === el) { unlockAudio(C); playRemote(C) } }
   return el
 }
 function callButtons(kind) {
@@ -306,13 +329,19 @@ function callButtons(kind) {
     if (k === 'aonly') { const C2 = CALL; if (C2) { C2.aOnly = !C2.aOnly; applyAudioOnly(C2, true) } }
     if (k === 'spk') {
       if (C) {
-        C.spkMuted = !C.spkMuted
-        t.classList.toggle('off', C.spkMuted)
-        try {
-          const A = window.Android50
-          if (A && typeof A.speaker === 'function') A.speaker(!C.spkMuted)
-          else if (A && C.video) C.audioMode = C.spkMuted ? 'ra' : 'wa' // v91: APK 2.6 ko'prigi yo'q — karnay=WebAudio, quloqchi=element
-        } catch {}
+        // v92: APK'da «Dinamik» = KARNAY↔QULOQCHI yo'nalishi (aniqlangan ishlaydi —
+        // APK 2.6'da ham, ko'prik bo'lmaganida ham WebAudio karnayga chiqaradi).
+        // Browserda = jim/ochiq (eski xulq).
+        if (window.Android50) {
+          C.spkOn = !C.spkOn
+          t.classList.toggle('off', !C.spkOn)
+          try { const A = window.Android50; if (typeof A.speaker === 'function') A.speaker(C.spkOn) } catch {}
+          C.audioMode = routeFor(C)
+          clog('dinamik', 'yo\'nalish → ' + C.audioMode + (C.spkOn ? ' (karnay)' : ' (quloqchi)'))
+        } else {
+          C.spkMuted = !C.spkMuted
+          t.classList.toggle('off', C.spkMuted)
+        }
         playRemote(C)
       }
     }
@@ -324,12 +353,19 @@ function callButtons(kind) {
 // 'wa' = WebAudio (AudioContext qo'ng'iroq boshida FOYDALANUVCHI BOSISHI ICHIDA
 //        ochiladi — autoplay siyosatidan chetlab o'tadi, eng ishonchli zaxira)
 const callEls = (C) => ({ v: qs('.remote', C.el), a: qs('.ra', C.el), pill: qs('.l-un', C.el) })
+// v92: AudioContext GLOBAL — bir marta ochiladi (foydalanuvchi bosishida), HECH QACHON
+// yopilmaydi. Har qo'ng'iroqda qayta ochilish noaniq natija berardi (ba'zan suspended
+// qolardi — «bir qarasang ishlaydi» tasodifiyligi manbalaridan biri).
 function unlockAudio(C) {
-  if (!C) return
   try {
-    if (!C.ctx) C.ctx = new (window.AudioContext || window.webkitAudioContext)()
-    if (C.ctx.state === 'suspended') C.ctx.resume().catch(() => {})
-  } catch {}
+    if (!window.__50actx || window.__50actx.state === 'closed') {
+      try { window.__50actx = new (window.AudioContext || window.webkitAudioContext)() } catch { window.__50actx = null }
+    }
+    const ctx = window.__50actx
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {})
+    if (C && ctx) C.ctx = ctx
+    return ctx || null
+  } catch { return null }
 }
 function connectWA(C) {
   try {
@@ -340,77 +376,76 @@ function connectWA(C) {
     // jurnal isboti: call 1791365978038092, A tomon ovoz=wa k=0% ch=2%).
     const st = C.remoteA || C.remote
     if (!st || !st.getAudioTracks().length) return false
-    const ctx = C.ctx
-    if (!ctx || ctx.state !== 'running') { unlockAudio(C) }
-    if (!C.ctx) return false
+    const ctx = C.ctx || unlockAudio(C)
+    if (!ctx) return false
+    if (ctx.state !== 'running') ctx.resume().catch(() => {})
     if (!C.waSrc) {
-      C.waSrc = C.ctx.createMediaStreamSource(st)
-      C.waGain = C.ctx.createGain(); C.waGain.gain.value = 1
-      C.waSrc.connect(C.waGain); C.waGain.connect(C.ctx.destination)
+      C.waSrc = ctx.createMediaStreamSource(st)
+      C.waGain = ctx.createGain(); C.waGain.gain.value = 1
+      C.waSrc.connect(C.waGain); C.waGain.connect(ctx.destination)
+      // v92: IJRO METRIKASI — waGain'dan KEYINgi nuqtada o'lchov (oqim-tap EMAS):
+      // «jim tugun» kasalligi aniqlanadi (oqim-tap yolg'on ijobiy berardi — v84 isboti)
+      try { C.waAn = ctx.createAnalyser(); C.waAn.fftSize = 512; C.waGain.connect(C.waAn) } catch { C.waAn = null }
       clog('ovoz-wa', 'WebAudio zanjiri ulandi (audio-trek=' + st.getAudioTracks().length + ', turn=' + (C.relay === undefined ? '?' : C.relay) + ')')
     }
-    if (C.ctx.state === 'suspended') C.ctx.resume().catch(() => {})
-    return C.ctx.state === 'running' || C.ctx.state === 'suspended'
+    return ctx.state === 'running' // v92: suspended = ISHLAMAYDI (pill chiqadi — aniqlangan)
   } catch (e) { clog('ovoz-wa-xato', String((e && e.message) || e).slice(0, 100)); return false }
 }
-function tryEl(el, depth, fromMode) {
+// v92: kaskad YO'Q — play() rad etilsa «Ovozni yoqish» tugmasi chiqadi (aniqlangan xulq);
+// ijro dalili kelganda tugma o'zi yashirinadi.
+function tryEl(el, mode) {
   let p; try { p = el.play() } catch { return false }
-  // bloklandi — keyingi qatlam (faqat rejim o'zgarmagan bo'lsa — boshqa yo'l allaqachon
-  // ishlagan bo'lsa eski rad-etilish bekor bo'lishi kerak)
-  if (p && p.then) p.catch(() => { try { const C = CALL; if (C && (!fromMode || C.audioMode === fromMode)) playRemote(C, true, (depth || 0) + 1) } catch {} })
-  return true // buyruq qabul qilindi — natijasi promise orqali kuzatiladi
+  if (p && p.then) p.then(() => {
+    const C = CALL
+    if (C && C.el && C.audioMode === mode) { C.audioBlocked = false; const pill = qs('.l-un', C.el); if (pill) pill.classList.add('hide') }
+  }).catch(() => {
+    const C = CALL
+    if (C && C.el && C.audioMode === mode) { C.audioBlocked = true; const pill = qs('.l-un', C.el); if (pill) pill.classList.remove('hide') }
+  })
+  return true
 }
-function playRemote(C, escalate, depth) {
+// v92: playRemote — ANIQLANGAN (deterministic). Yo'nalish routeFor()'dan keladi
+// (platforma + qo'ng'iroq turi + «Dinamik»); kaskad/qayta-urinishlar YO'Q — play()
+// rad etilsa «Ovozni yoqish» tugmasi. Jimlik-qutqaruv faqat evalStats'da NUTQ DALILI bilan.
+function playRemote(C) {
   if (!C?.el || CALL !== C || !C.remote) return
-  depth = depth || 0
   const { v, a, pill } = callEls(C)
   if (!v || !a) return
   // R2: oqim DOIM xuddi shu obyekt — bir marta bog'lanadi, hech qachon almashtirilmaydi
   if (v.srcObject !== C.remote) v.srcObject = C.remote
   // v82.1: <audio> elementga FAQAT AUDIO-trekli oqim. Ba'zi Android WebView'larida
-  // audio-element + VIDEO-trekli oqim = JIMLIK (tarmoqda ovoz bor, eshitilmaydi —
-  // jurnal isboti: inA>0, ovoz=ra, «ovoz bormayapti»). Klassik xato sinfi.
+  // audio-element + VIDEO-trekli oqim = JIMLIK (jurnal isboti). Klassik xato sinfi.
   const aOnly = C.remoteA || C.remote
   if (a.srcObject !== aOnly) a.srcObject = aOnly
-  if (C.spkMuted) { // «Dinamik» bilan ataylab o'chirilgan — zanjirga qo'l tekkizmaymiz
-    v.muted = true; a.muted = true
-    try { if (C.waGain) C.waGain.gain.value = 0 } catch {} // v91: WebAudio ham jim bo'lsin (avval wa ovozini o'chirmasdi!)
-    if (pill) pill.classList.add('hide')
-    return
-  }
-  try { if (C.waGain) C.waGain.gain.value = 1 } catch {} // v91: mute bekor — WebAudio ovozi tiklanadi
-  // v84: ELEMENT yo'li ASOSIY (barcha platformalarda) — WebAudio faqat ZAXIRA.
-  // Jurnal isboti (call 1791365978038092): A tomon ovoz=wa'da qotgan — k=0% (WebAudio
-  // remote-tuguni jim) va elementlar muted edi. Element — eng standart, kafolatlangan yo'l.
-  if (!C.audioMode) C.audioMode = modeOrd(C)[0] // v91: platforma/rejim bo'yicha default
-  if (escalate) {
-    const ord = modeOrd(C) // v91: APK video — wa birinchi (karnay)
-    const i = ord.indexOf(C.audioMode)
-    C.audioMode = ord[(i + 1 + ord.length) % ord.length]
-  }
+  if (!C.audioMode) C.audioMode = routeFor(C)
   const mode = C.audioMode
-  let ok
-  if (mode === 'ra') { v.muted = true; a.muted = false; ok = tryEl(a, depth, 'ra') }
-  else if (mode === 'v') { a.muted = true; v.muted = false; ok = tryEl(v, depth, 'v') }
-  else { a.muted = true; v.muted = true; ok = connectWA(C) }
-  if (!ok) { // bu yo'l ishlamadi — navbatdagi qatlamga o'tamiz (3 qatlamdan keyin pill)
-    if (depth >= 2) {
-      // hech bir yo'l buyruqni qabul qilmadi — «Ovozni yoqish» pill (har bosish qayta urinadi)
-      C.audioBlocked = true
-      if (pill) pill.classList.remove('hide')
-      return
-    }
-    return playRemote(C, true, depth + 1)
+  // browserda «Dinamik» = jim/ochiq; APK'da yo'nalish «Dinamik» tugmasida o'zgaradi
+  const mut = !!C.spkMuted && !window.Android50
+  // WebAudio ovozi: faqat 'wa' yo'li va jimlanmagan bo'lsa
+  try { if (C.waGain) C.waGain.gain.value = (mode === 'wa' && !mut) ? 1 : 0 } catch {}
+  if (mode === 'wa') {
+    v.muted = true; a.muted = true
+    if (connectWA(C)) { C.audioBlocked = false; if (pill) pill.classList.add('hide') }
+    else { C.audioBlocked = true; if (pill) pill.classList.remove('hide') }
+  } else if (mode === 'v') {
+    a.muted = true; v.muted = mut
+    tryEl(v, 'v')
+  } else {
+    v.muted = true; a.muted = mut
+    tryEl(a, 'ra')
   }
-  if (mode !== 'wa') C.audioBlocked = false
-  if (pill) pill.classList.toggle('hide', !C.audioBlocked)
   if (C.audioPrev !== mode) { C.audioPrev = mode; clog('ovoz-yol', mode + ' (turn=' + (C.relay === undefined ? '?' : C.relay) + ')') }
 }
-// v91: REJIM TARTIBI — APK'da VIDEO qo'ng'iroqda WebAudio BIRINCHI (karnay marshruti).
-// DALIL (Task 34, real jurnal): APK 2.6'da speaker ko'prigi yo'q — Chromium MODE_IN_COMMUNICATION
-// ovozi QULOQCHIGA boradi; video qo'ng'iroqda telefon yuz oldida — eshitilmaydi (X: k=0% rb=1).
-// WebAudio (AudioContext → STREAM_MUSIC) quloqchi marshrutini CHETLAB O'TADI → karnay.
-function modeOrd(C) { return (window.Android50 && C && C.video) ? ['wa', 'ra', 'v'] : ['ra', 'v', 'wa'] }
+// v92: YO'NALISH SIYOSATI — ANIQLANGAN (deterministic). Rejim FAQAT quyidagilarga
+// bog'liq: platforma + qo'ng'iroq turi + foydalanuvchining «Dinamik» tanlovi.
+// DALIL (Task 34, real jurnal): APK 2.6'da speaker ko'prigi yo'q — Chromium
+// MODE_IN_COMMUNICATION ovozi QULOQCHIGA boradi; video'da telefon yuz oldida —
+// eshitilmaydi (X: k=0% rb=1). WebAudio (AudioContext → STREAM_MUSIC) KARNAYGA
+// chiqadi — quloqchi marshrutini chetlab o'tadi.
+// APK: spkOn=true → 'wa' (karnay), false → 'ra' (quloqchi).
+// Default: video → karnay, audio → quloqchi (oddiy telefon qo'ng'irog'i kabi).
+// Browser: doim 'ra' (element — eng standart yo'l).
+function routeFor(C) { return window.Android50 ? (C.spkOn ? 'wa' : 'ra') : 'ra' }
 // v91: NATIVE OVOZ-KICK — jimlik aniqlanganda ovoz marshrutini OS darajasida urib ko'rish
 // (APK 3.0: audioKick — rejim NORMAL↔COMMUNICATION + karnay + ovoz darajalari;
 // eski APK'larda speaker-toggle zaxirasi; ko'prik umuman yo'q bo'lsa — jurnalga yozamiz)
@@ -452,6 +487,7 @@ function rebuildCallElements(C) {
     try { nv.srcObject = C.remote } catch {}
     try { na.srcObject = C.remoteA || C.remote } catch {}
     try { if (C.waSrc) { C.waSrc.disconnect(); C.waSrc = null } } catch {}
+    try { if (C.waAn) { C.waAn.disconnect(); C.waAn = null } } catch {}
     try { C.an_in = null } catch {}
     clog('ovoz-yangi-element', 'video+audio elementlar 0 dan qurildi #' + C.fbN + ' (turn=' + (C.relay === undefined ? '?' : C.relay) + ')')
     playRemote(C)
@@ -474,7 +510,7 @@ function rebindRemoteAudio(C) {
     a.srcObject = null
     a.srcObject = st
     if (!C.spkMuted) a.muted = false
-    if (C.audioMode === 'ra') tryEl(a, 0, 'ra')
+    if (C.audioMode === 'ra') tryEl(a, 'ra')
     clog('ovoz-qayta-boglash', 'audio element yangidan bog‘landi (trek=' + st.getAudioTracks().length + ', turn=' + (C.relay === undefined ? '?' : C.relay) + ')')
   } catch (e) { clog('ovoz-qayta-boglash-xato', String((e && e.message) || e).slice(0, 100)) }
 }
@@ -548,14 +584,31 @@ function rmsPct(C, stream, key) {
 // k=0% ko'rilgan). Endi har 250ms o'lchaymiz va 5s oyna ICHIDA HECH BO'LMASA BIR marta
 // eshitilgan MAKSIMUM darajani saqlaymiz — evalStats shu maksimumni o'qiydi: «bu oynada
 // ovoz bo'lganmi?» degan ISHONCHLI javob (gaplar yolg'on nol bermaydi).
+// v92: rejimga qarab MANBA tanlanadi — 'wa' rejimida IJRO ZANJIRI metrikasi (rmsWa —
+// waGain'dan keyin), boshqa rejimlarda oqim-tap (rmsPct).
 setInterval(() => {
   const C = CALL
   if (!C || !C.ctx || C.ctx.state !== 'running') return
   try {
-    if (C.remote || C.remoteA) { const v = rmsPct(C, C.remoteA || C.remote, 'in'); if (v >= 0) C.inWin = Math.max(C.inWin || -1, v) }
+    if (C.audioMode === 'wa' && C.waAn) { const v = rmsWa(C); if (v >= 0) C.inWin = Math.max(C.inWin || -1, v) }
+    else if (C.remote || C.remoteA) { const v = rmsPct(C, C.remoteA || C.remote, 'in'); if (v >= 0) C.inWin = Math.max(C.inWin || -1, v) }
     if (C.local) { const v = rmsPct(C, C.local, 'out'); if (v >= 0) C.outWin = Math.max(C.outWin || -1, v) }
   } catch {}
 }, 250)
+// v92: WebAudio IJRO ZANJIRI metrikasi — waGain'DAN KEYINGI nuqtada o'lchaydi
+// (oqim-tap EMAS!). wa tuguni «jim tugun» bo'lsa 0 qaytaradi — qutqaruv uni ko'radi
+// (oqim-tap esa yolg'on ijobiy berardi va ishlayotgan yo'l buzilmagan bo'lardi).
+function rmsWa(C) {
+  try {
+    const an = C.waAn
+    if (!an || !C.ctx || C.ctx.state !== 'running') return -1
+    const buf = C.ab_wa || (C.ab_wa = new Float32Array(an.fftSize))
+    an.getFloatTimeDomainData(buf)
+    let sum = 0
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
+    return Math.min(100, Math.round(Math.sqrt(sum / buf.length) * 400))
+  } catch { return -1 }
+}
 // FAQAT-OVOZ rejimi: chiquvchi video TARMODA UMUMAN YURIMAYDI (replaceTrack(null) —
 // renegotiation yo'q), masofa-video yashiriladi, ovoz davom etadi. Qarshi tomonda ham
 // avtomatik yoqiladi (signal orqali) — ikkala tomonda trafik tejaladi.
@@ -682,12 +735,12 @@ async function setupPC(C) {
         try { const qi = qs('.qi', C.el); if (qi) qi.classList.remove('hide') } catch {}
         try { holdWake(true) } catch {}
         // APK: video qo'ng'iroqda ovoz KARNAYGA chiqsin
-        try { if (C.video && window.Android50) { window.Android50.keepScreen && window.Android50.keepScreen(true); window.Android50.speaker && window.Android50.speaker(true) } } catch {}
+        try { if (C.video && window.Android50) { window.Android50.keepScreen && window.Android50.keepScreen(true); if (C.spkOn && window.Android50.speaker) window.Android50.speaker(true) } } catch {}
         // v91: marshrutni QAYTA TASDIQLASH — Chromium masofa-oqim ijrosi boshlanganda
         // o'zi qayta yo'naltirishi mumkin (2.5s va 7s'da yana bir marta karnayga qo'yamiz)
         try {
           if (C.video && window.Android50 && typeof window.Android50.speaker === 'function') {
-            const reSpk = () => { try { const C2 = CALL; if (C2 === C && !C2.spkMuted && typeof window.Android50.speaker === 'function') window.Android50.speaker(true) } catch {} }
+            const reSpk = () => { try { const C2 = CALL; if (C2 === C && C2.spkOn && typeof window.Android50.speaker === 'function') window.Android50.speaker(true) } catch {} }
             setTimeout(reSpk, 2500); setTimeout(reSpk, 7000)
           }
         } catch {}
@@ -738,7 +791,7 @@ function recover(C, why) {
   C.recTries = (C.recTries || 0) + 1
   if (C.recTries > 3) { endCall('missed', true, 'Aloqa yo‘q — internetni tekshirib, qayta urinib ko‘ring'); return }
   setCallState('Qayta ulanmoqda…')
-  C.raZero = 0; C.waZero = 0; C.reboundOnce = 0 // v85: yangi PC — qayta-bog'lash narvoni yana tayyor
+  C.silN = 0 // v92: yangi PC — jimlik-qutqaruv bosqichi 0 dan
   clog('tiklash', why + ' #' + C.recTries + ' (' + (C.role === 'offerer' ? 'o\'zim restart' : 'needice so\'rov') + ')')
   if (C.role === 'offerer') restartIce(C)
   else sigTo(C.peer.id, { k: 'needice', call_id: C.id }, 3, 900)
@@ -766,7 +819,7 @@ function endCall(status = 'ended', report = true, msg) {
   try { C.pc?.close() } catch {}
   C.local?.getTracks().forEach((t) => t.stop())
   try { C.waSrc?.disconnect?.(); C.waGain?.disconnect?.() } catch {}
-  try { C.ctx?.close?.() } catch {}
+  try { C.ctx = null } catch {} // v92: AudioContext GLOBAL — yopilmaydi, faqat aloqasi uziladi
   try { navigator.serviceWorker?.controller?.postMessage({ type: 'callend', tag: 'g50call' + C.id }) } catch {}
   qs('.cst', C.el).textContent = msg || (C.started ? 'Tugadi · ' + fmtDur(dur) : 'Tugadi')
   qs('.cbar', C.el).innerHTML = ''
@@ -782,9 +835,9 @@ async function callUser(uid, video) {
   if (uid === S.me.id) return
   let peer = S.users.get(uid)
   if (!peer) try { peer = await api('/users/' + uid); S.users.set(uid, peer) } catch (e) { return toast('⚠️ ' + e.message) }
-  // v91: APK'da VIDEO qo'ng'iroqda default ovoz yo'li 'wa' (WebAudio → KARNAY) — element
-  // yo'li MODE_IN_COMMUNICATION tufayli quloqchiga boradi (APK 2.6'da speaker ko'prigi yo'q)
-  CALL = { id: 0, peer, video: !!video, outgoing: true, role: 'offerer', audioMode: (window.Android50 && video) ? 'wa' : 'ra', ice: [], el: callUI(peer, video, 'Chaqirilmoqda…'), t0: Date.now(), ringMode: 'out' }
+  // v92: yo'nalish routeFor()da hal qilinadi — APK: video→karnay (spkOn=true),
+  // audio→quloqchi; browser: element. AudioContext GLOBAL (unlockAudio ichida).
+  CALL = { id: 0, peer, video: !!video, outgoing: true, role: 'offerer', spkOn: !!video, ice: [], el: callUI(peer, video, 'Chaqirilmoqda…'), t0: Date.now(), ringMode: 'out' }
   unlockAudio(CALL) // FOYDALANUVCHI BOSISHI ICHIDA: AudioContext ochiladi (autoplay qulfidan chiqish)
   clog('chaqirildi', 'to=' + uid + ' video=' + !!video)
   startSigPoll()
@@ -942,8 +995,8 @@ function incomingCall(ev, force) {
   }
   S.users.set(ev.from.id, { ...(S.users.get(ev.from.id) || {}), ...ev.from })
   const peer = S.users.get(ev.from.id)
-  // v91: kiruvchi video qo'ng'iroqda ham 'wa' default (karnay) — APK 2.6 quloqchi tuzoqqa qarshi
-  CALL = { id: ev.call_id, peer, video: !!ev.video, outgoing: false, role: 'answerer', audioMode: (window.Android50 && ev.video) ? 'wa' : 'ra', ice: [], el: callUI(peer, ev.video, ev.video ? 'Video qo‘ng‘iroq…' : 'Qo‘ng‘iroq…'), t0: Date.now(), ringMode: 'in' }
+  // v92: kiruvchi ham xuddi shu siyosat: video→karnay (spkOn=true), audio→quloqchi
+  CALL = { id: ev.call_id, peer, video: !!ev.video, outgoing: false, role: 'answerer', spkOn: !!ev.video, ice: [], el: callUI(peer, ev.video, ev.video ? 'Video qo‘ng‘iroq…' : 'Qo‘ng‘iroq…'), t0: Date.now(), ringMode: 'in' }
   clog('kirish-qo\'ng\'iroq', 'call=' + ev.call_id + ' from=' + ev.from.id + ' video=' + !!ev.video)
   startSigPoll()
   CALL.el.classList.add('incoming')
@@ -1186,75 +1239,58 @@ function evalStats(C, st) {
   } catch {}
   const at = C.local && C.local.getAudioTracks()[0]
   const rat = C.remote && C.remote.getAudioTracks()[0]
-  try {
-    if (C.ctx && C.ctx.state !== 'running') C.ctx.resume().catch(() => {})
-    if (C.audioMode === 'wa' && C.ctx && C.ctx.state === 'suspended') {
-      C.waSusp = (C.waSusp || 0) + 1
-      if (C.waSusp >= 3) { C.waSusp = 0; clog('ovoz-wa-qotdi', 'AudioContext 15s suspended — element yo‘liga o‘tilyapti'); playRemote(C, true) }
-    } else if (C.ctx) C.waSusp = 0
-  } catch {}
+  try { if (C.ctx && C.ctx.state !== 'running') C.ctx.resume().catch(() => {}) } catch {}
   // v87: stat har 2-oynada (10s — avval 15s edi, 29s'lik qo'ng'iroqlarda 1 tagina chiqardi)
-  if (C.statN % 2 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode}${C.audioBlocked ? '(blok)' : ''} k=${inR}% ch=${outR}% mik=${at ? (at.enabled ? 'on' : 'O‘CHIRILGAN') : 'yo‘q'} rmut=${rat ? (rat.muted ? 'ha' : 'yo‘q') : '?'} rb=${C.reboundOnce ? 1 : 0} fb=${C.fbN || 0} kk=${C.kickN || 0} vx=${C.qaLvl || 0} | alv=${alvR}% smp=+${dSmpl} kon=+${dKon} | el=${elState} | turn=${C.relay === undefined ? '?' : C.relay}`)
-  // ── v91: WA-QAYTISH QOROVULI ENDI DEKODER DALILI BILAN (HAL QILUVCHI TUZATISH) ──
-  // v90'da bu inR (WebAudio remote-tap) bilan edi: ayrim WebView'larda tap YOLG'ON nol
-  // beradi (v84 isboti) — karnayda ovoz chiqyotgan 'wa' yo'li tap-yolg'oni tufayli
-  // BEKOR QILINIB, foydalanuvchi jim element-yo'liga (quloqchi) QAYTARILARDI — X qurilma
-  // ana shu tuzoqda edi. Endi: alv (getStats audioLevel — dekoder chiqishi, mustaqil
-  // o'lchov) bo'lsa — FAQAT u 15s jimsiz bo'lsa qaytamiz; alv yo'q bo'lsa UMUMAN
-  // qaytmaymiz (jurnal kuzatadi — dalilsiz ishlayotgan yo'lni buzish taqiqlangan).
-  const alvAvail = alvR >= 0 // v91: alv bor/yo'qligi — ikkala qorovul ham shu o'zgaruvchidan foydalanadi
-  if (C.audioMode === 'wa' && dInA > 0 && alvAvail && alvR < 1) {
-    C.waZero = (C.waZero || 0) + 1
-    if (C.waZero >= 3 && !C.waDeadOnce) {
-      C.waDeadOnce = 1; C.waZero = 0
-      clog('ovoz-wa-jim', 'dekoder jim (alv=0, paketlar bor) — element yo‘liga qaytilmoqda')
-      C.audioMode = 'ra'
+  // v92: eshit= — qo'ng'iroq davomida HECH BO'LMASA BIR marta eshitish dalili bo'lganmi
+  if (C.statN % 2 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode || '?'}${C.audioBlocked ? '(blok)' : ''} eshit=${C.everHeard ? 1 : 0} k=${inR}% ch=${outR}% mik=${at ? (at.enabled ? 'on' : 'O‘CHIRILGAN') : 'yo‘q'} rmut=${rat ? (rat.muted ? 'ha' : 'yo‘q') : '?'} sil=${C.silN || 0} fb=${C.fbN || 0} kk=${C.kickN || 0} vx=${C.qaLvl || 0} | alv=${alvR}% smp=+${dSmpl} kon=+${dKon} | el=${elState} | turn=${C.relay === undefined ? '?' : C.relay}`)
+  // ── v92: JIMLIK-QUTQARUVCHI — NUTQ DALILI BILAN (ANIQLANGAN) ──
+  // v91 XATOSI (shikoyatning asosiy ildizi): qorovul dInA>0 bilan ishlar edi — lekin
+  // Opus SUKUTI ham paket yuboradi (dInA>0, ~10x kam). Ya'ni qarshi tomon 15s GAPIRMASA
+  // audioLevel=0 bo'lardi → ISHLAYOTGAN karnay yo'li 'ra'ga (quloqchi) almashtirilardi →
+  // video qo'ng'iroqda JIM. SUKUT O'ZI YO'LNI BUZARDI — sukut payti har qo'ng'iroqda
+  // boshqacha bo'lgani uchun «bir qarasang ishlaydi, bir qarasang ishlamaydi».
+  // v92 QOIDA: qutqaruv FAQAT ikkala shart birga bo'lganda ishlaydi:
+  //   NUTQ DALILI: dInA > 8000 bayt/5s (faol gapirish — Opus sukuti bunday bo'lolmaydi)
+  //   ES HITISH DALILI YO'Q: alv<1 (dekoder energiyasi) VA k<1 (ijro/oqim metrikasi)
+  // Sukutda (dInA≤8000) yo'l HECH QACHON o'zgartirilmaydi — ishlayotgan yo'l buzilmaydi.
+  const alvAvail = alvR >= 0
+  const mut = !!C.spkMuted && !window.Android50 // browser «Dinamik»-jim — foydalanuvchi tanlovi, qutqaruv aralashmaydi
+  const heard = (alvAvail && alvR > 1) || inR > 1
+  if (heard) { C.everHeard = 1; C.silN = 0 }
+  else if (dInA > 8000 && !mut) {
+    C.silN = (C.silN || 0) + 1
+    const z = C.silN
+    if (z === 1) {
+      // 1-oyna: o'z yo'limiz ICHIDA tiklash (yo'lni o'zgartirmasdan)
+      unlockAudio(C)
+      if (C.audioMode === 'wa') {
+        try { if (C.waSrc) { C.waSrc.disconnect(); C.waSrc = null } } catch {}
+        try { if (C.waAn) { C.waAn.disconnect(); C.waAn = null } } catch {}
+        try { C.an_in = null } catch {}
+        playRemote(C)
+      } else rebindRemoteAudio(C)
+      clog('ovoz-jim', 'bosqich 1: o\'z yo\'li tiklandi (rejim=' + C.audioMode + ' alv=' + alvR + '% k=' + inR + '%)')
+    } else if (z === 3) {
+      // 3-oyna: boshqa FIZIK yo'lga o'tish (karnay↔quloqchi) — faqat NUTQ dalilida
+      C.audioMode = C.audioMode === 'wa' ? 'ra' : 'wa'
       playRemote(C)
-    }
-  } else C.waZero = 0
-  // ── v91: OVOZ-QUTQARUV — UZLUKSIZ BOSQICHLI MASHINA (abadiy jimlik mumkin emas) ──
-  // v85/v90'dagi xato: narvon FAQAT 3 bosqich edi (rebind→'v'→'wa') — wa'dan keyin hech
-  // narsa; HAMMA yo'llar jim bo'lsa foydalanuvchi ABADIY degan edi. Endi: bosqichlar
-  // davom etadi — elementlar 0 dan quriladi, native kick, keyin rejimlar AYLANADI.
-  // Jurnal-dalil (Task 34): X — rb=1 (rebind ishladi, yordam YO'Q), keyin hech narsa.
-  const silentNow = alvAvail ? alvR < 1 : (inR !== -1 && inR < 1)
-  const actA = dInA > 8000 // faol audio: 5s oynada >8KB — Opus jimligi ~10x kam
-  if (C.audioMode !== 'wa' && dInA > 0 && silentNow) {
-    C.raZero = (C.raZero || 0) + 1
-    const z = C.raZero
-    const ord = modeOrd(C)
-    const pickNext = () => { // v91: 'wa' dekoderda o'lgan bo'lsa — aylanishda uni tashlab o'tamiz
-      let i = ord.indexOf(C.audioMode)
-      for (let n = 0; n < ord.length; n++) {
-        i = (i + 1) % ord.length
-        if (ord[i] === 'wa' && C.waDeadOnce) continue
-        if (ord[i] !== C.audioMode) return ord[i]
-      }
-      return C.audioMode
-    }
-    if (z === 1 && !C.reboundOnce) {
-      C.reboundOnce = 1
-      // v88: 1-oynadayoq (5s) qayta bog'laymiz — real qo'ng'iroqda qayta bog'lash ovozni
-      // tiklashi mumkin edi lekin 15s KUTILGANDI (call 1791388832980421, 16:00)
-      clog('ovoz-jim', 'bosqich 1: element qayta bog‘lanmoqda (faol-bayt=' + (actA ? 1 : 0) + ' k=' + inR + '% alv=' + alvR + '% rejim=' + C.audioMode + ')')
-      rebindRemoteAudio(C)
-    } else if (z === 2 || z === 3) {
-      const nxt = pickNext()
-      clog('ovoz-jim', 'bosqich ' + z + ': rejim ' + C.audioMode + ' → ' + nxt + ' (k=' + inR + '% alv=' + alvR + '%)')
-      C.audioMode = nxt; playRemote(C)
+      clog('ovoz-almashtirildi', C.audioMode + ' yo\'liga o\'tildi (nutq=' + Math.round(dInA / 1000) + 'KB/5s, eshitish dalili yo\'q)')
     } else if (z === 4) {
-      clog('ovoz-jim', 'bosqich 4: elementlar 0 dan qurilmoqda (rebind yordam bermadi)')
+      clog('ovoz-jim', 'bosqich 4: elementlar 0 dan qurilmoqda')
       rebuildCallElements(C)
     } else if (z === 5) {
       clog('ovoz-jim', 'bosqich 5: native ovoz-kick (OS marshrutini urish)')
       nativeKick(C)
     } else if (z >= 6) {
-      // AYLANISH: taslim bo'lish YO'Q — rejimlar almashinaveradi, har 3-oynada kick
-      const nxt = pickNext()
-      if (nxt !== C.audioMode) { clog('ovoz-jim', 'aylanish: ' + C.audioMode + ' → ' + nxt + ' (z=' + z + ')'); C.audioMode = nxt; playRemote(C) }
+      // AYLANISH: ikki fizik yo'l almashinadi — abadiy jimlik mumkin emas
+      C.audioMode = C.audioMode === 'wa' ? 'ra' : 'wa'
+      playRemote(C)
       if (z % 3 === 0) nativeKick(C)
+      if (z > 40) C.silN = 6 // hisoblagich cheksiz o'smasin
+      clog('ovoz-jim', 'aylanish: rejim=' + C.audioMode + ' (z=' + z + ')')
     }
-  } else if ((alvAvail && alvR > 1) || (!alvAvail && (inR > 0 || inR === -1))) C.raZero = 0
+  } else if (!dInA) C.silN = 0 // sukut/tarmoq jim — hech narsaga tegilmaydi (v91 ildizi yo'q)
+  // dInA 0..8000 orasida (pasli ovoz/sukut) — silN saqlanadi, o'zgarmaydi
   // ── KIRUVCHI OVOZ o'lgan — narvon: 3-oyna elementlarni jonlantir, 5-oynada tiklash ──
   if (dInA === 0) {
     C.inDead = (C.inDead || 0) + 1
