@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "zona | yozuvlar | ulash | holat | yol | tekshir | hammasi"
+        description: "zona | yozuvlar | ulash | holat | yol | himoya | tekshir | hammasi"
         required: true
         default: "zona"
 permissions:
@@ -17,7 +17,7 @@ jobs:
   domen:
     runs-on: ubuntu-latest
     steps:
-      - name: Cloudflare API ishlari (zona / yozuvlar / ulash / holat / yol)
+      - name: Cloudflare API ishlari (zona / yozuvlar / ulash / holat / yol / himoya)
         if: ${{ inputs.mode != 'tekshir' }}
         env:
           CF: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -171,9 +171,27 @@ jobs:
                   if show(f'route {pat}', r):
                       print(f'   {pat} -> {SKRIP} ulandi')
 
+          # ---------- HIMOYA (HTTP -> HTTPS avtomatik yo'naltirish) ----------
+          def himoya(zid):
+              st = (req('GET', f'/zones/{zid}').get('result') or {})
+              print('ZONA_HOLATI:', st.get('status'))
+              if st.get('status') != 'active':
+                  print('ZONA_ACTIVE_EMAS')
+                  sys.exit(4)
+              # Mavjud holat
+              for s in ('always_use_https', 'automatic_https_rewrites', 'ssl', 'min_tls_version'):
+                  r = req('GET', f'/zones/{zid}/settings/{s}')
+                  v = (r.get('result') or {}).get('value')
+                  print(f'HOLAT {s}: {v}' if r.get('success') else f'HOLAT {s}: oqib bolmadi ({json.dumps(r.get("errors"), ensure_ascii=False)})')
+              # Yoqish
+              for s, v in (('always_use_https', 'on'), ('automatic_https_rewrites', 'on'), ('min_tls_version', '1.2')):
+                  r = req('PATCH', f'/zones/{zid}/settings/{s}', {'value': v})
+                  if show(f'yoqish {s}={v}', r):
+                      print(f'   {s} = {v} — YOQILDI')
+
           mode = MODE if MODE != 'hammasi' else 'hammasi'
           zid = None
-          if mode in ('zona', 'hammasi', 'yozuvlar', 'ulash', 'holat', 'yol'):
+          if mode in ('zona', 'hammasi', 'yozuvlar', 'ulash', 'holat', 'yol', 'himoya'):
               zid = zona()
           if mode in ('yozuvlar', 'hammasi') and zid:
               yozuvlar(zid)
@@ -183,6 +201,8 @@ jobs:
               holat(zid)
           if mode == 'yol' and zid:
               yol(zid)
+          if mode == 'himoya' and zid:
+              himoya(zid)
           print('DOMEN_ISH_TUGADI')
           PY
 
