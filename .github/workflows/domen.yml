@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "zona | yozuvlar | ulash | tekshir | hammasi"
+        description: "zona | yozuvlar | ulash | holat | tekshir | hammasi"
         required: true
         default: "zona"
 permissions:
@@ -17,7 +17,7 @@ jobs:
   domen:
     runs-on: ubuntu-latest
     steps:
-      - name: Cloudflare API ishlari (zona / yozuvlar / ulash)
+      - name: Cloudflare API ishlari (zona / yozuvlar / ulash / holat)
         if: ${{ inputs.mode != 'tekshir' }}
         env:
           CF: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -134,14 +134,34 @@ jobs:
                   if show(f'domen-ulash {hn}', a):
                       print(f'   {hn} -> {SKRIP} (production) ulandi')
 
+          # ---------- HOLAT (faqat ko'rish) ----------
+          def holat(zid):
+              print('--- ZONA ---')
+              st = (req('GET', f'/zones/{zid}').get('result') or {})
+              print('ZONA_HOLATI:', st.get('status'), '| NS:', ' '.join(st.get('name_servers') or []))
+              print('--- DNS YOZUVLARI ---')
+              lst = req('GET', f'/zones/{zid}/dns_records?per_page=100').get('result') or []
+              for r in lst:
+                  print(f"  {r['type']:5} {r['name']:22} -> {r['content'][:60]:60} proxy={r.get('proxied')}")
+              print('--- WORKER CUSTOM DOMAINS ---')
+              d = req('GET', f'/accounts/{ACC}/workers/domains')
+              if not d.get('success'):
+                  print('  xato:', json.dumps(d.get('errors'), ensure_ascii=False))
+              for r in (d.get('result') or []):
+                  print(f"  {r.get('hostname')} -> {r.get('service')} ({r.get('environment')}) zone={r.get('zone_id')[:8]}")
+              if not d.get('result'):
+                  print('  (bosh)')
+
           mode = MODE if MODE != 'hammasi' else 'hammasi'
           zid = None
-          if mode in ('zona', 'hammasi', 'yozuvlar', 'ulash'):
+          if mode in ('zona', 'hammasi', 'yozuvlar', 'ulash', 'holat'):
               zid = zona()
           if mode in ('yozuvlar', 'hammasi') and zid:
               yozuvlar(zid)
           if mode in ('ulash', 'hammasi') and zid:
               ulash(zid)
+          if mode == 'holat' and zid:
+              holat(zid)
           print('DOMEN_ISH_TUGADI')
           PY
 
