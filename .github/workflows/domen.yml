@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "zona | yozuvlar | ulash | holat | tekshir | hammasi"
+        description: "zona | yozuvlar | ulash | holat | yol | tekshir | hammasi"
         required: true
         default: "zona"
 permissions:
@@ -17,7 +17,7 @@ jobs:
   domen:
     runs-on: ubuntu-latest
     steps:
-      - name: Cloudflare API ishlari (zona / yozuvlar / ulash / holat)
+      - name: Cloudflare API ishlari (zona / yozuvlar / ulash / holat / yol)
         if: ${{ inputs.mode != 'tekshir' }}
         env:
           CF: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -152,9 +152,28 @@ jobs:
               if not d.get('result'):
                   print('  (bosh)')
 
+          # ---------- YOL (workers route — DNS'ga TEKINAMAYDI) ----------
+          def yol(zid):
+              st = (req('GET', f'/zones/{zid}').get('result') or {})
+              print('ZONA_HOLATI:', st.get('status'))
+              if st.get('status') != 'active':
+                  print('ZONA_ACTIVE_EMAS')
+                  sys.exit(4)
+              print('--- MAVJUD ROUTES ---')
+              ex = req('GET', f'/zones/{zid}/workers/routes')
+              if not ex.get('success'):
+                  print('  royxat oqish xatosi:', json.dumps(ex.get('errors'), ensure_ascii=False))
+              for r in (ex.get('result') or []):
+                  print(f"  {r.get('pattern'):32} -> {r.get('script')}")
+              for pat in (DOMEN + '/*', WWW + '/*'):
+                  r = req('POST', f'/zones/{zid}/workers/routes',
+                          {'pattern': pat, 'script': SKRIP})
+                  if show(f'route {pat}', r):
+                      print(f'   {pat} -> {SKRIP} ulandi')
+
           mode = MODE if MODE != 'hammasi' else 'hammasi'
           zid = None
-          if mode in ('zona', 'hammasi', 'yozuvlar', 'ulash', 'holat'):
+          if mode in ('zona', 'hammasi', 'yozuvlar', 'ulash', 'holat', 'yol'):
               zid = zona()
           if mode in ('yozuvlar', 'hammasi') and zid:
               yozuvlar(zid)
@@ -162,6 +181,8 @@ jobs:
               ulash(zid)
           if mode == 'holat' and zid:
               holat(zid)
+          if mode == 'yol' and zid:
+              yol(zid)
           print('DOMEN_ISH_TUGADI')
           PY
 
