@@ -220,7 +220,7 @@ public class MainActivity extends Activity {
     }
 
     @JavascriptInterface
-    public String version() { return "3.0"; }
+    public String version() { return "3.1"; }
 
     /** Web tomondan ruxsatlarni ataylab so'rash (masalan qo'ng'iroq tugmasi bosilganda). */
     @JavascriptInterface
@@ -289,7 +289,7 @@ public class MainActivity extends Activity {
     s.setCacheMode(WebSettings.LOAD_DEFAULT);
     s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     s.setJavaScriptCanOpenWindowsAutomatically(true);
-    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/3.0");
+    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/3.1");
     web.addJavascriptInterface(new Bridge(), "Android50");
 
     web.setWebViewClient(new WebViewClient() {
@@ -330,13 +330,37 @@ public class MainActivity extends Activity {
       @Override
       public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb,
                                        FileChooserParams params) {
-        if (fileCb != null) fileCb.onReceiveValue(null);
+        if (fileCb != null) { try { fileCb.onReceiveValue(null); } catch (Exception ignored) { } }
         fileCb = cb;
+        // v3.1 ROBUST INTENT: params.createIntent() ayrim OEM WebView'larda
+        // (ko'p-mime accept="image/*,video/*" bilan) galereya tomonidan noto'g'ri
+        // qayta ishlanadi va BO'SH natija qaytadi. Qo'lda to'g'ri intent quramiz:
+        // ACTION_GET_CONTENT + EXTRA_MIME_TYPES + EXTRA_ALLOW_MULTIPLE — barcha
+        // OEM galereyalari to'g'ri tushunadigan kanonik shakl. Ishlamasa — eski yo'l.
         try {
-          startActivityForResult(params.createIntent(), FILE_REQ);
+          android.content.Intent it = new android.content.Intent(android.content.Intent.ACTION_GET_CONTENT);
+          it.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+          it.setType("*/*");
+          java.util.ArrayList<String> mimes = new java.util.ArrayList<>();
+          try {
+            String[] acc = params.getAcceptTypes();
+            if (acc != null) for (String a : acc) {
+              if (a == null) continue;
+              for (String p : a.split(",")) { p = p.trim(); if (!p.isEmpty()) mimes.add(p); }
+            }
+          } catch (Exception ignored) { }
+          if (!mimes.isEmpty()) it.putExtra(android.content.Intent.EXTRA_MIME_TYPES, mimes.toArray(new String[0]));
+          boolean multi = false;
+          try { multi = (params.getMode() & FileChooserParams.MODE_MULTIPLE) != 0; } catch (Exception ignored) { }
+          it.putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, multi);
+          startActivityForResult(android.content.Intent.createChooser(it, "Fayl tanlash"), FILE_REQ);
         } catch (Exception e) {
-          fileCb = null;
-          return false;
+          try {
+            startActivityForResult(params.createIntent(), FILE_REQ);
+          } catch (Exception e2) {
+            fileCb = null;
+            return false;
+          }
         }
         return true;
       }
@@ -514,7 +538,9 @@ public class MainActivity extends Activity {
     }
     boolean needCam = !osPermGranted(Manifest.permission.CAMERA);
     boolean needMic = !osPermGranted(Manifest.permission.RECORD_AUDIO);
-    if (!needCam && !needMic) {
+    // v3.1: media-o'qish ruxsatlari ham shu funksiyada so'raladi (galereya BO'SH qaytarmasligi uchun)
+    java.util.List<String> mediaPerms = mediaReadPerms();
+    if (!needCam && !needMic && mediaPerms.isEmpty()) {
       if (done != null) { try { done.grant(done.getResources()); } catch (Exception ignored) { } }
       return;
     }
@@ -526,12 +552,30 @@ public class MainActivity extends Activity {
     java.util.List<String> need = new java.util.ArrayList<>();
     if (needCam) need.add(Manifest.permission.CAMERA);
     if (needMic) need.add(Manifest.permission.RECORD_AUDIO);
-    try {
-      requestPermissions(need.toArray(new String[0]), MEDIA_REQ);
-    } catch (Exception e) {
-      pendingWebReq = null;
-      if (done != null) { try { done.deny(); } catch (Exception ignored) { } }
+    need.addAll(mediaPerms);
+    if (!need.isEmpty()) {
+      try {
+        requestPermissions(need.toArray(new String[0]), MEDIA_REQ);
+        return;
+      } catch (Exception e) {
+        pendingWebReq = null;
+        if (done != null) { try { done.deny(); } catch (Exception ignored) { } }
+        return;
+      }
     }
+    if (done != null) { try { done.grant(done.getResources()); } catch (Exception ignored) { } }
+  }
+
+  // v3.1: versiyaga qarab media-o'qish ruxsatlari (berilmaganlari qaytaradi)
+  private java.util.List<String> mediaReadPerms() {
+    java.util.List<String> p = new java.util.ArrayList<>();
+    if (Build.VERSION.SDK_INT >= 33) {
+      if (!osPermGranted(Manifest.permission.READ_MEDIA_IMAGES)) p.add(Manifest.permission.READ_MEDIA_IMAGES);
+      if (!osPermGranted(Manifest.permission.READ_MEDIA_VIDEO)) p.add(Manifest.permission.READ_MEDIA_VIDEO);
+    } else if (Build.VERSION.SDK_INT >= 23) {
+      if (!osPermGranted(Manifest.permission.READ_EXTERNAL_STORAGE)) p.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+    }
+    return p;
   }
 
   /** Web (getUserMedia) so'rovini OS ruxsatlari bilan moslaydi. */
@@ -595,9 +639,24 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-    if (requestCode == FILE_REQ && fileCb != null) {
-      fileCb.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
-      fileCb = null;
+    if (requestCode == FILE_REQ) {
+      ValueCallback<Uri[]> cb = fileCb; fileCb = null;
+      if (cb == null) return;
+      // v3.1 MUSTAHKAM NATIJA: parseResult o'rniga qo'lda ajratamiz (ClipData + getData).
+      // Ba'zi galereyalar RESULT_OK bilan data=null yoki faqat ClipData beradi —
+      // standart parseResult bunda null qaytarib, WebView «bekor qilindi» deb hisoblaydi →
+      // JS n=0 BO'SH oladi. Bu holatlarda ham fayllarni yetkazamiz.
+      Uri[] out = null;
+      if (resultCode == RESULT_OK && data != null) {
+        try {
+          java.util.ArrayList<Uri> list = new java.util.ArrayList<>();
+          android.content.ClipData cd = data.getClipData();
+          if (cd != null) for (int i = 0; i < cd.getItemCount(); i++) { Uri u = cd.getItemAt(i).getUri(); if (u != null) list.add(u); }
+          if (list.isEmpty() && data.getData() != null) list.add(data.getData());
+          if (!list.isEmpty()) out = list.toArray(new Uri[0]);
+        } catch (Exception ignored) { }
+      }
+      try { cb.onReceiveValue(out); } catch (Exception ignored) { }
       return;
     }
     super.onActivityResult(requestCode, resultCode, data);

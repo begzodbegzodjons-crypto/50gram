@@ -441,10 +441,12 @@ function pickFile(accept, multiple = false, capture) {
     if (capture) i.setAttribute('capture', capture)
     // v81: galereya BEKOR qilib yopilsa («cancel» — Android Chrome/WebView 113+) — va'da
     // abadiy osilib qolmasdi (avval: tanlash bekor qilinsa hech narsa sodir bo'lmasdi).
+    // v93: BEKOR vs BO'SH-NATIJA ajratiladi (multiple'da massivga __bekor belgi qo'yiladi) —
+    // WebView faylni yetkazmagan holat (APK chooser muammosi) jurnaldan aniq ko'rinadi.
     let ok = false
     const fin = (v) => { if (!ok) { ok = true; res(v) } }
-    i.onchange = () => fin(multiple ? [...i.files] : i.files[0] || null)
-    i.addEventListener('cancel', () => fin(multiple ? [] : null))
+    i.onchange = () => { const a = multiple ? [...i.files] : i.files[0] || null; fin(a) }
+    i.addEventListener('cancel', () => { if (multiple) { const a = []; a.__bekor = true; fin(a) } else fin(null) })
     try { i.click() } catch (e) { fin(multiple ? [] : null) }
   })
 }
@@ -1028,7 +1030,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v92'
+window.__50BUILD = 'v93'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return

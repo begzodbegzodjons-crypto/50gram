@@ -864,10 +864,17 @@ $('b-attach').onclick = () => {
       try {
         const files = a === 'cam' ? [await pickFile('image/*,video/*', false, 'environment')].filter(Boolean) : await pickFile('image/*,video/*', true)
         // v81 TASHXIS: galereya o'z javobini BERDI — nechta fayl, qanday tur (jurnalga).
-        // Agar foydalanuvchi rasm tanlasa-yu bu yozuv jurnalda BO'LMASA — WebView faylni
-        // yetkazmagani (change hodisasi o'tmagan) aniq bo'ladi.
-        mediaLog('picker-javob', new Error('ta=' + a + ' n=' + (files ? files.length : 0) + (files && files[0] ? ' birinchi=' + (files[0].type || '?') + '/' + files[0].size : ' (BO\'SH)')), { kind: a }, 'qadam')
-        if (!files.length) return
+        // v93: BEKOR (foydalanuvchi yopdi) va BO'SH (WebView natija yetkazmadi — APK chooser
+        // muammosi) AJRATILDI — jurnaldan aniq tashxis.
+        if (!files.length) {
+          if (files && files.__bekor) mediaLog('picker-bekor', new Error('foydalanuvchi bekor qildi'), { kind: a }, 'qadam')
+          else {
+            mediaLog('picker-bosh', new Error('tanlov natijasi bosh — WebView faylni yetkazmadi (APK 2.6/3.0 chooser xusuusiyati)'), { kind: a }, 'xato')
+            toast('⚠️ Rasm tanlanmadi. Qayta urinib ko‘ring yoki «Fayl» yo‘li orqali yuboring')
+          }
+          return
+        }
+        mediaLog('picker-javob', new Error('ta=' + a + ' n=' + files.length + (files[0] ? ' birinchi=' + (files[0].type || '?') + '/' + files[0].size : '')), { kind: a }, 'qadam')
         const body = files.length === 1 ? await captionAsk(files[0]) : ''
         if (body === null) { mediaLog('picker-yopildi', new Error('izoh oynasi bekor yopildi'), { kind: a }, 'qadam'); return }
         files.slice(0, 10).forEach((f, i) => sendFile(f, f.type.startsWith('video/') ? 'video' : 'photo', { body: i === 0 ? body : '' }))
