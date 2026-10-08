@@ -1,0 +1,239 @@
+== Jurnal workflow yuritilmoqda
+dispatch: 204
+RUN_ID=37762777680
+[1] in_progress None
+[2] in_progress None
+[3] completed success
+=== JURNAL ===
+﻿2026-10-08T10:20:09.7760473Z Current runner version: '2.337.0'
+2026-10-08T10:20:09.7785318Z ##[group]Runner Image Provisioner
+2026-10-08T10:20:09.7786216Z Hosted Compute Agent
+2026-10-08T10:20:09.7786833Z Version: 20260901.588
+2026-10-08T10:20:09.7787551Z Commit: f88ec8081b781fac6c440065ac7ff9e710ce3d0b
+2026-10-08T10:20:09.7788308Z Build Date: 2026-09-01T19:56:44Z
+2026-10-08T10:20:09.7789035Z Worker ID: {58d18a93-8407-4808-bcad-23998f35f672}
+2026-10-08T10:20:09.7789837Z Azure Region: westcentralus
+2026-10-08T10:20:09.7790690Z ##[endgroup]
+2026-10-08T10:20:09.7792512Z ##[group]Operating System
+2026-10-08T10:20:09.7793186Z Ubuntu
+2026-10-08T10:20:09.7793752Z 24.04.5
+2026-10-08T10:20:09.7794366Z LTS
+2026-10-08T10:20:09.7794914Z ##[endgroup]
+2026-10-08T10:20:09.7795524Z ##[group]Runner Image
+2026-10-08T10:20:09.7796158Z Image: ubuntu-24.04
+2026-10-08T10:20:09.7796790Z Version: 20260927.320.1
+2026-10-08T10:20:09.7798186Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260927.320/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-08T10:20:09.7799809Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260927.320
+2026-10-08T10:20:09.7801151Z ##[endgroup]
+2026-10-08T10:20:09.7802506Z ##[group]GITHUB_TOKEN Permissions
+2026-10-08T10:20:09.7804752Z Contents: read
+2026-10-08T10:20:09.7805402Z Metadata: read
+2026-10-08T10:20:09.7806133Z Packages: read
+2026-10-08T10:20:09.7806755Z ##[endgroup]
+2026-10-08T10:20:09.7808898Z Secret source: Actions
+2026-10-08T10:20:09.7810134Z Cache mode: write
+2026-10-08T10:20:09.7811028Z Prepare workflow directory
+2026-10-08T10:20:09.8147592Z Prepare all required actions
+2026-10-08T10:20:09.8195763Z Getting action download info
+2026-10-08T10:20:10.1099840Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-10-08T10:20:10.2178129Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2026-10-08T10:20:10.4101213Z Complete job name: jurnal
+2026-10-08T10:20:10.4862861Z ##[group]Run actions/checkout@v4
+2026-10-08T10:20:10.4863793Z with:
+2026-10-08T10:20:10.4864284Z   repository: begzodbegzodjons-crypto/50gram
+2026-10-08T10:20:10.4868550Z   token: ***
+2026-10-08T10:20:10.4868995Z   ssh-strict: true
+2026-10-08T10:20:10.4869444Z   ssh-user: git
+2026-10-08T10:20:10.4870134Z   persist-credentials: true
+2026-10-08T10:20:10.4870639Z   clean: true
+2026-10-08T10:20:10.4871097Z   sparse-checkout-cone-mode: true
+2026-10-08T10:20:10.4871619Z   fetch-depth: 1
+2026-10-08T10:20:10.4872058Z   fetch-tags: false
+2026-10-08T10:20:10.4872510Z   show-progress: true
+2026-10-08T10:20:10.4872960Z   lfs: false
+2026-10-08T10:20:10.4873381Z   submodules: false
+2026-10-08T10:20:10.4873847Z   set-safe-directory: true
+2026-10-08T10:20:10.4874365Z   allow-unsafe-pr-checkout: false
+2026-10-08T10:20:10.4875108Z ##[endgroup]
+2026-10-08T10:20:10.5907341Z Syncing repository: begzodbegzodjons-crypto/50gram
+2026-10-08T10:20:10.5909268Z ##[group]Getting Git version info
+2026-10-08T10:20:10.5910220Z Working directory is '/home/runner/work/50gram/50gram'
+2026-10-08T10:20:10.5911853Z [command]/usr/bin/git version
+2026-10-08T10:20:10.5977191Z git version 2.55.0
+2026-10-08T10:20:10.5999062Z ##[endgroup]
+2026-10-08T10:20:10.6014049Z Temporarily overriding HOME='/home/runner/work/_temp/38b89d62-4c09-49b5-b69e-87dbcbd258ff' before making global git config changes
+2026-10-08T10:20:10.6015667Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-08T10:20:10.6021726Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/50gram/50gram
+2026-10-08T10:20:10.6081405Z Deleting the contents of '/home/runner/work/50gram/50gram'
+2026-10-08T10:20:10.6086422Z ##[group]Initializing the repository
+2026-10-08T10:20:10.6091343Z [command]/usr/bin/git init /home/runner/work/50gram/50gram
+2026-10-08T10:20:10.6169773Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-08T10:20:10.6174091Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-08T10:20:10.6175384Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-08T10:20:10.6176151Z hint: call:
+2026-10-08T10:20:10.6176585Z hint:
+2026-10-08T10:20:10.6177107Z hint: 	git config --global init.defaultBranch <name>
+2026-10-08T10:20:10.6177735Z hint:
+2026-10-08T10:20:10.6178379Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-08T10:20:10.6179302Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-08T10:20:10.6180267Z hint:
+2026-10-08T10:20:10.6180698Z hint: 	git branch -m <name>
+2026-10-08T10:20:10.6181184Z hint:
+2026-10-08T10:20:10.6181822Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-08T10:20:10.6183369Z Initialized empty Git repository in /home/runner/work/50gram/50gram/.git/
+2026-10-08T10:20:10.6185852Z [command]/usr/bin/git remote add origin https://github.com/begzodbegzodjons-crypto/50gram
+2026-10-08T10:20:10.6235624Z ##[endgroup]
+2026-10-08T10:20:10.6236628Z ##[group]Disabling automatic garbage collection
+2026-10-08T10:20:10.6238956Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-08T10:20:10.6272872Z ##[endgroup]
+2026-10-08T10:20:10.6281022Z ##[group]Setting up auth
+2026-10-08T10:20:10.6281791Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-08T10:20:10.6316401Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-08T10:20:10.6658633Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-08T10:20:10.6699220Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-08T10:20:10.6958465Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-08T10:20:10.6998357Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-08T10:20:10.7239196Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-08T10:20:10.7280909Z ##[endgroup]
+2026-10-08T10:20:10.7282160Z ##[group]Fetching the repository
+2026-10-08T10:20:10.7291724Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +8a251b7d3c7a3f74f45582b108d77f479eaff140:refs/remotes/origin/main
+2026-10-08T10:20:11.8978336Z From https://github.com/begzodbegzodjons-crypto/50gram
+2026-10-08T10:20:11.9001319Z  * [new ref]         8a251b7d3c7a3f74f45582b108d77f479eaff140 -> origin/main
+2026-10-08T10:20:11.9031654Z ##[endgroup]
+2026-10-08T10:20:11.9032451Z ##[group]Determining the checkout info
+2026-10-08T10:20:11.9033343Z ##[endgroup]
+2026-10-08T10:20:11.9033951Z [command]/usr/bin/git sparse-checkout disable
+2026-10-08T10:20:11.9057330Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-08T10:20:11.9101762Z ##[group]Checking out the ref
+2026-10-08T10:20:11.9103283Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-10-08T10:20:11.9488759Z Switched to a new branch 'main'
+2026-10-08T10:20:11.9491855Z branch 'main' set up to track 'origin/main'.
+2026-10-08T10:20:11.9501161Z ##[endgroup]
+2026-10-08T10:20:11.9547094Z [command]/usr/bin/git log -1 --format=%H
+2026-10-08T10:20:11.9577293Z 8a251b7d3c7a3f74f45582b108d77f479eaff140
+2026-10-08T10:20:11.9952207Z ##[group]Run actions/setup-node@v4
+2026-10-08T10:20:11.9953437Z with:
+2026-10-08T10:20:11.9954368Z   node-version: 20
+2026-10-08T10:20:11.9955366Z   always-auth: false
+2026-10-08T10:20:11.9956393Z   check-latest: false
+2026-10-08T10:20:11.9965717Z   token: ***
+2026-10-08T10:20:11.9966653Z ##[endgroup]
+2026-10-08T10:20:12.1410538Z Attempting to download 20...
+2026-10-08T10:20:12.1521960Z (node:2364) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-08T10:20:12.1525628Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-08T10:20:13.0905444Z Acquiring 20.20.2 - x64 from https://github.com/actions/node-versions/releases/download/20.20.2-23521894959/node-20.20.2-linux-x64.tar.gz
+2026-10-08T10:20:13.7450963Z Extracting ...
+2026-10-08T10:20:13.7572273Z [command]/usr/bin/tar xz --strip 1 --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/ac305b15-662d-44a6-afd0-049c1de53a1f -f /home/runner/work/_temp/2253d2ba-deb9-4e41-b3c6-e5aad1698e3d
+2026-10-08T10:20:14.8489229Z Adding to the cache ...
+2026-10-08T10:20:16.7108067Z ##[group]Environment details
+2026-10-08T10:20:16.9271475Z node: v20.20.2
+2026-10-08T10:20:16.9272050Z npm: 10.8.2
+2026-10-08T10:20:16.9272358Z yarn: 1.22.22
+2026-10-08T10:20:16.9272972Z ##[endgroup]
+2026-10-08T10:20:16.9542866Z ##[group]Run node scripts/jurnal_read.mjs
+2026-10-08T10:20:16.9543290Z [36;1mnode scripts/jurnal_read.mjs[0m
+2026-10-08T10:20:16.9776939Z shell: /usr/bin/bash -e {0}
+2026-10-08T10:20:16.9777247Z env:
+2026-10-08T10:20:16.9777563Z   E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+2026-10-08T10:20:16.9777937Z ##[endgroup]
+2026-10-08T10:20:29.4040894Z login OK uid=1791126437516073
+2026-10-08T10:20:30.1833901Z === JURNAL (80 yozuv) ===
+2026-10-08T10:20:30.1835864Z [10-08 10:18] klient call:media uid=1790856718955563 :: media-qadam [picker-javob] kind=gal size=0 mime=? :: ta=gal n=0 (BO'SH)
+2026-10-08T10:20:30.1837868Z [10-08 10:17] klient call:diag uid=1790856718955563 :: ishga-tushdi | build=v92 | apk=1 | on=1 | hid=visible | ua=) Version/4.0 Chrome/154.0.8037.106 Mobile Safari/537.36 50GramApp/2.6
+2026-10-08T10:20:30.1840471Z [10-08 09:55] klient call:diag uid=1790858672586492 :: ishga-tushdi | build=v92 | apk=1 | on=1 | hid=visible | ua=o) Version/4.0 Chrome/153.0.8010.36 Mobile Safari/537.36 50GramApp/2.6
+2026-10-08T10:20:30.1845091Z [10-08 09:38] klient call:1791452300227538 uid=1791126437516073 :: 09:38:19.160 chaqirildi | to=1791126452361349 video=false ¦ 09:38:19.161 sig:poll yoqildi | lastSid=1791452271363890 ¦ 09:38:20.798 media tayyor | audio=1 video=0 ¦ 09:38:36.405 sig:k=hangup | from=1791126452361349 call_id=1791452300227538 | C=out id=1791452300227538 pc=false started=false ¦ 09:38:36.406 endCall | status=ended | | davomiylik=0s | pc=yo'q | turn=? | ovoz=?
+2026-10-08T10:20:30.1848631Z [10-08 09:38] klient call:1791452300227538 uid=1791126452361349 :: 09:38:35.818 endCall | status=declined | | davomiylik=0s | pc=yo'q | turn=? | ovoz=?
+2026-10-08T10:20:30.1853895Z [10-08 09:38] klient call:1791452262190216 uid=1791126452361349 :: 09:38:20.800 kirish-qo'ng'iroq | call=1791452300227538 from=1791126437516073 video=false ¦ 09:38:20.800 sig:poll yoqildi | lastSid=1791452271042888 ¦ 09:38:21.700 sig:navbat 2 ta | hangup,call_closed ¦ 09:38:21.700 sig:k=call_closed | from=1791126437516073 call_id=1791452262190216 | C=in id=1791452300227538 pc=false started=false ¦ 09:38:21.700 sig:DROP call_id | k=call_closed kelgan=1791452262190216 bizniki=1791452300227538
+2026-10-08T10:20:30.1860874Z [10-08 09:38] klient call:1791452262190216 uid=1791126452361349 :: 09:38:04.063 stat | inA=+15685 inV=+162258 outA=+15044 outV=+197184 kadrlar=+100 | ovoz=ra eshit=1 k=0% ch=5% mik=on rmut=yo‘q sil=0 fb=0 kk=0 vx=0 | alv=25% smp=+240000 kon=+0 | el=cur+5 mu=0 vol=1 pa=0 rd=4 | turn=0 ¦ 09:38:12.680 sig:k=hangup | from=1791126437516073 call_id=1791452262190216 | C=in id=1791452262190216 pc=true started=true ¦ 09:38:12.680 endCall | status=ended | | davomiylik=21s | pc=connected | turn=0 | ovoz=ra
+2026-10-08T10:20:30.1864197Z [10-08 09:38] klient call:1791452262190216 uid=1791126437516073 :: 09:38:05.887 stat | inA=+15053 inV=+201849 outA=+15702 outV=+183569 kadrlar=+100 | ovoz=ra eshit=1 k=2% ch=6% mik=on rmut=yo‘q sil=0 fb=0 kk=0 vx=0 | alv=100% smp=+240000 kon=+0 | el=cur+5 mu=0 vol=1 pa=0 rd=4 | turn=0 ¦ 09:38:12.137 endCall | status=ended | | davomiylik=20s | pc=connected | turn=0 | ovoz=ra
+2026-10-08T10:20:30.1867589Z [10-08 09:38] klient call:1791452262190216 uid=1791126452361349 :: 09:37:51.072 masofa-trek | video ready=live ¦ 09:37:51.472 ovoz-qayta-boglash | audio element yangidan bog‘landi (trek=1, turn=?) ¦ 09:37:51.676 ulanildi | turn=? | audio=ra ¦ 09:37:51.690 trek-tirik | audio ¦ 09:37:51.882 trek-tirik | video ¦ 09:37:52.645 sig:navbat 18 ta | offer,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice
+2026-10-08T10:20:30.1870743Z [10-08 09:38] klient call:1791452262190216 uid=1791126437516073 :: 09:37:51.675 masofa-trek | video ready=live ¦ 09:37:51.685 ulanildi | turn=? | audio=ra ¦ 09:37:51.687 trek-tirik | video ¦ 09:37:51.697 trek-tirik | audio ¦ 09:37:52.075 ovoz-qayta-boglash | audio element yangidan bog‘landi (trek=1, turn=?) ¦ 09:37:52.732 sig:navbat 2 ta | ice,answer
+2026-10-08T10:20:30.1874503Z [10-08 09:37] klient call:1791452262190216 uid=1791126452361349 :: 09:37:42.753 kirish-qo'ng'iroq | call=1791452262190216 from=1791126437516073 video=true ¦ 09:37:42.754 sig:poll yoqildi | lastSid=0 ¦ 09:37:49.190 media tayyor | audio=1 video=1 ¦ 09:37:51.067 sig:k=offer | from=1791126437516073 call_id=1791452262190216 | C=in id=1791452262190216 pc=true started=false ¦ 09:37:51.071 masofa-trek | audio ready=live ¦ 09:37:51.072 ovoz-yol | ra (turn=?)
+2026-10-08T10:20:30.1877917Z [10-08 09:37] klient call:1791452262190216 uid=1791126437516073 :: 09:37:47.340 sig:navbat 1 ta | e2ediag ¦ 09:37:50.178 sig:k=accept | from=1791126452361349 call_id=1791452262190216 | C=out id=1791452262190216 pc=false started=false ¦ 09:37:50.931 sig:navbat 1 ta | accept ¦ 09:37:51.668 sig:k=answer | from=1791126452361349 call_id=1791452262190216 | C=out id=1791452262190216 pc=true started=false ¦ 09:37:51.674 masofa-trek | audio ready=live ¦ 09:37:51.675 ovoz-yol | ra (turn=?)
+2026-10-08T10:20:30.1880872Z [10-08 09:37] klient call:1791452262190216 uid=1791126437516073 :: 09:37:41.115 chaqirildi | to=1791126452361349 video=true ¦ 09:37:41.116 sig:poll yoqildi | lastSid=0 ¦ 09:37:42.782 media tayyor | audio=1 video=1 ¦ 09:37:45.569 sig:k=e2ediag | from=1791126452361349 call_id=undefined | C=out id=1791452262190216 pc=false started=false
+2026-10-08T10:20:30.1882544Z [10-08 09:37] klient call:diag uid=1791126452361349 :: ishga-tushdi | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1883739Z [10-08 09:37] klient call:diag uid=1791126452361349 :: sw-yoq | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1884936Z [10-08 09:37] klient call:diag uid=1791126437516073 :: ishga-tushdi | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1886246Z [10-08 09:37] klient call:diag uid=1791126437516073 :: sw-yoq | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1887464Z [10-08 09:32] klient call:diag uid=1790856718955563 :: ishga-tushdi | build=v92 | apk=1 | on=1 | hid=visible | ua=) Version/4.0 Chrome/154.0.8037.106 Mobile Safari/537.36 50GramApp/2.6
+2026-10-08T10:20:30.1888644Z [10-08 09:32] klient call:diag uid=1791451920681234 :: ishga-tushdi | build=v92 | apk=0 | on=1 | hid=visible | ua=37.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 OPR/136.0.0.0
+2026-10-08T10:20:30.1889774Z [10-08 09:32] klient call:diag uid=1791451920681234 :: sw-yoq | build=v92 | apk=0 | on=1 | hid=visible | ua=37.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 OPR/136.0.0.0
+2026-10-08T10:20:30.1892326Z [10-08 09:23] klient call:1791451402323260 uid=1791126437516073 :: 09:23:21.445 chaqirildi | to=1791126452361349 video=false ¦ 09:23:21.445 sig:poll yoqildi | lastSid=1791451373462643 ¦ 09:23:23.104 media tayyor | audio=1 video=0 ¦ 09:23:38.733 sig:k=hangup | from=1791126452361349 call_id=1791451402323260 | C=out id=1791451402323260 pc=false started=false ¦ 09:23:38.733 endCall | status=ended | | davomiylik=0s | pc=yo'q | turn=? | ovoz=?
+2026-10-08T10:20:30.1894295Z [10-08 09:23] klient call:1791451402323260 uid=1791126452361349 :: 09:23:38.193 endCall | status=declined | | davomiylik=0s | pc=yo'q | turn=? | ovoz=?
+2026-10-08T10:20:30.1896941Z [10-08 09:23] klient call:1791451365025484 uid=1791126452361349 :: 09:23:23.167 kirish-qo'ng'iroq | call=1791451402323260 from=1791126437516073 video=false ¦ 09:23:23.167 sig:poll yoqildi | lastSid=1791451373146013 ¦ 09:23:23.836 sig:navbat 2 ta | hangup,call_closed ¦ 09:23:23.836 sig:k=call_closed | from=1791126437516073 call_id=1791451365025484 | C=in id=1791451402323260 pc=false started=false ¦ 09:23:23.836 sig:DROP call_id | k=call_closed kelgan=1791451365025484 bizniki=1791451402323260
+2026-10-08T10:20:30.1901122Z [10-08 09:23] klient call:1791451365025484 uid=1791126452361349 :: 09:22:55.205 sig:navbat 14 ta | ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice ¦ 09:23:07.107 stat | inA=+15688 inV=+173128 outA=+15015 outV=+199234 kadrlar=+100 | ovoz=ra eshit=1 k=38% ch=100% mik=on rmut=yo‘q sil=0 fb=0 kk=0 vx=0 | alv=100% smp=+240000 kon=+0 | el=cur+5 mu=0 vol=1 pa=0 rd=4 | turn=0 ¦ 09:23:14.938 sig:k=hangup | from=1791126437516073 call_id=1791451365025484 | C=in id=1791451365025484 pc=true started=true ¦ 09:23:14.939 endCall | status=ended | | davomiylik=21s | pc=connected | turn=0 | ovoz=ra
+2026-10-08T10:20:30.1904336Z [10-08 09:23] klient call:1791451365025484 uid=1791126437516073 :: 09:23:08.331 stat | inA=+15032 inV=+206540 outA=+15685 outV=+184801 kadrlar=+100 | ovoz=ra eshit=1 k=0% ch=26% mik=on rmut=yo‘q sil=0 fb=0 kk=0 vx=0 | alv=25% smp=+240000 kon=+0 | el=cur+5 mu=0 vol=1 pa=0 rd=4 | turn=0 ¦ 09:23:14.421 endCall | status=ended | | davomiylik=21s | pc=connected | turn=0 | ovoz=ra
+2026-10-08T10:20:30.1906902Z [10-08 09:23] klient call:1791451365025484 uid=1791126452361349 :: 09:22:53.228 masofa-trek | video ready=live ¦ 09:22:53.399 sig:navbat 5 ta | offer,ice,ice,ice,ice ¦ 09:22:53.627 ovoz-qayta-boglash | audio element yangidan bog‘landi (trek=1, turn=?) ¦ 09:22:53.774 ulanildi | turn=? | audio=ra ¦ 09:22:53.789 trek-tirik | audio ¦ 09:22:54.002 trek-tirik | video
+2026-10-08T10:20:30.1909390Z [10-08 09:23] klient call:1791451365025484 uid=1791126437516073 :: 09:22:53.779 ulanildi | turn=? | audio=ra ¦ 09:22:53.792 trek-tirik | audio ¦ 09:22:53.803 trek-tirik | video ¦ 09:22:53.818 sig:navbat 1 ta | accept ¦ 09:22:54.173 ovoz-qayta-boglash | audio element yangidan bog‘landi (trek=1, turn=?) ¦ 09:22:55.609 sig:navbat 2 ta | ice,answer
+2026-10-08T10:20:30.1912472Z [10-08 09:23] klient call:1791451365025484 uid=1791126452361349 :: 09:22:45.537 kirish-qo'ng'iroq | call=1791451365025484 from=1791126437516073 video=true ¦ 09:22:45.537 sig:poll yoqildi | lastSid=0 ¦ 09:22:51.553 media tayyor | audio=1 video=1 ¦ 09:22:53.222 sig:k=offer | from=1791126437516073 call_id=1791451365025484 | C=in id=1791451365025484 pc=true started=false ¦ 09:22:53.227 masofa-trek | audio ready=live ¦ 09:22:53.227 ovoz-yol | ra (turn=?)
+2026-10-08T10:20:30.1916015Z [10-08 09:22] klient call:1791451365025484 uid=1791126437516073 :: 09:22:48.443 sig:navbat 1 ta | e2ediag ¦ 09:22:52.450 sig:k=accept | from=1791126452361349 call_id=1791451365025484 | C=out id=1791451365025484 pc=false started=false ¦ 09:22:53.764 sig:k=answer | from=1791126452361349 call_id=1791451365025484 | C=out id=1791451365025484 pc=true started=false ¦ 09:22:53.772 masofa-trek | audio ready=live ¦ 09:22:53.773 ovoz-yol | ra (turn=?) ¦ 09:22:53.773 masofa-trek | video ready=live
+2026-10-08T10:20:30.1918828Z [10-08 09:22] klient call:1791451365025484 uid=1791126437516073 :: 09:22:44.152 chaqirildi | to=1791126452361349 video=true ¦ 09:22:44.154 sig:poll yoqildi | lastSid=0 ¦ 09:22:45.499 media tayyor | audio=1 video=1 ¦ 09:22:48.124 sig:k=e2ediag | from=1791126452361349 call_id=undefined | C=out id=1791451365025484 pc=false started=false
+2026-10-08T10:20:30.1920570Z [10-08 09:22] klient call:diag uid=1791126452361349 :: ishga-tushdi | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1921906Z [10-08 09:22] klient call:diag uid=1791126452361349 :: sw-yoq | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1923081Z [10-08 09:22] klient call:diag uid=1791126437516073 :: ishga-tushdi | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1924222Z [10-08 09:22] klient call:diag uid=1791126437516073 :: sw-yoq | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1926772Z [10-08 09:09] klient call:1791450551084854 uid=1791126437516073 :: 09:09:10.117 chaqirildi | to=1791126452361349 video=false ¦ 09:09:10.117 sig:poll yoqildi | lastSid=1791450522288251 ¦ 09:09:11.608 media tayyor | audio=1 video=0 ¦ 09:09:27.225 sig:k=hangup | from=1791126452361349 call_id=1791450551084854 | C=out id=1791450551084854 pc=false started=false ¦ 09:09:27.225 endCall | status=ended | | davomiylik=0s | pc=yo'q | turn=? | ovoz=?
+2026-10-08T10:20:30.1928607Z [10-08 09:09] klient call:1791450551084854 uid=1791126452361349 :: 09:09:26.699 endCall | status=declined | | davomiylik=0s | pc=yo'q | turn=? | ovoz=?
+2026-10-08T10:20:30.1931321Z [10-08 09:09] klient call:1791450513397634 uid=1791126452361349 :: 09:09:11.640 kirish-qo'ng'iroq | call=1791450551084854 from=1791126437516073 video=false ¦ 09:09:11.640 sig:poll yoqildi | lastSid=1791450521928835 ¦ 09:09:12.383 sig:navbat 2 ta | hangup,call_closed ¦ 09:09:12.383 sig:k=call_closed | from=1791126437516073 call_id=1791450513397634 | C=in id=1791450551084854 pc=false started=false ¦ 09:09:12.383 sig:DROP call_id | k=call_closed kelgan=1791450513397634 bizniki=1791450551084854
+2026-10-08T10:20:30.1934869Z [10-08 09:09] klient call:1791450513397634 uid=1791126452361349 :: 09:08:55.353 stat | inA=+15673 inV=+167247 outA=+15743 outV=+198238 kadrlar=+100 | ovoz=ra eshit=1 k=7% ch=1% mik=on rmut=yo‘q sil=0 fb=0 kk=0 vx=0 | alv=6% smp=+239520 kon=+0 | el=cur+5 mu=0 vol=1 pa=0 rd=4 | turn=0 ¦ 09:09:03.961 sig:k=hangup | from=1791126437516073 call_id=1791450513397634 | C=in id=1791450513397634 pc=true started=true ¦ 09:09:03.962 endCall | status=ended | | davomiylik=21s | pc=connected | turn=0 | ovoz=ra
+2026-10-08T10:20:30.1937767Z [10-08 09:09] klient call:1791450513397634 uid=1791126437516073 :: 09:08:57.533 stat | inA=+15697 inV=+218988 outA=+15666 outV=+194307 kadrlar=+100 | ovoz=ra eshit=1 k=100% ch=13% mik=on rmut=yo‘q sil=0 fb=0 kk=0 vx=0 | alv=25% smp=+240000 kon=+0 | el=cur+5 mu=0 vol=1 pa=0 rd=4 | turn=0 ¦ 09:09:03.096 endCall | status=ended | | davomiylik=20s | pc=connected | turn=0 | ovoz=ra
+2026-10-08T10:20:30.1940689Z [10-08 09:09] klient call:1791450513397634 uid=1791126452361349 :: 09:08:42.028 masofa-trek | video ready=live ¦ 09:08:42.427 ovoz-qayta-boglash | audio element yangidan bog‘landi (trek=1, turn=?) ¦ 09:08:42.589 ulanildi | turn=? | audio=ra ¦ 09:08:42.611 trek-tirik | audio ¦ 09:08:42.795 trek-tirik | video ¦ 09:08:43.732 sig:navbat 18 ta | offer,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice
+2026-10-08T10:20:30.1943365Z [10-08 09:08] klient call:1791450513397634 uid=1791126437516073 :: 09:08:42.591 masofa-trek | video ready=live ¦ 09:08:42.597 ulanildi | turn=? | audio=ra ¦ 09:08:42.599 trek-tirik | video ¦ 09:08:42.609 trek-tirik | audio ¦ 09:08:42.991 ovoz-qayta-boglash | audio element yangidan bog‘landi (trek=1, turn=?) ¦ 09:08:43.963 sig:navbat 2 ta | answer,ice
+2026-10-08T10:20:30.1946322Z [10-08 09:08] klient call:1791450513397634 uid=1791126452361349 :: 09:08:33.947 kirish-qo'ng'iroq | call=1791450513397634 from=1791126437516073 video=true ¦ 09:08:33.948 sig:poll yoqildi | lastSid=0 ¦ 09:08:40.171 media tayyor | audio=1 video=1 ¦ 09:08:42.023 sig:k=offer | from=1791126437516073 call_id=1791450513397634 | C=in id=1791450513397634 pc=true started=false ¦ 09:08:42.027 masofa-trek | audio ready=live ¦ 09:08:42.027 ovoz-yol | ra (turn=?)
+2026-10-08T10:20:30.1949811Z [10-08 09:08] klient call:1791450513397634 uid=1791126437516073 :: 09:08:38.552 sig:navbat 1 ta | e2ediag ¦ 09:08:41.106 sig:k=accept | from=1791126452361349 call_id=1791450513397634 | C=out id=1791450513397634 pc=false started=false ¦ 09:08:42.155 sig:navbat 1 ta | accept ¦ 09:08:42.581 sig:k=answer | from=1791126452361349 call_id=1791450513397634 | C=out id=1791450513397634 pc=true started=false ¦ 09:08:42.590 masofa-trek | audio ready=live ¦ 09:08:42.591 ovoz-yol | ra (turn=?)
+2026-10-08T10:20:30.1952731Z [10-08 09:08] klient call:1791450513397634 uid=1791126437516073 :: 09:08:32.402 chaqirildi | to=1791126452361349 video=true ¦ 09:08:32.402 sig:poll yoqildi | lastSid=0 ¦ 09:08:33.941 media tayyor | audio=1 video=1 ¦ 09:08:36.654 sig:k=e2ediag | from=1791126452361349 call_id=undefined | C=out id=1791450513397634 pc=false started=false
+2026-10-08T10:20:30.1954514Z [10-08 09:08] klient call:diag uid=1791126452361349 :: ishga-tushdi | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1955717Z [10-08 09:08] klient call:diag uid=1791126452361349 :: sw-yoq | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1956889Z [10-08 09:08] klient call:diag uid=1791126437516073 :: ishga-tushdi | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1958071Z [10-08 09:08] klient call:diag uid=1791126437516073 :: sw-yoq | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1960687Z [10-08 09:02] klient call:1791450143201616 uid=1791126437516073 :: 09:02:22.311 chaqirildi | to=1791126452361349 video=false ¦ 09:02:22.311 sig:poll yoqildi | lastSid=1791450114339438 ¦ 09:02:23.661 media tayyor | audio=1 video=0 ¦ 09:02:39.971 sig:k=hangup | from=1791126452361349 call_id=1791450143201616 | C=out id=1791450143201616 pc=false started=false ¦ 09:02:39.972 endCall | status=ended | | davomiylik=0s | pc=yo'q | turn=? | ovoz=?
+2026-10-08T10:20:30.1962489Z [10-08 09:02] klient call:1791450143201616 uid=1791126452361349 :: 09:02:38.753 endCall | status=declined | | davomiylik=0s | pc=yo'q | turn=? | ovoz=?
+2026-10-08T10:20:30.1965113Z [10-08 09:02] klient call:1791450105812654 uid=1791126452361349 :: 09:02:23.719 kirish-qo'ng'iroq | call=1791450143201616 from=1791126437516073 video=false ¦ 09:02:23.719 sig:poll yoqildi | lastSid=1791450114007845 ¦ 09:02:25.889 sig:navbat 2 ta | hangup,call_closed ¦ 09:02:25.889 sig:k=call_closed | from=1791126437516073 call_id=1791450105812654 | C=in id=1791450143201616 pc=false started=false ¦ 09:02:25.889 sig:DROP call_id | k=call_closed kelgan=1791450105812654 bizniki=1791450143201616
+2026-10-08T10:20:30.1969207Z [10-08 09:02] klient call:1791450105812654 uid=1791126452361349 :: 09:02:07.875 stat | inA=+15020 inV=+172409 outA=+15025 outV=+197666 kadrlar=+100 | ovoz=ra eshit=1 k=0% ch=1% mik=on rmut=yo‘q sil=0 fb=0 kk=0 vx=0 | alv=2% smp=+240000 kon=+0 | el=cur+5 mu=0 vol=1 pa=0 rd=4 | turn=0 ¦ 09:02:12.876 ovoz-qayta-boglash | audio element yangidan bog‘landi (trek=1, turn=0) ¦ 09:02:12.876 ovoz-jim | bosqich 1: o'z yo'li tiklandi (rejim=ra alv=0% k=0%) ¦ 09:02:15.816 sig:k=hangup | from=1791126437516073 call_id=1791450105812654 | C=in id=1791450105812654 pc=true started=true ¦ 09:02:15.817 endCall | status=ended | | davomiylik=
+2026-10-08T10:20:30.1972568Z [10-08 09:02] klient call:1791450105812654 uid=1791126437516073 :: 09:02:09.297 stat | inA=+15006 inV=+206779 outA=+14999 outV=+185929 kadrlar=+100 | ovoz=ra eshit=1 k=35% ch=0% mik=on rmut=yo‘q sil=0 fb=0 kk=0 vx=0 | alv=6% smp=+240000 kon=+0 | el=cur+5 mu=0 vol=1 pa=0 rd=4 | turn=0 ¦ 09:02:15.290 endCall | status=ended | | davomiylik=21s | pc=connected | turn=0 | ovoz=ra
+2026-10-08T10:20:30.1975384Z [10-08 09:02] klient call:1791450105812654 uid=1791126452361349 :: 09:01:54.099 masofa-trek | video ready=live ¦ 09:01:54.499 ovoz-qayta-boglash | audio element yangidan bog‘landi (trek=1, turn=?) ¦ 09:01:54.654 ulanildi | turn=? | audio=ra ¦ 09:01:54.672 trek-tirik | audio ¦ 09:01:54.863 trek-tirik | video ¦ 09:01:56.011 sig:navbat 19 ta | offer,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice
+2026-10-08T10:20:30.1978071Z [10-08 09:02] klient call:1791450105812654 uid=1791126437516073 :: 09:01:54.660 ulanildi | turn=? | audio=ra ¦ 09:01:54.666 trek-tirik | video ¦ 09:01:54.678 trek-tirik | audio ¦ 09:01:55.056 ovoz-qayta-boglash | audio element yangidan bog‘landi (trek=1, turn=?) ¦ 09:01:56.414 sig:navbat 2 ta | answer,ice
+2026-10-08T10:20:30.1981184Z [10-08 09:02] klient call:1791450105812654 uid=1791126452361349 :: 09:01:46.348 kirish-qo'ng'iroq | call=1791450105812654 from=1791126437516073 video=true ¦ 09:01:46.349 sig:poll yoqildi | lastSid=0 ¦ 09:01:52.416 media tayyor | audio=1 video=1 ¦ 09:01:54.095 sig:k=offer | from=1791126437516073 call_id=1791450105812654 | C=in id=1791450105812654 pc=true started=false ¦ 09:01:54.099 masofa-trek | audio ready=live ¦ 09:01:54.099 ovoz-yol | ra (turn=?)
+2026-10-08T10:20:30.1984550Z [10-08 09:01] klient call:1791450105812654 uid=1791126437516073 :: 09:01:53.290 sig:k=accept | from=1791126452361349 call_id=1791450105812654 | C=out id=1791450105812654 pc=false started=false ¦ 09:01:54.620 sig:navbat 1 ta | accept ¦ 09:01:54.649 sig:k=answer | from=1791126452361349 call_id=1791450105812654 | C=out id=1791450105812654 pc=true started=false ¦ 09:01:54.656 masofa-trek | audio ready=live ¦ 09:01:54.656 ovoz-yol | ra (turn=?) ¦ 09:01:54.656 masofa-trek | video ready=live
+2026-10-08T10:20:30.1987604Z [10-08 09:01] klient call:1791450105812654 uid=1791126437516073 :: 09:01:44.926 chaqirildi | to=1791126452361349 video=true ¦ 09:01:44.927 sig:poll yoqildi | lastSid=0 ¦ 09:01:46.310 media tayyor | audio=1 video=1 ¦ 09:01:48.940 sig:k=e2ediag | from=1791126452361349 call_id=undefined | C=out id=1791450105812654 pc=false started=false ¦ 09:01:49.207 sig:navbat 1 ta | e2ediag
+2026-10-08T10:20:30.1989352Z [10-08 09:01] klient call:diag uid=1791126452361349 :: ishga-tushdi | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1990626Z [10-08 09:01] klient call:diag uid=1791126452361349 :: sw-yoq | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1991799Z [10-08 09:01] klient call:diag uid=1791126437516073 :: ishga-tushdi | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1992940Z [10-08 09:01] klient call:diag uid=1791126437516073 :: sw-yoq | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.1995383Z [10-08 08:45] klient call:1791449125388186 uid=1791126437516073 :: 08:45:24.331 chaqirildi | to=1791126452361349 video=false ¦ 08:45:24.331 sig:poll yoqildi | lastSid=1791449096543190 ¦ 08:45:25.934 media tayyor | audio=1 video=0 ¦ 08:45:41.544 sig:k=hangup | from=1791126452361349 call_id=1791449125388186 | C=out id=1791449125388186 pc=false started=false ¦ 08:45:41.544 endCall | status=ended | | davomiylik=0s | pc=yo'q | turn=? | ovoz=?
+2026-10-08T10:20:30.1997202Z [10-08 08:45] klient call:1791449125388186 uid=1791126452361349 :: 08:45:40.982 endCall | status=declined | | davomiylik=0s | pc=yo'q | turn=? | ovoz=?
+2026-10-08T10:20:30.1999810Z [10-08 08:45] klient call:1791449087494427 uid=1791126452361349 :: 08:45:25.960 kirish-qo'ng'iroq | call=1791449125388186 from=1791126437516073 video=false ¦ 08:45:25.960 sig:poll yoqildi | lastSid=1791449096189467 ¦ 08:45:26.704 sig:navbat 2 ta | hangup,call_closed ¦ 08:45:26.704 sig:k=call_closed | from=1791126437516073 call_id=1791449087494427 | C=in id=1791449125388186 pc=false started=false ¦ 08:45:26.704 sig:DROP call_id | k=call_closed kelgan=1791449087494427 bizniki=1791449125388186
+2026-10-08T10:20:30.2001983Z [10-08 08:45] klient call:media uid=1791102166705663 :: media-qadam [sendFile-YUBORILDI] kind=voice size=0 mime=? :: ok
+2026-10-08T10:20:30.2002948Z [10-08 08:45] klient call:media uid=1791102166705663 :: media-qadam [sendFile-yuklandi] kind=voice size=0 mime=? :: media=h4LzWJm8Z7SDWQSNQpNXPX
+2026-10-08T10:20:30.2004276Z [10-08 08:45] klient call:media uid=1791102166705663 :: media-qadam [sendFile-boshlanmoqda] kind=voice size=66085 mime=audio/webm;codecs=opus :: kind=voice hajm=66085 mime=audio/webm;codecs=opus chat=1791350210111881
+2026-10-08T10:20:30.2007260Z [10-08 08:45] klient call:1791449087494427 uid=1791126452361349 :: 08:45:09.385 stat | inA=+15669 inV=+164979 outA=+15686 outV=+197894 kadrlar=+100 | ovoz=ra eshit=1 k=0% ch=0% mik=on rmut=yo‘q sil=0 fb=0 kk=0 vx=0 | alv=25% smp=+240000 kon=+0 | el=cur+5 mu=0 vol=1 pa=0 rd=4 | turn=0 ¦ 08:45:17.889 sig:k=hangup | from=1791126437516073 call_id=1791449087494427 | C=in id=1791449087494427 pc=true started=true ¦ 08:45:17.890 endCall | status=ended | | davomiylik=21s | pc=connected | turn=0 | ovoz=ra
+2026-10-08T10:20:30.2011151Z [10-08 08:45] klient call:1791449087494427 uid=1791126437516073 :: 08:44:56.807 trek-tirik | audio ¦ 08:44:56.835 trek-tirik | video ¦ 08:44:57.192 ovoz-qayta-boglash | audio element yangidan bog‘landi (trek=1, turn=?) ¦ 08:44:58.037 sig:navbat 2 ta | answer,ice ¦ 08:45:09.838 stat | inA=+15684 inV=+198689 outA=+15634 outV=+170096 kadrlar=+100 | ovoz=ra eshit=1 k=1% ch=0% mik=on rmut=yo‘q sil=1 fb=0 kk=0 vx=0 | alv=6% smp=+240000 kon=+0 | el=cur+5 mu=0 vol=1 pa=0 rd=4 | turn=0 ¦ 08:45:17.311 endCall | status=ended | | davomiylik=21s | pc=connected | turn=0 | ovoz=ra
+2026-10-08T10:20:30.2014480Z [10-08 08:45] klient call:1791449087494427 uid=1791126452361349 :: 08:44:56.260 masofa-trek | video ready=live ¦ 08:44:56.659 ovoz-qayta-boglash | audio element yangidan bog‘landi (trek=1, turn=?) ¦ 08:44:56.793 ulanildi | turn=? | audio=ra ¦ 08:44:56.808 trek-tirik | audio ¦ 08:44:57.033 trek-tirik | video ¦ 08:44:57.941 sig:navbat 19 ta | offer,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice,ice
+2026-10-08T10:20:30.2017441Z [10-08 08:45] klient call:1791449087494427 uid=1791126437516073 :: 08:44:56.238 sig:navbat 1 ta | accept ¦ 08:44:56.785 sig:k=answer | from=1791126452361349 call_id=1791449087494427 | C=out id=1791449087494427 pc=true started=false ¦ 08:44:56.792 masofa-trek | audio ready=live ¦ 08:44:56.792 ovoz-yol | ra (turn=?) ¦ 08:44:56.793 masofa-trek | video ready=live ¦ 08:44:56.796 ulanildi | turn=? | audio=ra
+2026-10-08T10:20:30.2019818Z [10-08 08:45] klient call:1791449088601457 uid=1791102166705663 :: 08:44:47.886 chaqirildi | to=1791350011018105 video=false ¦ 08:44:47.887 sig:poll yoqildi | lastSid=0 ¦ 08:44:49.984 media tayyor | audio=1 video=0 ¦ 08:45:05.849 endCall | status=ended | | davomiylik=0s | pc=yo'q | turn=? | ovoz=?
+2026-10-08T10:20:30.2022803Z [10-08 08:45] klient call:1791449087494427 uid=1791126452361349 :: 08:44:48.155 kirish-qo'ng'iroq | call=1791449087494427 from=1791126437516073 video=true ¦ 08:44:48.155 sig:poll yoqildi | lastSid=0 ¦ 08:44:54.357 media tayyor | audio=1 video=1 ¦ 08:44:56.255 sig:k=offer | from=1791126437516073 call_id=1791449087494427 | C=in id=1791449087494427 pc=true started=false ¦ 08:44:56.259 masofa-trek | audio ready=live ¦ 08:44:56.259 ovoz-yol | ra (turn=?)
+2026-10-08T10:20:30.2026217Z [10-08 08:45] klient call:1791449087494427 uid=1791126437516073 :: 08:44:46.426 chaqirildi | to=1791126452361349 video=true ¦ 08:44:46.426 sig:poll yoqildi | lastSid=0 ¦ 08:44:48.079 media tayyor | audio=1 video=1 ¦ 08:44:50.738 sig:k=e2ediag | from=1791126452361349 call_id=undefined | C=out id=1791449087494427 pc=false started=false ¦ 08:44:52.642 sig:navbat 1 ta | e2ediag ¦ 08:44:55.266 sig:k=accept | from=1791126452361349 call_id=1791449087494427 | C=out id=1791449087494427 pc=false started=false
+2026-10-08T10:20:30.2028299Z [10-08 08:44] klient call:diag uid=1791126452361349 :: ishga-tushdi | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.2029695Z [10-08 08:44] klient call:diag uid=1791102166705663 :: ishga-tushdi | build=v92 | apk=1 | on=1 | hid=visible | ua=o) Version/4.0 Chrome/154.0.8037.57 Mobile Safari/537.36 50GramApp/2.6
+2026-10-08T10:20:30.2030998Z [10-08 08:44] klient call:diag uid=1791126452361349 :: sw-yoq | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.2032197Z [10-08 08:44] klient call:diag uid=1791126437516073 :: ishga-tushdi | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.2033407Z [10-08 08:44] klient call:diag uid=1791126437516073 :: sw-yoq | build=v92 | apk=0 | on=1 | hid=visible | ua=x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36
+2026-10-08T10:20:30.7065572Z Post job cleanup.
+2026-10-08T10:20:30.8296335Z (node:2416) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-08T10:20:30.8297175Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-08T10:20:30.8551638Z Post job cleanup.
+2026-10-08T10:20:30.9425847Z [command]/usr/bin/git version
+2026-10-08T10:20:30.9467546Z git version 2.55.0
+2026-10-08T10:20:30.9503701Z Temporarily overriding HOME='/home/runner/work/_temp/13a631a9-9d5c-40fc-be23-24f4d44c82d4' before making global git config changes
+2026-10-08T10:20:30.9505495Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-08T10:20:30.9508444Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/50gram/50gram
+2026-10-08T10:20:30.9547235Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-08T10:20:30.9584042Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-08T10:20:30.9857134Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-08T10:20:30.9886477Z http.https://github.com/.extraheader
+2026-10-08T10:20:30.9902990Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-10-08T10:20:30.9933859Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-08T10:20:31.0203347Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-08T10:20:31.0240663Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-08T10:20:31.0646052Z Cleaning up orphan processes
+2026-10-08T10:20:31.0939625Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

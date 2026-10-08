@@ -176,3 +176,23 @@ Work Log:
 Stage Summary:
 - Sayt texnik jihatdan Google'ga to'liq tayyor (robots+sitemap+meta+JSON-LD+https redirect).
 - Qolgan: (1) foydalanuvchi wildcard route *.50gram.uz/* qayta qo'shishi (www 403 hali); (2) GSC: domain property + DNS TXT verify + sitemap submit + Request indexing — yo'riqnoma foydalanuvchiga berildi (bajarilishi kutilmoqda).
+
+---
+Task ID: 41
+Agent: Super Z (asosiy)
+Task: Rasm/fayl yuborish ishlamayapti (APK tanlov BO'SH) + video qo'ng'iroq birtomonlama ovoz (v93)
+
+Work Log:
+- Jurnal tashxisi (run 37762777680): [10:18] media-qadam [picker-javob] kind=gal n=0 (BO'SH) — APK qurilma (X, 50GramApp/2.6) galereyadan rasm tanladi, WebView natija yetkazmadi. Voice xabar o'tgan (sendFile YUBORILDI ok). Journalda image upload umuman yo'q — muammo TANLOV qadamida.
+- APK kod tahlili: onShowFileChooser/onActivityResult standart edi; lekin AndroidManifest'da READ_MEDIA_IMAGES/VIDEO/READ_EXTERNAL_STORAGE RUXSATLARI YO'Q edi (Android 13+ va OEM galereyalar bunda BO'SH natija qaytarishi ma'lum).
+- MEDIA E2E yozildi (scripts/e2e_media_send.mjs + e2e-media.yml): 2 brauzer, real UI, A yuboradi → B dekript+dekod (naturalWidth>0), fayl bayt-bayt mos. Node fetch'ga Mozilla UA qo'shildi (FW), yangi akkaunt profil qadami, faqat YANGI xabarga assertion (eski xabarlar aralashmasin).
+- ISBOT (run 37766883596): MEDIA E2E PASS — web+server+R2+dekript TO'LIQ SOG'LOM. Muammo 100% APK tanlov ko'prigida.
+- APK v3.1 (versionCode 11): manifest'ga READ_MEDIA_IMAGES + READ_MEDIA_VIDEO + READ_MEDIA_VISUAL_USER_SELECTED + READ_EXTERNAL_STORAGE(maxSdk 32); ensureOsMediaPerms endi media ruxsatlarni ham so'raydi (mediaReadPerms()); onShowFileChooser — robust ACTION_GET_CONTENT (setType */* + EXTRA_MIME_TYPES + EXTRA_ALLOW_MULTIPLE, createIntent fallback); onActivityResult — qo'lda ClipData+getData ajratish (parseResult null-qaytish holatlari yopildi), callback hech qachon yo'qolmaydi.
+- JS v93: pickFile — cancel vs bo'sh-natija ajratildi (__bekor belgi); chat.js — picker-bekor (qadam) / picker-bosh (xato + foydalanuvchiga toast «Fayl yo'li bilan urinib ko'ring»). Versiya v93 (worker+core+sw sinxron).
+- CI yakuni: Deploy ✅ / Smoke ✅ (37768605956, 3-yo'qlik v93 qulfi OK) / MEDIA E2E ✅ (rasm dekod + fayl bayt-bayt) / Call E2E ✅ (37769005756 — ikkala tomon video kadrlar + audio currentTime, jiringlash 15s, rad yetdi) / Jurnal ✅.
+- Video qo'ng'iroq ovozi: v92 yo'nalishi tasdiqlandi (routeFor: APK video→'wa' karnay, spkOn=!!video; ko'prik metodlari typeof-himoyalangan — APK 2.6'da ham ishlaydi). Bugungi real qo'ng'iroqlar desktop↔desktop — IKKALA tomon eshitgan (ovoz=ra eshit=1). APK↔APK real sinov hali yo'q — foydalanuvchi kutilmoqda; APK v3.1 o'rnatilsa native audioKick/speaker ham qo'shiladi.
+
+Stage Summary:
+- Rasm/fayl: server+web E2E bilan isbotlandi; APK 2.6 galereya muammosi v3.1'da tuzatildi (ruxsatlar+robust intent+mustahkam natija). Foydalanuvchi APK v3.1 ni qurib o'rnatishi kerak (avvalgi rebuild usulida); JS v93 hoziroq jonli (tashxis+toast).
+- Video ovoz: v92/v93 jonli; APK qurilmalarda real video qo'ng'iroq sinovi kutilmoqda (jurnal ovoz=wa + eshit=1 beradi). APK v3.1 bilan native audioKick qo'shiladi.
+- Eslatma: mening box IP FW blokda (UA'siz curl urinishlar) — API tekshiruvlar CI orqali.
