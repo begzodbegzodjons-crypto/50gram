@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /50gram.apk$
+
+# Sayt xaritasi
+Sitemap: https://50gram.uz/sitemap.xml

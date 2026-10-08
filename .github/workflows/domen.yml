@@ -216,6 +216,10 @@ jobs:
           done
           echo "== core.js build belgisi"
           curl -sS --max-time 25 https://50gram.uz/core.js | grep -o "__50BUILD = '[^']*'" || echo "BUILD BELGISI TOPILMADI"
+          echo "== robots.txt"
+          curl -sS --max-time 25 https://50gram.uz/robots.txt | head -5 || echo "ROBOTS YOQ"
+          echo "== sitemap.xml"
+          curl -sS -o /dev/null --max-time 25 -w "sitemap: %{http_code}\n" https://50gram.uz/sitemap.xml || true
           echo "== /api/health (brauzer UA bilan)"
           curl -sS -A "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/154.0 Mobile Safari/537.36" --max-time 25 -w "\nhealth http: %{http_code}\n" https://50gram.uz/api/health || true
           echo "== /50gram.apk"
