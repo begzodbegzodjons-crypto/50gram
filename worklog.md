@@ -142,3 +142,21 @@ Stage Summary:
 - Ildiz tuzatish uchun foydalanuvchiga 2 variant berildi: (A) Workers -> 50gram -> Settings -> Domains & Routes -> Add -> Route: 50gram.uz/* (asosiy — avvalgi oqim ham route yozgandi); (B) Add -> Custom domain 50gram.uz + record replacement tasdiqlash (o'lgan yozuvni ham tozalaydi).
 - Foydalanuvchi qilgach: curl bilan tekshiriladi (200 + 50 Gram title), so'ng CI tekshir rejimi.
 - www allaqachon to'liq ishlaydi (bu orqali ilova ochiladi — ildiz tuzatilmaguncha).
+
+---
+Task ID: 39
+Agent: Super Z (asosiy)
+Task: Foydalanuvchi route qo'shdi (50gram.uz/*) — ildiz OCHILDI; wildcard o'chirilgani uchun www buzildi
+
+Work Log:
+- Foydalanuvchi Cloudflare UI'da Add Route oynasini ochdi (skrinshot): zone=50gram.uz, route=50gram.uz/*, Failure mode=Fail closed (default) — to'g'ri to'ldirilgan.
+- Foydalanuvchi "Add Route" bosdi VA AVVALGI wildcard route'ni (*.50gram.uz/*) O'CHIRDI.
+- Tekshiruv: https://50gram.uz/ -> 200 + <title>50 Gram (ILOVA OCHILYAPTI!). Lekin www -> 522, keyinroq 403 (eski origin) — wildcard o'chirilgani uchun www route'siz qoldi.
+- core.js v92 (3/3 urinish 200), APK www'da 200/759KB. Mening IP'im /api/* da 404 "Not found" — FW meni UA'siz curl urinishlari uchun blokladi (kutilgan himoya; real foydalanuvchiga ta'sir yo'q).
+- Mustaqil CI tekshiruv (tekshir rejimi): 50gram.uz -> 200 + ilova HTML, core.js=v92, apk=200 759216 bayt. www -> 403 Forbidden (eski origin javobi).
+- domen.yml tekshir rejimiga /api/health (brauzer UA) qo'shildi, commit push.
+
+Stage Summary:
+- ASOSIY MAQSAD BAJARILDI: 50gram.uz ildizi endi ilovani beradi (mustaqil tarmoqdan isbotlangan).
+- QOLGAN ISH: foydalanuvchi wildcard route'ni qayta qo'shishi kerak (*.50gram.uz/* — xuddi shu oynada) — www ham shu bilan qaytadi.
+- Mening IP FW blokda (30 kun) — keyingi API tekshiruvlar CI orqali (toza IP + brauzer UA).
