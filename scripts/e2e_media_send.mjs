@@ -62,7 +62,14 @@ async function newApp(browser, acc, label) {
   const page = await ctx.newPage()
   page.on('pageerror', (e) => log('  [' + label + '] pageerror:', String(e).slice(0, 150)))
   await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('#chatlist', { timeout: 20000 })
+  // Yangi akkaunt — profil qadami (ism) chiqishi mumkin: to'ldiramiz
+  try {
+    await page.waitForSelector('#a-prof:not(.hide)', { timeout: 5000 })
+    await page.fill('#ap-first', 'E2E ' + label)
+    await page.click('#b-prof')
+    log('[' + label + '] profil to`ldirildi')
+  } catch {}
+  await page.waitForSelector('#chatlist .item', { timeout: 25000 })
   return { ctx, page }
 }
 
