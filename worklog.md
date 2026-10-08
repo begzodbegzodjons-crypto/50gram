@@ -71,3 +71,21 @@ Work Log:
 Stage Summary:
 - Qolgan odam-qadamlari: (1) DNS Records'da mail/webmail/ftp kalitlarini kulrang qilish (boshqacha iloji yo'q — token DNS yozishga ruxsatsiz); (2) zona active bo'lgach «tekshir» xabari → CI ulash (50gram.uz + www → worker) va tekshir.
 - Ilovada qattiq URL yo'qligi tasdiqlangan — domen ulanganda kod o'zgarmaydi.
+
+---
+Task ID: 36
+Agent: Super Z (asosiy)
+Task: v91 — VIDEO qo'ng'iroqda birtomonlama ovoz ildizi (APK 2.6 quloqchi tuzoq) + uzluksiz qutqaruv narvoni
+
+Work Log:
+- Ildiz tahlili (kod + jurnal dalillari bilan): (1) real qo'ng'iroqlarda ikkala qurilma APK 50GramApp/2.6 — speaker() ko'prigi v2.8'da YOZILGAN lekin qurilmalarda YO'Q (rebuild kutilmoqda); (2) Chromium WebView WebRTC MODE_IN_COMMUNICATION o'rnatadi → ovoz QULOQCHIGA yo'naladi; video qo'ng'iroqda telefon yuz oldida = eshitilmaydi, audio qo'ng'iroqda quloq yonida = eshitiladi — shikoyatning «faqat video»ligi izohlandi; (3) X qurilma (k=0% rb=1, inA faol, el ijroda) — tap yolg'on nol (v84 isboti) barcha eski narvonlarni chalg'itgan; (4) v90'dagi JONLI XATO: wa-qaytish qorovuli inR (tap) bilan — ishlayotgan 'wa' (karnay) yo'li tap-yolg'onida BEKOR qilinar edi.
+- rtc.js v91: (a) modeOrd() — APK+video: ['wa','ra','v'] (WebAudio → STREAM_MUSIC → KARNAY, quloqchi marshrutini chetlab o'tadi), desktop: ['ra','v','wa']; (b) default audioMode callUser/incomingCall'da APK video='wa'; (c) wa-qaytish qorovuli alv-gated (dekoder audioLevel) — tap yolg'oni ishlayotgan yo'lni buzolmaydi; (d) uzluksiz narvon: z1 rebind → z2/z3 rejim almashtirish → z4 rebuildCallElements (elementlar 0 dan) → z5 nativeKick → z>=6 AYLANISH + har 3-oynada kick (abadiy jimlik mumkin emas); (e) pickNext waDeadOnce'da wa'ni tashlab o'tadi; (f) playRemote spkMuted waGain.gain=0 (avval WebAudio «Dinamik»ga bo'ysunmasdi!) + tiklash; (g) 'Dinamik' tugmasi APK 2.6'da video rejimda wa/ra almashtiradi; (h) connected'da speaker qayta tasdiqlash (2.5s/7s) + routeInfo jurnalga; (i) stat'ga fb=/kk= maydonlari.
+- TDZ xatosi ushlandi va tuzatildi (alvAvail wa-qorovulda ishlatilib pastda e'lon qilingandi) — node --check TDZ'ni ushlab olmaydi, qo'lda topildi.
+- APK v3.0 (MainActivity.java, keyingi rebuild uchun): speaker() endi avval setMode(MODE_IN_COMMUNICATION) keyin setCommunicationDevice (tartib muhim — kommunikatsiya rejimisiz setCommunicationDevice ta'sirsiz); off'da clearCommunicationDevice + MODE_NORMAL; YANGI audioKick(video) — ovoz darajalari (VOICE_CALL>=35%, MUSIC>=20%) + NORMAL↔COMMUNICATION marshrut-kick + video'da karnay; YANGI routeInfo() — mode/spk/vc/mu/dev jurnalga; version 3.0, UA 50GramApp/3.0.
+- Versiya v91 sinxron: worker BUILD_V + core.js __50BUILD + sw.js V.
+- TDZ sababli sinov: node --check 3 faylda OK.
+
+Stage Summary:
+- Simptom: video qo'ng'iroqda bir tomon ovozi chiqmaydi (APK qurilmalar). Ildiz: APK 2.6'da speaker ko'prigi yo'q → Chromium comm-rejim ovozi quloqchiga → video'da ko'rinmaydi; + v90 wa-qaytish qorovuli tap-yolg'onida ishlayotgan karnay yo'lini buzardi.
+- v91: APK video qo'ng'iroqda ovoz endi WebAudio (KARNAY) orqali; tap yolg'oni yo'lni buzolmaydi (alv-gated); qutqaruv hech qachon to'xtamaydi (aylanish); Dinamik WebAudio'ni boshqaradi; APK 3.0 audioKick/routeInfo bilan rebuild-ga tayyor.
+- Kutilayotgan isbot: foydalanuvchi video qo'ng'iroq qiladi → jurnal'da ovoz=wa + alv>0 + eshitish tasdiqlanadi.

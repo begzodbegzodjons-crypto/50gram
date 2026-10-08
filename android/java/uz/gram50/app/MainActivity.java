@@ -101,6 +101,10 @@ public class MainActivity extends Activity {
     // v2.8 (v74 klient bilan birga): QO'NG'IROQ OVOZI YO'NALISHI — WebView WebRTC ovozi
     // ko'pincha QULOQCHIGA yo'nalgan bo'ladi, foydalanuvchi «ovoz kelmayapti» deb o'ylaydi.
     // JS: Android50.speaker(true) — karnayga, speaker(false) — quloqchiga qaytaradi.
+    // v3.0 (v91 klient): MARSHRUT TARTIBI TUZATILDI — setCommunicationDevice faqat
+    // MODE_IN_COMMUNICATION rejimida TA'SIR QILADI: avval rejim, KEYIN qurilma (tartib
+    // muhim). O'chirilganda rejim NORMAL'ga qaytariladi (aks holda telefon kommunikatsiya
+    // rejimida qoladi — keyingi musiqa/jiringlash noto'g'ri yo'naladi).
     @JavascriptInterface
     public void speaker(final boolean on) {
       runOnUiThread(new Runnable() {
@@ -108,23 +112,97 @@ public class MainActivity extends Activity {
           try {
             AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
             if (am == null) return;
-            if (Build.VERSION.SDK_INT >= 31) {
-              if (on) {
-                for (AudioDeviceInfo d : am.getAvailableCommunicationDevices()) {
-                  if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
-                    am.setCommunicationDevice(d); // yangi API — Android 12+
-                    break;
+            if (on) {
+              try { am.setMode(AudioManager.MODE_IN_COMMUNICATION); } catch (Exception ignored) { }
+              if (Build.VERSION.SDK_INT >= 31) {
+                AudioDeviceInfo spk = null;
+                try {
+                  for (AudioDeviceInfo d : am.getAvailableCommunicationDevices()) {
+                    if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) { spk = d; break; }
                   }
+                } catch (Exception ignored) { }
+                if (spk != null) {
+                  try { am.setCommunicationDevice(spk); } catch (Exception ignored) { }
+                } else {
+                  try { am.setSpeakerphoneOn(true); } catch (Exception ignored) { }
                 }
               } else {
-                am.clearCommunicationDevice();
+                try { am.setSpeakerphoneOn(true); } catch (Exception ignored) { }
               }
             } else {
-              am.setSpeakerphoneOn(on); // eski API — Android 11 va pastda ishonchli
+              if (Build.VERSION.SDK_INT >= 31) {
+                try { am.clearCommunicationDevice(); } catch (Exception ignored) { }
+              } else {
+                try { am.setSpeakerphoneOn(false); } catch (Exception ignored) { }
+              }
+              try { am.setMode(AudioManager.MODE_NORMAL); } catch (Exception ignored) { }
             }
           } catch (Exception ignored) { }
         }
       });
+    }
+
+    // v3.0 (v91 klient): OVOZ-KICK — JS jimlik aniqlaganda marshrutni OS darajasida urib
+    // o'tadi: (1) qo'ng'iroq/musiqa ovoz darajalari 0 bo'lmasin, (2) rejim NORMAL →
+    // COMMUNICATION almashtirish — audio HAL yangi marshrut hodisasi oladi (qotib qolgan
+    // yo'nalish qayta jonlanadi), (3) video bo'lsa karnayga qaytaradi.
+    @JavascriptInterface
+    public void audioKick(final int video) {
+      runOnUiThread(new Runnable() {
+        @Override public void run() {
+          try {
+            AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am == null) return;
+            try {
+              int vmax = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL);
+              int vc = am.getStreamVolume(AudioManager.STREAM_VOICE_CALL);
+              if (vmax > 0 && vc < (int) (vmax * 0.35f)) {
+                am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, Math.max(3, (int) (vmax * 0.6f)), 0);
+              }
+            } catch (Exception ignored) { }
+            try {
+              int mmax = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+              int mv = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+              if (mmax > 0 && mv < Math.max(2, (int) (mmax * 0.2f))) {
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, Math.max(4, (int) (mmax * 0.5f)), 0);
+              }
+            } catch (Exception ignored) { }
+            try { am.setMode(AudioManager.MODE_NORMAL); } catch (Exception ignored) { }
+            main.postDelayed(new Runnable() {
+              @Override public void run() {
+                try {
+                  AudioManager am2 = (AudioManager) getSystemService(AUDIO_SERVICE);
+                  if (am2 == null) return;
+                  am2.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                  if (video == 1) speaker(true); // video — karnay; audio — quloqchi (tabiiy)
+                } catch (Exception ignored) { }
+              }
+            }, 250);
+          } catch (Exception ignored) { }
+        }
+      });
+    }
+
+    // v3.0 (v91 klient): marshrut tashxisi — JS jurnalga yozadi (keyingi shikoyatda bir
+    // qarorda: rejim, karnay holati, ovoz darajalari, kommunikatsiya qurilmasi)
+    @JavascriptInterface
+    public String routeInfo() {
+      try {
+        AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (am == null) return "yo'q";
+        StringBuilder b = new StringBuilder();
+        b.append("mode=").append(am.getMode());
+        b.append(" spk=").append(am.isSpeakerphoneOn() ? 1 : 0);
+        b.append(" vc=").append(am.getStreamVolume(AudioManager.STREAM_VOICE_CALL)).append('/').append(am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL));
+        b.append(" mu=").append(am.getStreamVolume(AudioManager.STREAM_MUSIC)).append('/').append(am.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+        if (Build.VERSION.SDK_INT >= 31) {
+          try {
+            AudioDeviceInfo cd = am.getCommunicationDevice();
+            b.append(" dev=").append(cd == null ? -1 : cd.getType());
+          } catch (Exception ignored) { }
+        }
+        return b.toString();
+      } catch (Exception e) { return "xato"; }
     }
 
     // v2.8: QO'NG'IROQDA EKRAN UXLAMASIN — ekran o'chsa OS kamera/mikrofonni to'xtatishi
@@ -142,7 +220,7 @@ public class MainActivity extends Activity {
     }
 
     @JavascriptInterface
-    public String version() { return "2.9"; }
+    public String version() { return "3.0"; }
 
     /** Web tomondan ruxsatlarni ataylab so'rash (masalan qo'ng'iroq tugmasi bosilganda). */
     @JavascriptInterface
@@ -211,7 +289,7 @@ public class MainActivity extends Activity {
     s.setCacheMode(WebSettings.LOAD_DEFAULT);
     s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     s.setJavaScriptCanOpenWindowsAutomatically(true);
-    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/2.8");
+    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/3.0");
     web.addJavascriptInterface(new Bridge(), "Android50");
 
     web.setWebViewClient(new WebViewClient() {
