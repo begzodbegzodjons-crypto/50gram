@@ -38,3 +38,20 @@ Stage Summary:
 - Asosiy ildiz (ehtimollik tartibida): qutqaruv narvoni juda SEKIN edi — real deaf qo'ng'iroqlar 20-25s'da o'lgani uchun 'v'/'wa' zaxira yo'llari hech qachon sinalmagan. v90 bunday holatni 15s ichida barcha yo'llarni sinab hal qiladi.
 - Agar yana shikoyat bo'lsa: alv/smp/kon/el maydonlari sababni BIR jurnalda aniq beradi (element qotgan cur+0 / dekoder jim smp+0 / metr yolg'oni cur>0+alv>0 / yuboruvchi jim).
 - Versiya: v90 (worker/core/sw sinxron). Rasm/fayl tekshiruvi yakunlandi: arxitektura to'g'ri, yagona zaiflik (resize hang) tuzatildi.
+
+---
+Task ID: 35
+Agent: Super Z (asosiy)
+Task: 50gram.uz domenini Worker'ga ulash (foydalanuvchi DNS yozuvlarini berdi)
+
+Work Log:
+- Tekshiruv: web/ da qattiq URL YO'Q (API = location.origin + '/api', WebSocket ham shundan) — domen ulanganda kod o'zgarmaydi.
+- .github/workflows/domen.yml yozildi (commit 4d28e46): mode=zona|yozuvlar|ulash|tekshir|hammasi. Python urllib bilan CF API: zona yaratish/tekshirish + NS chiqarish; pochta yozuvlarini (mail/webmail/ftp A, MX, SPF, DMARC — DNS-only) idempotent yaratish; zona active bo'lgach ziddiyatli A/CNAME o'chirib worker custom domain ulash (50gram.uz + www); tekshir: curl 200 + __50BUILD + apk.
+- CI sinov (run 37723935961, mode=zona): deploy token'ida com.cloudflare.api.account.zone.create RUXSATI YOQ — zona Dashboard orqali qo'shilishi kerak. Kutilgan holat; workflow baribir ishlab turadi (zona bor bo'lsa GET qilib oladi... token zone:o'qishsiz — Dashboard yo'li asosiy).
+- Push 4d28e46 CI: Deploy ✅ (37723930515) / E2E ✅ (37723930608) / Jurnal ✅ (37723930544).
+- Jurnal tahlili: v90 deploy (02:39) dan keyin HAQIQIY qo'ng'iroq YO'Q — faqat E2E chaqiruvlari (02:25/02:34, e2ediag belgilari, alv/smp/el maydonlari LIVE). Deaf juftlik (1790856718955563/1790858672586492) oxirgi real qo'ng'iroqlari 01:58-01:59 (v89 davri) — v90 narvoni (5s/10s/15s) haqiqiy qurilmada hali sinovdan o'tmagan.
+
+Stage Summary:
+- Domen uchun foydalanuvchidan 2 qadam kutilyapti: (1) Cloudflare Dashboard → Add domain → 50gram.uz (yozuvlar avto-import, NS beriladi); (2) registrar'da NS almashtirish. Keyin menga xabar — men CI (hammasi/tekshir) orqali yakunlayman; token ruxsati yetmasa oxirgi 2 klik (Workers → Custom domain) ko'rsatiladi.
+- Pochta (MX/SPF/DMARC/mail/webmail) saqlanadi; 50gram.uz ildizi endi ILOVA bo'ladi (eski sayt o'rniga) — muhim bo'lsa app.50gram.uz alternativi bor.
+- Audio: v90 real qurilmada kutilmoqda; alv/smp/kon/el bir qo'ng'iroqda ildizni aniq ko'rsatadi.
