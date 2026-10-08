@@ -63,6 +63,12 @@ jobs:
           def zona():
               z = req('GET', '/zones?name=' + DOMEN)
               items = z.get('result') or []
+              if not items:  # nom bo'yicha filtrlash ruxsat etilmagan bo'lsa — umumiy ro'yxat
+                  z2 = req('GET', '/zones?per_page=50')
+                  for it in (z2.get('result') or []):
+                      if it.get('name') == DOMEN:
+                          items = [it]
+                          break
               if items:
                   zid = items[0]['id']
                   print('ZONA_ALLAQACHON_BOR:', zid, '| holati:', items[0].get('status'))
@@ -95,7 +101,13 @@ jobs:
                   got = ex.get('result') or []
                   found = [r for r in got if r.get('content', '').strip().strip('"') == content.strip()]
                   if found:
-                      print(f'BOR: {t} {name} -> {content}')
+                      r0 = found[0]
+                      # mail/webmail/ftp — proxy O'CHIRILGAN bo'lishi shart (pochta/SMTP uchun)
+                      if not prox and r0.get('proxied'):
+                          show(f"proxy-kulrang {t} {name}",
+                               req('PATCH', f"/zones/{zid}/dns_records/{r0['id']}", {'proxied': False}))
+                      else:
+                          print(f'BOR: {t} {name} -> {content} (proxy={r0.get("proxied")})')
                       continue
                   body = {'type': t, 'name': name, 'content': content, 'ttl': ttl, 'proxied': prox}
                   if prio is not None:
