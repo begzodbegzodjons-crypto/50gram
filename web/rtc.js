@@ -973,6 +973,17 @@ async function handleSignalEv(ev) {
       applyAudioOnly(C, false)
       return
     }
+    // ── v90: qa — qarshi tomon KIRUVCHI video sifati yomon deb xabar beradi: bizning
+    // CHIQUVCHI bitratimiz uni bog'ib qo'yyapti — darhol pasaytiramiz (renegotiation YO'Q) ──
+    if (d.k === 'qa') {
+      const nl = Math.min(3, +d.lvl || 0)
+      if (nl > (C.qaLvl || 0)) {
+        C.qaLvl = nl; C.qaAt = Date.now()
+        applyVideoLevel(C)
+        clog('sifat-masofa', 'qarshi tomon so\u2018rovi \u2192 L' + nl + ' (video yengillashtirildi)')
+      }
+      return
+    }
     // ── offer: FAQAT offerer yaratadi (qabul qiluvchi faqat JAVOB beradi) ──
     if (d.k === 'offer') {
       if (!C.pc) { // EARLY-OFFER PARKING: pc hali tayyor emas (getMedia ishlayapti)
@@ -1027,6 +1038,7 @@ on('call_closed', (ev) => {
 // TO'G'RILAYDI. Tiklash rollarga bo'lingan (R1): offerer o'zi restart, answerer so'raydi.
 function evalStats(C, st) {
   let inA = 0, inV = 0, outA = 0, outV = 0, fr = 0, fd = 0, lostV = 0, recvV = 0, lostA = 0, recvA = 0, rtt = -1
+  let alvL = -1, smpl = 0, kon = 0 // v90: dekoder o'lchovlari — audioLevel, totalSamplesReceived, concealedSamples
   st.forEach((r) => {
     // TURN relay belgisi — «mobil tarmoqda media yo'q» deganda birinchi savolga javob
     if (r.type === 'candidate-pair' && r.state === 'succeeded') {
@@ -1034,7 +1046,14 @@ function evalStats(C, st) {
       if (typeof r.currentRoundTripTime === 'number') rtt = r.currentRoundTripTime
     }
     if (r.type === 'inbound-rtp' && !r.isRemote) {
-      if (r.kind === 'audio') { inA += r.bytesReceived || 0; lostA = r.packetsLost || 0; recvA = r.packetsReceived || 0 }
+      if (r.kind === 'audio') {
+        inA += r.bytesReceived || 0; lostA = r.packetsLost || 0; recvA = r.packetsReceived || 0
+        // v90: audioLevel — Chromium DEKODER CHIQISHIDagi ovoz (0-1). WebAudio remote-tap
+        // ba'zi WebView'larda yolg'on nol beradi — bu o'lchov mustaqil va ishonchli.
+        if (typeof r.audioLevel === 'number') alvL = Math.max(alvL, Math.round(r.audioLevel * 100))
+        smpl += r.totalSamplesReceived || 0
+        kon += r.concealedSamples || 0
+      }
       if (r.kind === 'video') { inV += r.bytesReceived || 0; fr = r.framesDecoded || 0; fd = r.framesDropped || 0; lostV = r.packetsLost || 0; recvV = r.packetsReceived || 0 }
     }
     if (r.type === 'outbound-rtp') {
@@ -1043,11 +1062,12 @@ function evalStats(C, st) {
     }
   })
   const now = Date.now(), s = C.st0
-  if (!s) { C.st0 = { t: now, inA, inV, outA, outV, fr, fd, lostV, recvV, lostA, recvA }; return }
+  if (!s) { C.st0 = { t: now, inA, inV, outA, outV, fr, fd, lostV, recvV, lostA, recvA, smpl, kon }; return }
   if (now - s.t < 4500) return // ~5s oynada bir marta
   const dts = Math.max(1, (now - s.t) / 1000)
   const dInA = inA - s.inA, dInV = inV - s.inV, dOutA = outA - s.outA, dOutV = outV - s.outV
-  C.st0 = { t: now, inA, inV, outA, outV, fr, fd, lostV, recvV, lostA, recvA }
+  const dSmpl = Math.max(0, smpl - (s.smpl || 0)), dKon = Math.max(0, kon - (s.kon || 0))
+  C.st0 = { t: now, inA, inV, outA, outV, fr, fd, lostV, recvV, lostA, recvA, smpl, kon }
   C.statN = (C.statN || 0) + 1
   // ── v82.1: OVOZ DARAJASI (RMS) — «kim jim» savoliga aniq javob ──
   // v84: kiruvchi o'lchov remoteA (faqat-audio oqim) bilan — an_in eski/bo'sh trekka
@@ -1055,7 +1075,21 @@ function evalStats(C, st) {
   // v87: namunovchining 5s OYNA MAKSIMUMI (bitta snapshot emas!) — -1 = o'lchanmadi
   let inR = C.inWin === undefined ? -1 : C.inWin
   let outR = C.outWin === undefined ? -1 : C.outWin
+  const alvR = alvL // v90: dekoder-chiqishi ovozi (yo'q bo'lsa -1)
   C.inWin = -1; C.outWin = -1
+  // v90: ELEMENT HOLATI — element IJRO etmoqdami? currentTime harakati = ijro isboti.
+  // Keyingi jurnal bu bilan ANIQ ajratadi: element qotgan (cur+0) / dekoder jim (cur>0,
+  // smp+0) / metr yolg'on (cur>0, alv>0, k=0) / yuboruvchi jim (smp>0, alv=0).
+  let elState = 'yo‘q'
+  try {
+    const aEl = C.el && qs('.ra', C.el)
+    if (aEl) {
+      const ct = aEl.currentTime || 0
+      const dCur = C.cur0 === undefined ? -1 : Math.round((ct - C.cur0) * 10) / 10
+      C.cur0 = ct
+      elState = 'cur+' + dCur + ' mu=' + (aEl.muted ? 1 : 0) + ' vol=' + aEl.volume + ' pa=' + (aEl.paused ? 1 : 0) + ' rd=' + aEl.readyState
+    }
+  } catch {}
   const at = C.local && C.local.getAudioTracks()[0]
   const rat = C.remote && C.remote.getAudioTracks()[0]
   try {
@@ -1066,7 +1100,7 @@ function evalStats(C, st) {
     } else if (C.ctx) C.waSusp = 0
   } catch {}
   // v87: stat har 2-oynada (10s — avval 15s edi, 29s'lik qo'ng'iroqlarda 1 tagina chiqardi)
-  if (C.statN % 2 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode}${C.audioBlocked ? '(blok)' : ''} k=${inR}% ch=${outR}% mik=${at ? (at.enabled ? 'on' : 'O‘CHIRILGAN') : 'yo‘q'} rmut=${rat ? (rat.muted ? 'ha' : 'yo‘q') : '?'} rb=${C.reboundOnce ? 1 : 0} vx=${C.qaLvl || 0} | turn=${C.relay === undefined ? '?' : C.relay}`)
+  if (C.statN % 2 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode}${C.audioBlocked ? '(blok)' : ''} k=${inR}% ch=${outR}% mik=${at ? (at.enabled ? 'on' : 'O‘CHIRILGAN') : 'yo‘q'} rmut=${rat ? (rat.muted ? 'ha' : 'yo‘q') : '?'} rb=${C.reboundOnce ? 1 : 0} vx=${C.qaLvl || 0} | alv=${alvR}% smp=+${dSmpl} kon=+${dKon} | el=${elState} | turn=${C.relay === undefined ? '?' : C.relay}`)
   // ── v84: WA-O'LIK QOROVULI — paketlar kelayapti (dInA>0) lekin WebAudio masofa
   // oqimidan 15s JIM (k=0): ba'zi WebView'larda remote-stream source tuguni jim
   // ishlaydi. BIR MARTA element yo'liga o'tamiz — element ovozi kafolatlangan.
@@ -1088,23 +1122,26 @@ function evalStats(C, st) {
   // k=0% rmut=yo'q inA=+14996 — baytlar oqyapti, ovoz chiqmayapti, hech kim
   // yordam bermagan. Narvon: (1) qayta bog'lash — eng ko'p davolovchi, (2) 'v',
   // (3) 'wa'. Har bosqich jurnalga yoziladi — keyingi jurnal isbot beradi.
-  if (C.audioMode !== 'wa' && dInA > 0 && inR !== -1 && inR < 1) {
+  const alvAvail = alvR >= 0
+  const silentNow = alvAvail ? alvR < 1 : (inR !== -1 && inR < 1)
+  const actA = dInA > 8000 // faol audio: 5s oynada >8KB — Opus jimligi ~10x kam
+  if (C.audioMode !== 'wa' && dInA > 0 && silentNow) {
     C.raZero = (C.raZero || 0) + 1
     if (C.raZero >= 1 && !C.reboundOnce) {
       C.reboundOnce = 1
       // v88: 1-oynadayoq (5s) qayta bog'laymiz — avval 2-oyna (10s) edi; real qo'ng'iroqda
       // (call 1791388832980421, 16:00) qayta bog'lash ovozni tikkaldi lekin 15s KUTGANDI.
-      clog('ovoz-ra-jim', 'paketlar bor, k=0 — audio element qayta bog‘lanmoqda (bosqich 1)')
+      clog('ovoz-ra-jim', 'jimlik: faol-bayt=' + (actA ? 1 : 0) + ' k=' + inR + '% alv=' + alvR + "% — element qayta bog'lanmoqda (bosqich 1)")
       rebindRemoteAudio(C)
-    } else if (C.raZero === 5) {
+    } else if (C.raZero === 2) {
       clog('ovoz-ra-jim', 'k=0 davom — video-element yo‘liga o‘tilmoqda (bosqich 2)')
       C.audioMode = 'v'; playRemote(C)
-    } else if (C.raZero === 8 && !C.waDeadOnce) {
+    } else if (C.raZero === 3 && !C.waDeadOnce) {
       C.waDeadOnce = 1
       clog('ovoz-ra-jim', 'k=0 davom — WebAudio yo‘liga o‘tilmoqda (bosqich 3)')
       C.audioMode = 'wa'; playRemote(C)
     }
-  } else if (inR > 0 || inR === -1) C.raZero = 0
+  } else if ((alvAvail && alvR > 1) || (!alvAvail && (inR > 0 || inR === -1))) C.raZero = 0
   // ── KIRUVCHI OVOZ o'lgan — narvon: 3-oyna elementlarni jonlantir, 5-oynada tiklash ──
   if (dInA === 0) {
     C.inDead = (C.inDead || 0) + 1
@@ -1159,6 +1196,8 @@ function evalStats(C, st) {
       if (C.qBadN >= 2 && C.qaLvl < 3 && now - (C.qaAt || 0) > 10000) {
         C.qaLvl++; C.qaAt = now; C.qBadN = 0
         applyVideoLevel(C)
+        // v90: qarshi tomonga ham xabar — uning KIRUVCHISI ham yomon bo'lishi mumkin
+        try { sig(C.peer.id, { k: 'qa', call_id: C.id, lvl: C.qaLvl }) } catch {}
         clog('sifat-pasaydi', 'L' + C.qaLvl + ' — tarmoq sekin, video yengillashtirildi (bad=' + bad + ')')
       } else if (C.qGoodN >= 4 && C.qaLvl > 0 && now - (C.qaAt || 0) > 15000) {
         C.qaLvl--; C.qaAt = now; C.qGoodN = 0
