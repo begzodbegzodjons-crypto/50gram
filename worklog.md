@@ -120,3 +120,25 @@ Stage Summary:
 - E2E da ikkala tomonda audio+video aqiqiy oqishi isbotlandi (server/browser qismi).
 - APK qurilmalarda (WebView quloqchi-tuzoq) yakuniy isbot foydalanuvchining REAL video qo'ng'irog'i bilan bo'ladi — jurnalda ovoz=wa + alv>0 + eshit=1 kutiladi.
 - Eslatma: domen line (Task 35) hali ham kutish rejimida — zona pending.
+
+---
+Task ID: 38
+Agent: Super Z (asosiy)
+Task: 50gram.uz zona active — lekin ildiz ochilmayapti (522) — ildiz sabab topildi
+
+Work Log:
+- Foydalanuvchi: zona tasdiqlandi (active), sayt ochilmayapti.
+- CI (domen.yml) orqali tekshiruv: zona ACTIVE (76c80bed6fd4c447f45b7796a38d6e67, leland+meilani NS). NS butun dunyoga tarqalgan (dig: 1.1.1.1 va 8.8.8.8 ikkalasi CF NS beradi).
+- holat rejimi qo'shildi (zona+DNS+custom domains ro'yxati): custom domains BO'SH.
+- ulash urinishi: 100117 — 50gram.uz va www'da "externally managed DNS records" bor, token o'chira olmaydi (DNS yozish ruxsati yo'q).
+- OMMAVIY DNS: 50gram.uz va www IKKALASI ham CF proxy IP'lariga (104.21.x/172.67.x) qaraydi.
+- Real javoblar: https://50gram.uz/ -> 522 (CF eski origin 45.138.159.4 ga ulanolmaydi — o'sha sabab ochilmayapti). https://www.50gram.uz/ -> 200 VA BIZNING ILOVA (core.js __50BUILD=v92, /50gram.apk 200 759KB) — www ISHLAYAPT!
+- YOL rejimi qo'shildi (workers route yaratish): MAVJUD ROUTES ro'yxatida faqat BITTASI bor: *.50gram.uz/* -> 50gram — www shunga tushadi; ildizga TEGMAYDI (wildcard apex'ni qamramaydi). POST route: "No access to the specified resource" — token route yozish huquqsiz.
+- XULOSA (ildiz): www'ga worker route ulangan, ildizga ulanmagan + ildiz A yozuvi o'lgan eski xostingga qaraydi -> 522. Token route qo'sha olmaydi -> foydalanuvchiga 1 ta UI amali kerak (route yoki custom domain).
+- Firewall izohi: curl'siz UA bilan /api/* -> 404 "Not found" — bu FW_UA_OK himoyasi (oddiy holat, worker turibdi degani).
+- domen.yml yangi rejimlar: holat, yol. scripts/domen_run.sh — workflow yuritish+kuzatish+jurnal skripti.
+
+Stage Summary:
+- Ildiz tuzatish uchun foydalanuvchiga 2 variant berildi: (A) Workers -> 50gram -> Settings -> Domains & Routes -> Add -> Route: 50gram.uz/* (asosiy — avvalgi oqim ham route yozgandi); (B) Add -> Custom domain 50gram.uz + record replacement tasdiqlash (o'lgan yozuvni ham tozalaydi).
+- Foydalanuvchi qilgach: curl bilan tekshiriladi (200 + 50 Gram title), so'ng CI tekshir rejimi.
+- www allaqachon to'liq ishlaydi (bu orqali ilova ochiladi — ildiz tuzatilmaguncha).
