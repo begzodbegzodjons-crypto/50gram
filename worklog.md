@@ -55,3 +55,19 @@ Stage Summary:
 - Domen uchun foydalanuvchidan 2 qadam kutilyapti: (1) Cloudflare Dashboard → Add domain → 50gram.uz (yozuvlar avto-import, NS beriladi); (2) registrar'da NS almashtirish. Keyin menga xabar — men CI (hammasi/tekshir) orqali yakunlayman; token ruxsati yetmasa oxirgi 2 klik (Workers → Custom domain) ko'rsatiladi.
 - Pochta (MX/SPF/DMARC/mail/webmail) saqlanadi; 50gram.uz ildizi endi ILOVA bo'ladi (eski sayt o'rniga) — muhim bo'lsa app.50gram.uz alternativi bor.
 - Audio: v90 real qurilmada kutilmoqda; alv/smp/kon/el bir qo'ng'iroqda ildizni aniq ko'rsatadi.
+
+---
+Task ID: 35-b
+Agent: Super Z (asosiy)
+Task: Domen ulash davomi — foydalanuvchi bilan jonli yo'riqnoma
+
+Work Log:
+- Foydalanuvchi Workers → 50gram → Domains orqali «Connect your domain» oynasini ochdi → zona yaratish oqimi (confirm-scanned-records) tugadi: 8 yozuv (4 A, 1 CNAME, 1 MX, 2 TXT) avto-import qilindi.
+- domen.yml yaxshilandi: zona umumiy ro'yxatdan topiladigan bo'ldi + mail/webmail/ftp uchun PATCH proxied=false qo'shildi (commit: proxy-kulrang).
+- CI yozuvlar run'i (37731277849): ZONA BOR (76c80bed6fd4c447f45b7796a38d6e67, pending) + NS_SERVERLAR=leland/meilani.ns.cloudflare.com. DNS YOZISH RUXSATI YOQ (code 10000 Authentication error) — deploy token faqat Worker'ga ruxsatli.
+- Foydalanuvchi my.eskiz.uz'da NS'larni kiritdi (leland + meilani) va Saqlash bosdi.
+- ulash run'i: ZONA_HOLATI=pending; activation_check yuborildi (tezlashtirish). Registry hali eski NS beradi (ns1/ns2.eskiz.uz) — tarqalish kutilmoqda.
+
+Stage Summary:
+- Qolgan odam-qadamlari: (1) DNS Records'da mail/webmail/ftp kalitlarini kulrang qilish (boshqacha iloji yo'q — token DNS yozishga ruxsatsiz); (2) zona active bo'lgach «tekshir» xabari → CI ulash (50gram.uz + www → worker) va tekshir.
+- Ilovada qattiq URL yo'qligi tasdiqlangan — domen ulanganda kod o'zgarmaydi.
