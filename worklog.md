@@ -216,3 +216,27 @@ Stage Summary:
 - Sertifikat eski bilan bir xil → foydalanuvchilar eski APK ustidan USTIGA O'RNATADI (o'chirish/data yo'qotish shart emas).
 - www hali 403 (wildcard route *.50gram.uz/* foydalanuvchida kutilmoqda) — o'zgarmadi.
 - Keyingi real sinov: foydalanuvchi APK'ni o'rnatib rasm yuboradi (jurnalda kind=gal n>1 kutishadi) + APK↔APK video qo'ng'iroq (ovoz=wa, eshit=1).
+
+---
+Task ID: 43
+Agent: Super Z (asosiy)
+Task: Video qo'ng'iroq BIRTOMONLAFA ovoz — HAL QILUVCHI forenzika (real APK 3.1 jurnalidan) + v94 ko'p-qatlamli yechim
+
+Work Log:
+- Foydalanuvchi tanbehi: «vaziyatni aniqlay olmayapsan» — OSONO javob: avvalgi tashxislar desktop-E2E'ga tayanar edi. ENDI REAL APK 3.1 qo'ng'iroq jurnali (65s, call 1791514815091595) to'liq forenzika qilindi.
+- QURILMALAR: ikkala qurilma ham 50GramApp/3.1 o'rnatilgan (X=Chrome/154 WebView, Y=Chrome/153 WebView). X = doimiy quloqsiz tomon (2.6 davridan beri bir xil).
+- FOR ENZIKA (hal qiluvchi): X'da NATIV marshrut TO'G'RI (routeInfo: mode=3 spk=1 dev=2 — karnay, COMM-qurilma=BUILTIN_SPEAKER — Y bilan bir xil!). Lekin X'da MASOFA OVOZI barcha o'lchov nuqtasida HAQIQIY NOL: k=0% (wa-zanjir RMS, waGain'dan keyin), k=0% (ra-oqim-tap), alv=0% (dekoder audioLevel), smp=+0 — lekin inA=+9-15KB/5s (ovoz baytlari KELADI!) va X mikrofoni ISHLAYDI (Y'da k=79-100% — X ovozi Yga boradi; X'ning ch=0-100% — mikrofon o'lchovi ishlaydi = kontekst sog'lom). Y tomonda hammasi mukammal (smp=+240000/5s).
+- XULOSA: X qurilmasining WebView (Chrome/154) WebRTC masofa-audio PLEYOUT quvuri jim ishlab chiqaradi — wa/ra/v hammasi BIR qabul quvuridan oqadi, shuning uchun yo'l almashtirish (v91/v92 narvoni) HECH QACHON yordam bermagan. Bu engine-darajasidagi muammo — JS tomondan yagona yo'l: qabul quvurini YANGIDAN tug'ildirish.
+- X'ning «mikro-jim heal #1-#4»lari YALG'ON ekan (mikrofon aslida ishlaydi, Y eshitadi) — foydalanuvchi sukutida outR<1 bo'lgani uchun qo'zg'algan; dOutA>0 sharti sukutda ham o'tar edi. Bu churn video muzlashlarga xissa qo'shgan.
+- v94 (commit c24e2c0) rtc.js:
+  (a) QUTQARUV NARVONI KENGAYDI: z=1 yangi oqim-o'ram (new MediaStream([track])) bilan manba qayta quriladi → z=3 uch FIZIK yo'l aylanishi wa→ra→v (v = video-element ovozi — v85 daliliga ko'ra ba'zi qurilmalarda yagona yo'l) → z=4 elementlar 0 dan → z=5 AudioContext QAYTA TUG'ILISHI (eski kontekst close(), yangisi 0 dan — «running lekin ichi o'lik» holatga yagona JS davo) → z=6 nativeKick → z=7 a-reset (pastda) → z>=8 aylanish (har 3 kick, har 5 element, har 7 manba).
+  (b) a-reset — HAL QILUVCHI: quloqsiz tomon {k:'a-reset'} yuboradi → gapiruvchi audio transceiver'ni STOP qilib, YANGI m-line bilan addTransceiver + renegotiation offer (areset=1 belgisi eski-offer qorovulidan o'tadi) → quloqsiz tomonda YANGI receiver/dekoder tug'iladi. Qarshi tomon javobidan keyin O'Z MIKROFONINI yangi transceiver'ga qayta ulaydi (aks holda gapiruvchi quloqsizni eshitmay qolardi!) + areset offer-bypass ping-pongsiz (!t.stopped guard).
+  (c) DIAGNOSTIKA: stat'ga ctx= (AudioContext.state), aS= (audioLevel maydoni bormi), sS= (totalSamplesReceived bormi — Chrome/154'da YO'Q ekan!), rej= (play() rad etishlar soni); tryEl endi rad etish ISMI/sababini jurnalga yozadi; core.js g50Beacon'ga dev= (APK 3.2 devInfo: MODEL | Android | WebView versiya).
+  (d) mikro-jim yolg'on heal yopildi: dOutA>12000 (kuchli nutq dalili) talabi.
+- APK 3.2 (versionCode 12): MainActivity'ga devInfo() ko'prigi (MODEL/Android/WebView). scripts/apk_build.sh bilan qurildi, web/50gram.apk'ga joylandi (SHA-256 04d9ea98...).
+- CI: Deploy SUCCESS (run c24e2c0). Tekshir: site 200, __50BUILD=v94, apk 200 + bayt-bayt mos. Smoke SUCCESS (sw=v94 core=v94 worker=v94, qulf OK), MEDIA E2E SUCCESS, CALL E2E SUCCESS (birinchi parallel urinish concurrency-cancel — ketma-ket qayta yuritildi; bir marta 404/FW runner-ip vaqtinchalik — keyingi run toza).
+
+Stage Summary:
+- Ildiz ANIQLANGAN (jurnal isboti bilan): quloqsiz tomonning WebView pleyout quvuri o'lik — yo'l almashtirish yordam bermasligi ENDI TUSHUNARLI. v94: 5 ta mustaqil qutqaruv qatlami + eng oxirgisi YANGI DEKODER (a-reset renegotiation) — har bir qatlam jurnalga yoziladi.
+- APK 3.2 IXTIYORIY (faqat dev= tashxisi uchun) — v94 JS avtomatik yetadi (3-yo'qlik versiya qulfi).
+- Keyingi sinov: foydalanuvchi VIDEO qo'ng'iroq — agar 35s ichida ovoz kelmasa ham, endi jurnalda HAR QATLAM ko'rinadi (ovoz-wa-yangi / ovoz-qayta-tug / a-reset / ovoz-play-rad / ctx=) — keyingi qadam 100% aniqlanadi.
