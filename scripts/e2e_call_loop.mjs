@@ -9,9 +9,11 @@
  *   1) A→B video   2) A→B video (AYNAN REGRESSIYA HOLATI)   3) B→A video (teskari yo'nalish)
  * Har qo'ng'iroqda TO'LIQ media assertions (ikkala tomon: PC connected, kiruvchi
  * audio+video baytlar, kadrlar, audio currentTime).
- * Har qo'ng'iroqdan KEYIN MUHR INVARIANTLARI (M1/M2):
- *   M1: BARCHA yaratilgan AudioContext'lar 'running' bo'lmasligi kerak (endCall ularni
- *       yopadi — kontekst qo'ng'iroqlar orasida tirik qolmasin)
+ * Har qo'ng'iroqdan KEYIN MUHR INVARIANTLARI (M1/M2/M3):
+ *   M1: SHU qo'ng'iroqning o'z AudioContext'i yopiq bo'lishi kerak ('running' emas)
+ *       — aynan v94 kasalligi (qo'ng'iroq konteksti tirik qolib ketardi).
+ *       IZOH: core.js'dagi beep()-toni konteksti (xabar ovozlari) alohida va BENIGN —
+ *       u qo'ng'iroq dvigateliga kirmaydi va test uni hisobga olmaydi.
  *   M2: window.__50actx === null (virgin-kainot kafolati — keyingi qo'ng'iroq 0 dan ochadi)
  *   M3: har qo'ng'iroq KAMIDA bitta YANGI AudioContext yaratgan (freshAudioUniverse ishlagan)
  * Agar kelajakda kimdir endCall tartibini buza bilsa yoki «global kontekstni saqlash»
@@ -174,17 +176,19 @@ async function waitClean(P1, P2) {
 }
 
 // ═══ MUHR INVARIANTLARI — har qo'ng'iroq tugagach ═══
-async function sealCheck(page, label, callN) {
-  const s = await page.evaluate(() => ({
-    actxGlobal: window.__50actx === null || window.__50actx === undefined ? 'null' : String(window.__50actx.state),
-    actxCount: (window.__actxs || []).length,
-    actxStates: (window.__actxs || []).map((c) => c.state),
-  }))
-  // M1: hech bir kontekst 'running' qolmasin (v94 kasalligi: global kontekst tirik qolardi)
-  const allDead = s.actxStates.every((st) => st === 'closed' || st === 'closing' || st === 'interrupted')
-  ok(allDead, `[${label}] MUHR M1: qo'ng'iroq #${callN}dan keyin BARCHA AudioContext yopiq (running qolmagan)`, 'holatlar=' + JSON.stringify(s.actxStates))
+// ctxHandle = qo'ng'iroq davomida olingan window.__50actx JSHandle — SHU qo'ng'iroqning
+// o'z konteksti. endCall uni yopishi SHART (v94 kasalligi aynan shu edi).
+async function sealCheck(page, label, callN, ctxHandle) {
+  // M1: SHU qo'ng'iroqning konteksti yopiq (running EMAS)
+  const st = await page.evaluate((h) => (h ? String(h.state) : 'yaratilmagan'), ctxHandle).catch(() => 'xato')
+  ok(st !== 'running', `[${label}] MUHR M1: qo'ng'iroq #${callN}ning o'z konteksti YOPIQ (running emas)`, 'holat=' + st)
   // M2: global havola tozalangan (keyingi qo'ng'iroq 0 dan ochiladi)
-  ok(s.actxGlobal === 'null', `[${label}] MUHR M2: global __50actx tozalangan`, 'global=' + s.actxGlobal)
+  const s = await page.evaluate(() => ({
+    global: window.__50actx === null || window.__50actx === undefined ? 'null' : String(window.__50actx.state),
+    actxCount: (window.__actxs || []).length,
+    runningN: (window.__actxs || []).filter((c) => c.state === 'running').length,
+  }))
+  ok(s.global === 'null', `[${label}] MUHR M2: global __50actx tozalangan`, 'global=' + s.global)
   return s
 }
 
@@ -268,6 +272,10 @@ try {
     ok(actxAfterA > actxBeforeA, `[${cfg.label}] #${cfg.n}: MUHR M3 chaqiruvchida yangi kontekst tug'ilgan`, `oldin=${actxBeforeA} keyin=${actxAfterA}`)
     ok(actxAfterB > actxBeforeB, `[${cfg.label}] #${cfg.n}: MUHR M3 qabulchida yangi kontekst tug'ilgan`, `oldin=${actxBeforeB} keyin=${actxAfterB}`)
 
+    // MUHR M1 uchun: SHU qo'ng'iroqning kontekst-havolasini yopilishdan OLDIN ushlab olamiz
+    const ctxHandleC = await cfg.caller.page.evaluateHandle(() => window.__50actx)
+    const ctxHandleE = await cfg.callee.page.evaluateHandle(() => window.__50actx)
+
     // Tugatish — chaqiruvchi
     await hangupByButton(cfg.caller.page)
     await cfg.caller.page.waitForTimeout(4500)
@@ -277,9 +285,11 @@ try {
     ok(goneE, `[${cfg.label}] #${cfg.n}: qabulchi oynasi proaktiv yopildi`)
     await cfg.caller.page.waitForTimeout(2500) // close() lar yakunlanishi
 
-    // MUHR M1/M2 — ikkala tomorda
-    await sealCheck(cfg.caller.page, cfg.label + ' chaqiruvchi', cfg.n)
-    await sealCheck(cfg.callee.page, cfg.label + ' qabulchi', cfg.n)
+    // MUHR M1/M2 — ikkala tomorda (shu qo'ng'iroqning o'z konteksti tekshiriladi)
+    await sealCheck(cfg.caller.page, cfg.label + ' chaqiruvchi', cfg.n, ctxHandleC)
+    await sealCheck(cfg.callee.page, cfg.label + ' qabulchi', cfg.n, ctxHandleE)
+    try { await ctxHandleC.dispose() } catch {}
+    try { await ctxHandleE.dispose() } catch {}
   }
 
   log('─── YAKUNIY: konsol xatolari ───')
