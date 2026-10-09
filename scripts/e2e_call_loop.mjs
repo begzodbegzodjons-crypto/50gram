@@ -90,7 +90,7 @@ async function login(page, u, who = 'A') {
         try { return JSON.parse(txt) } catch (e) { throw new Error('HTTP ' + res.status + ' ' + path + ': ' + txt.slice(0, 60)) }
       }
       try {
-        const o = await j('/auth/otp', { phone })
+        const o = await j('/auth/otp', { phone, force: 1 })
         if (!o.ok) return { err: 'otp: ' + JSON.stringify(o) }
         const v = await j('/auth/verify', { phone: full, code: o.dev_code })
         if (!v.token) return { err: 'verify: ' + JSON.stringify(v) }
@@ -200,8 +200,8 @@ const browser = await chromium.launch({
 
 try {
   log('BASE =', BASE)
-  const A_ = await newPage(browser, 'A(007)')
-  const B_ = await newPage(browser, 'B(008)')
+  const A_ = await newPage(browser, 'A(009)')
+  const B_ = await newPage(browser, 'B(010)')
   log('login A …')
   const ua = await login(A_.page, A, 'A')
   ok(!!ua.uid, 'A login', 'uid=' + ua.uid)

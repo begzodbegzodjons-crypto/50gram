@@ -31,7 +31,7 @@ const j = async (path, opt = {}) => {
   return d
 }
 const login = async (p) => {
-  const o = await j('/api/auth/otp', { method: 'POST', body: { phone: p.phone } })
+  const o = await j('/api/auth/otp', { method: 'POST', body: { phone: p.phone, force: 1 } })
   const v = await j('/api/auth/verify', { method: 'POST', body: { phone: p.full, code: o.dev_code } })
   const token = v.token || v.access_token || v
   const me = await j('/api/me', { h: { authorization: 'Bearer ' + token } })

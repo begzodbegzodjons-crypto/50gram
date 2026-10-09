@@ -87,7 +87,7 @@ async function login(page, u, who = 'A') {
         try { return JSON.parse(txt) } catch (e) { throw new Error('HTTP ' + res.status + ' ' + path + ': ' + txt.slice(0, 60)) }
       }
       try {
-        const o = await j('/auth/otp', { phone })
+        const o = await j('/auth/otp', { phone, force: 1 })
         if (!o.ok) return { err: 'otp: ' + JSON.stringify(o) }
         const v = await j('/auth/verify', { phone: full, code: o.dev_code })
         if (!v.token) return { err: 'verify: ' + JSON.stringify(v) }

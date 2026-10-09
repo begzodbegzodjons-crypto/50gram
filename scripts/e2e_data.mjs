@@ -28,7 +28,7 @@ const j = async (path, opt = {}) => {
   return { st: r.status, d }
 }
 const login = async (p) => {
-  const o = await j('/api/auth/otp', { method: 'POST', body: { phone: p.phone } })
+  const o = await j('/api/auth/otp', { method: 'POST', body: { phone: p.phone, force: 1 } })
   if (o.st !== 200 || !o.d.dev_code) throw new Error('otp ' + o.st + ' ' + JSON.stringify(o.d).slice(0, 80))
   const v = await j('/api/auth/verify', { method: 'POST', body: { phone: p.full, code: o.d.dev_code } })
   if (v.st !== 200 || !v.d.token) throw new Error('verify ' + v.st)
