@@ -289,3 +289,29 @@ Stage Summary:
 - MUHR QO'YILDI: (1) har pushda CI avtomatik 3 ketma-ket qo'ng'iroqni sinaydi — aynan «keyingi qo'ng'iroq jim» simptomi qaytsa 2-qo'ng'iroq QIZIL bo'ladi; (2) rtc.js'da MUHR qoidalari hujjatlashtirildi (tartib buzilishi taqiqlangan); (3) teardown zanjiri mustahkamlandi (UI xatosi teardown'ni uzolmaydi) + jurnal audit qatori.
 - XULQ 100% O'ZGARMAGAN — faqat kuzatuvchanlik va himoya qo'shildi. Foydalanuvchi hech narsa sezmagan bo'lishi kerak (ilova o'zi v96'ga yangilanadi, qo'ng'iroq paytida yangilanmaydi).
 - Darslik: alohida concurrency guruhdagi workflow'lar boshqa E2E'lar bilan raqam-to'qnashuvga ehtiyot bo'lishi kerak — har testga o'z raqamlari (009/010 endi MUHRniki).
+
+---
+Task ID: 46
+Agent: Super Z (asosiy)
+Task: Masshtab (100–100 000 bir vaqtda foydalanuvchi) + o'rgimchak to'ri ALOHIDA modul + R2 10GB kasbiy boshqaruv (shifrlangan, to'lib qolmaydigan, yetimsiz) + offline→online outbox + xulq o'zgarmas muhr (v97)
+
+Work Log:
+- HOZIRGI TIZIM O'RGANILDI: fayllar klientda AES-256-GCM shifrlanadi → R2 (m/<id>/<idx>) asosiy manba, D1'da faqat marker; to'r: peer_have (qaysi qurilmada nima bor) + nodes (30GB kvota, score) + pin_jobs (15-20 nusxa vazifalari) + WebRTC DataChannel (p2p.js); har foydalanuvchiga alohida Durable Object (izolyat — halaqit yo'q).
+- 3 TA SIRLI "R2 SIZIB KETISH" TOPILDI: (1) cron'da R2 faqat 100 fayl/o'chirish edi, D1 esa HAMMASINI — 100 dan ortiq o'lik faylda R2'da YETIM obyektlar qolardi (ko'rinmas o'sish → 10GB to'lishi); (2) gone bayrog'i HECH QACHON o'rnatilmagan edi (server nusxasi yo'qolsa tizim bilmagan); (3) p2pHave har elementga 2-3 so'rov (200 element = ~500 so'rov/so'rovda) — 1000 foydalanuvchida TiDB bo'g'ilardi.
+- v97 (commit c982afc + 0b023c9) — 4 qatlamli kuchaytirish:
+  (1) ALOHIDA MODUL: worker/src/spiderweb.ts — to'r MIYASI (peer_have/pin_jobs/nodes/planReplicas/signal/verify) hujjatlangan alohida faylda, deps-fabrika orqali ulanadi (xulq bitta-bitta bir xil). BATCH OPTIMIZATSIYA: p2pHave 500 so'rov → 2 so'rov; planReplicas 2000 so'rov → guruhli (GROUP BY, 100lik paket) — javob va DB holati AYNAN bir xil.
+  (2) R2 KASBIY BOSHQARUV: R2+D1 o'chirish BITTA batchda (yetim KAFOLATGAN yo'q, 5×100 fayl/yugurish) + YETIM SWEEP (R2 list ≤1000 kalit, media yozuvi yo'q kalitlar o'chadi — tarixiy siziblar ham tozalanadi) + BOSQICHLI POSBON (8GB oshsa 3×100 fayl, faqat replicas>=2 nusxali fayllar — yo'qotish yo'q).
+  (3) TO'R O'Z-O'ZINI TIKLASH: mediaChunk bo'lak topolmasa → gone=1 + DARHOL planReplicas → to'r nusxa yig'adi → to'rdan olgan onlayn qurilma FONDA shifrlangan nusxani serverga qayta yuklaydi (GET /media/:id/restore-info → PUT chunklar → done) — sha256 BUTUNLIK MUHRI (mos emasa 400). Server keshi o'zi to'planadi, keyingi foydalanuvchilar tez oladi.
+  (4) KLIENT OUTBOX: IDB v4 + 'outbox' do'koni — internet uzilgan paytda xabar/fayl NAVBATDA ushlanadi (🕓), online/WS-ulanish/45s/visibility'da AVTOMATIK yuboriladi (40 element/60MB chegara, 7 urinish limit, server 4xx/5xx radini qayta urinmaydi). sendFile faylni (≤30MB) navbatga qo'yadi.
+- YANGI XAVFSIZLIK: /storage/stats'ga r2_bytes + healing maydonlari; restore-info faqat gone=1 faylga (sog'lomga 404), faqat egasi/chat a'zosi/pin-job egasiga.
+- MUHR E2E YANGI: scripts/e2e_data.mjs + e2e-data.yml (raqamlar 011/012): fayl davrasi (R2 roundtrip bayt-bayt), to'r registry (have saved:1, peers), stats maydonlari, restore-info YOPIQ muhri (sog'lom faylga 404), begona faylga PUT taqiqlangan.
+- DARSLIK (2 qizil topildi): (a) /media/:id/restore-info yo'li mediaChunk SOYASIDA qoldi (match() tartib bilan) → idx="restore-info" NaN → 500 + yalg'on gone yondi! Tuzatish (0b023c9): yo'l mediaChunk'dan OLDIN + mediaChunk'da Number.isInteger(idx) tekshiruvi. (b) 3 push ketma-ket → 2 MUHR run (007-010) vaqt ustma-ust → 409 raqam-band — MUHR yakka qayta yuritilib PASS.
+- CI (0b023c9): Deploy ✅ 37890821170 / Smoke ✅ 37891194984 (v97 qulf) / CALL E2E ✅ 37890821115 / MEDIA E2E ✅ 37891595240 / MUHR ✅ 37891923071 (3 ketma-ket qo'ng'iroq, 67 assertion) / DATA E2E ✅ 37890868281 (15/15) / Jurnal ✅ 37891768087 / domen tekshir ✅ (core v97, health ok, robots/sitemap, APK 763312B o'zgarmagan).
+- Jonli isbot: DATA E2E'da {"r2_bytes":6705171, "healing":0} — R2 boshqaruvi JONLI; p2pHave batch yo'li saved:1; smoke v97 qulfi OK.
+
+Stage Summary:
+- TO'R ENDI ALOHIDA MODUL (spiderweb.ts) va 100–100 000 foydalanuvchi uchun batch-optimal: bir foydalanuvchi boshqasiga UMUMIAN halaqit qilmaydi (alohida DO izolyatlar + batch so'rovlar).
+- R2 10GB: yetim obyekt yo'q (tenglashtirilgan o'chirish + sweep), bosqichli posbon, faqat SHIFRLANGAN baytlar (AES-256-GCM klientdan), to'lib qolmaydi.
+- MA'LUMOT YO'QOLMAYDI: 15-20 qurilma nusxasi (bor edi) + gone-detektor + to'r→server o'z-o'zini tiklash (v97 yangi) + outbox (offline ushlab, online uzatish) + DATA E2E har pushda kuzatadi.
+- XULQ O'ZGARMAGAN: bor funksiyalar bitta-bitta bir xil (batch natija identik, tiklash fonda, outbox faqat tarmoq-xatosida). APK o'zgarmadi — v97 qulfi barcha qurilmaga ~1 daqiqada yetadi.
+- www 403 holati o'zgarmagan (wildcard route *.50gram.uz/* foydalanuvchida kutilmoqda).
