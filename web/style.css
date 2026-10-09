@@ -53,18 +53,18 @@ body.dark .auth-box{background:rgba(20,28,49,.72);border-color:rgba(255,255,255,
 .step .mut{margin:0 0 18px}
 .phone-in{display:flex;align-items:center;background:rgba(255,255,255,.85);border:1.5px solid var(--chiziq);border-radius:18px;padding:0 16px;margin-bottom:14px;transition:border-color .18s,box-shadow .18s}
 body.dark .phone-in{background:rgba(10,16,31,.4)}
-.phone-in:focus-within{border-color:var(--asos);box-shadow:0 0 0 4px rgba(46,123,255,.14)}
+.phone-in:focus-within{border-color:var(--asos);box-shadow:var(--fokus,0 0 0 4px rgba(46,123,255,.14))}
 .phone-in span{font-weight:700;margin-right:10px;color:var(--asos)}
 .phone-in input{flex:1;border:0;background:none;outline:0;padding:15px 0;font-size:18px;letter-spacing:.5px;min-width:0;font-weight:600}
 .code-in{width:100%;text-align:center;font-size:30px;font-weight:700;letter-spacing:12px;padding:14px;border-radius:18px;border:1.5px solid var(--chiziq);background:rgba(255,255,255,.85);outline:0;margin-bottom:14px;transition:border-color .18s,box-shadow .18s}
 body.dark .code-in{background:rgba(10,16,31,.4)}
-.code-in:focus{border-color:var(--asos);box-shadow:0 0 0 4px rgba(46,123,255,.14)}
+.code-in:focus{border-color:var(--asos);box-shadow:var(--fokus,0 0 0 4px rgba(46,123,255,.14))}
 .inp{width:100%;padding:13px 15px;border-radius:16px;border:1.5px solid var(--chiziq);background:rgba(255,255,255,.85);outline:0;margin-bottom:10px;font-size:15px;transition:border-color .18s,box-shadow .18s}
 body.dark .inp{background:rgba(10,16,31,.4)}
-.inp:focus{border-color:var(--asos);box-shadow:0 0 0 4px rgba(46,123,255,.14)}
+.inp:focus{border-color:var(--asos);box-shadow:var(--fokus,0 0 0 4px rgba(46,123,255,.14))}
 textarea.inp{resize:vertical;min-height:80px}
-.btn{border:0;background:var(--grad);color:#fff;border-radius:16px;padding:12px 18px;font-weight:700;transition:.16s;box-shadow:var(--bez-i),0 8px 22px rgba(46,123,255,.4)}
-.btn:active{transform:translateY(1px) scale(.98);box-shadow:var(--bez-u),0 4px 12px rgba(46,123,255,.32)}
+.btn{border:0;background:var(--grad);color:#fff;border-radius:16px;padding:12px 18px;font-weight:700;transition:.16s;box-shadow:var(--bez-i),var(--tugma-glow,0 8px 22px rgba(46,123,255,.4))}
+.btn:active{transform:translateY(1px) scale(.98);box-shadow:var(--bez-u),var(--tugma-glow2,0 4px 12px rgba(46,123,255,.32))}
 .btn:disabled{opacity:.5}
 .btn.big{width:100%;padding:15px;font-size:16px;letter-spacing:.1px}
 .btn.gh{background:var(--asos-och);color:var(--asos);box-shadow:none}
@@ -1189,3 +1189,169 @@ body.dark .stile{box-shadow:inset 0 1.5px 0 rgba(255,255,255,.15),inset 0 -2px 0
 .tl-n{flex-shrink:0;text-align:center;color:var(--xira);font-size:11.5px}
 .tl-n b{display:block;font-size:14.5px;color:var(--matn)}
 .tl-empty{padding:18px 14px;text-align:center;color:var(--xira);font-size:13.5px}
+
+/* ============================================================
+   v99 — «SIMPLE» ICHKI DIZAYN (ChatGPT-uslubi: oq fon, qora
+   yozuv, tekis yuzalar, soya/gradient/gloss yo'q, sodda dock)
+   MUHIM: FAQAT KO'RINISH. Hech qanday class/JS/HTML/xulq
+   o'zgarmagan — barcha qoidalar oxirida, eski qoidalarni
+   BEKOR QILIB (cascade) faqat rang/soya/radius almashtiradi.
+   QAMROV: body darajasi = ICHKI UI (chat, ro'yxat, lenta,
+   reels-panellar, sheet, sozlamalar sahifalari, to'liq ekran).
+   #auth (KIRISH EKRANI) o'z qiymatlari bilan TO'LIQ TIKLANADI —
+   avvalgi «AURORA» ko'rinishi bir-birining o'rnida qoladi.
+   Funksiyalar saqlanadi: aksent tanlagich (applyAcc → html
+   inline --asos) ISHLAYDI (ranglar o'zgaradi, faqat TEKIS
+   renderlanadi), fon rasmi (WALLS inline) ISHLAYDI,
+   --msgfs/--mrad sozlamalari TEGILMAGAN.
+   ============================================================ */
+:root{
+  --asos:#0D0D0D;--asos2:#000000;
+  --fokus:0 0 0 4px rgba(46,123,255,.14);
+  --tugma-glow:0 8px 22px rgba(46,123,255,.4);
+  --tugma-glow2:0 4px 12px rgba(46,123,255,.32);
+}
+body{
+  --fon:#FFFFFF;--sirt:#FFFFFF;--sirt2:#F7F7F8;
+  --matn:#0D0D0D;--xira:#8E8EA0;--chiziq:#ECECF1;
+  --men:#F0F0F1;--u:#F7F7F8;--asos-och:#F0F0F1;
+  --soya:0 1px 2px rgba(0,0,0,.05);--soya2:0 4px 18px rgba(0,0,0,.08);
+  --grad:var(--asos);--gradb:var(--asos);--ring:var(--asos);
+  --bez-i:none;--bez-u:none;
+  --fokus:0 0 0 4px rgba(13,13,13,.07);
+  --tugma-glow:none;--tugma-glow2:none;
+}
+body.dark{
+  --fon:#171717;--sirt:#212121;--sirt2:#2F2F2F;
+  --matn:#ECECEC;--xira:#ACACBE;--chiziq:#2F2F2F;
+  --men:#2F2F2F;--u:#2F2F2F;--asos-och:#2F2F2F;
+  --soya:0 1px 2px rgba(0,0,0,.3);--soya2:0 4px 18px rgba(0,0,0,.4);
+  --bez-i:none;--bez-u:none;
+  --fokus:0 0 0 4px rgba(236,236,236,.12);
+}
+/* #auth = KIRISH EKRANI — «AURORA» ko'rinishi TO'LIQ tiklandi */
+#auth{
+  --asos:#2E7BFF;--asos2:#1E5FE0;--asos-och:#EBF1FF;
+  --grad:linear-gradient(135deg,#2E7BFF 0%,#7C5CFF 100%);
+  --gradb:linear-gradient(135deg,#00C8FF 0%,#2E7BFF 100%);
+  --ring:conic-gradient(from 200deg,#2E7BFF,#00C8FF,#7C5CFF,#FF6A3D,#2E7BFF);
+  --fon:#F1F4FB;--sirt:#FFFFFF;--sirt2:#F4F6FC;--matn:#0E1330;--xira:#6A7490;--chiziq:#E7EBF6;
+  --men:#D9E6FF;--u:#FFFFFF;
+  --soya:0 1px 2px rgba(18,28,68,.05),0 8px 28px rgba(18,28,68,.08);
+  --soya2:0 2px 6px rgba(18,28,68,.06),0 18px 50px rgba(18,28,68,.14);
+  --bez-i:inset 0 1.5px 0 rgba(255,255,255,.35),inset 0 -2px 0 rgba(0,0,0,.14);
+  --bez-u:inset 0 1.5px 0 rgba(255,255,255,.26),inset 0 -2px 0 rgba(0,0,0,.12);
+  --fokus:0 0 0 4px rgba(46,123,255,.14);
+  --tugma-glow:0 8px 22px rgba(46,123,255,.4);
+  --tugma-glow2:0 4px 12px rgba(46,123,255,.32);
+}
+body.dark #auth{
+  --fon:#0A101F;--sirt:#141C31;--sirt2:#1A2340;--matn:#EDF1FC;--xira:#8E9ABC;--chiziq:#26314F;
+  --men:#2A4C90;--u:#1B2440;--asos-och:#1D2F5C;
+  --soya:0 2px 14px rgba(0,0,0,.4);--soya2:0 4px 22px rgba(0,0,0,.55);
+  --bez-i:inset 0 1.5px 0 rgba(255,255,255,.14),inset 0 -2px 0 rgba(0,0,0,.3);
+  --bez-u:inset 0 1.5px 0 rgba(255,255,255,.1),inset 0 -2px 0 rgba(0,0,0,.28);
+}
+
+/* ---------- MAIN: tekis oq fon + sodda sarlavha ---------- */
+#main{background:var(--fon)}
+body.dark #main{background:var(--fon)}
+.top{background:var(--fon);backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none;border-bottom:1px solid var(--chiziq)}
+body.dark .top{background:var(--fon);box-shadow:none;border-bottom:1px solid var(--chiziq)}
+.top h1{font-size:22px;font-weight:750;letter-spacing:-.4px;background:none;-webkit-background-clip:border-box;background-clip:border-box;-webkit-text-fill-color:var(--matn);color:var(--matn)}
+body.dark .top h1{background:none;-webkit-background-clip:border-box;background-clip:border-box;-webkit-text-fill-color:var(--matn);color:var(--matn)}
+.mini-logo{filter:none}
+.ic{background:transparent;border:0;box-shadow:none;border-radius:12px}
+body.dark .ic{box-shadow:none}
+@media (hover:hover){.ic:hover{background:var(--sirt2)}}
+
+/* ---------- DOCK: suzuvchi 3D orol → tekis pastki panel ---------- */
+.dock{margin:0;padding:6px 6px calc(6px + env(safe-area-inset-bottom));background:var(--fon);backdrop-filter:none;-webkit-backdrop-filter:none;border-radius:0;border:0;border-top:1px solid var(--chiziq);box-shadow:none;gap:2px}
+body.dark .dock{background:var(--fon);border-color:var(--chiziq);box-shadow:none}
+.dock button[data-t]{--dcol:var(--matn)!important;--ddark:var(--matn)!important;--dglo:transparent!important;border-radius:12px;font-weight:600;gap:2px}
+.dock button i{border-radius:10px}
+.dock button.on{color:var(--matn)}
+.dock button.on i{background:var(--sirt2);color:var(--matn);filter:grayscale(1);opacity:1;transform:none;box-shadow:none}
+.dock button.on::before{background:var(--matn);box-shadow:none;bottom:0;width:14px;height:2.5px;opacity:.9}
+.bdg{background:var(--qizil);box-shadow:none;border-color:var(--fon)}
+body.dark .bdg{border-color:var(--fon)}
+
+/* ---------- RO'YXAT ---------- */
+.item{border-radius:12px}
+.item.act{background:var(--asos-och);border-color:transparent}
+@media (hover:hover){.item:hover{background:var(--sirt2)}}
+.cnt{background:var(--asos);box-shadow:none}
+.av.saved{background:var(--asos)!important;box-shadow:none;font-size:20px}
+
+/* ---------- DIALOG ---------- */
+.dlg-bg{display:none}
+.chead{background:var(--fon);backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none;border-bottom:1px solid var(--chiziq)}
+body.dark .chead{background:var(--fon);box-shadow:none;border-bottom:1px solid var(--chiziq)}
+.day,.sys{box-shadow:none}
+body.dark .day,body.dark .sys{box-shadow:none}
+.m{box-shadow:0 1px 2px rgba(0,0,0,.05);border-color:var(--chiziq)}
+body.dark .m{box-shadow:none;border-color:var(--chiziq)}
+.mrow.me .m{background:var(--asos);border-color:transparent;box-shadow:none}
+.m .rp{background:var(--sirt2)}
+.voice .pb{background:var(--asos);box-shadow:none}
+.file .fi{background:var(--asos);box-shadow:none}
+.mrow.hl{animation:hlflash 1.6s ease}
+
+/* ---------- KOMPOZITOR ---------- */
+.yoz{background:var(--fon);border-top:1px solid var(--chiziq);box-shadow:none}
+.yoz .inwrap{background:var(--sirt2);border:1px solid var(--chiziq);border-radius:22px;box-shadow:none}
+.yoz .inwrap:focus-within{border-color:var(--xira);box-shadow:none}
+.yb{background:transparent;box-shadow:none;border:0}
+body.dark .yb{background:transparent;box-shadow:none}
+.yb.asos{background:var(--asos);border-color:transparent;box-shadow:none}
+.yb.rec{background:var(--qizil);border-color:transparent;box-shadow:none}
+.picker{border-top:1px solid var(--chiziq);box-shadow:none}
+
+/* ---------- SHEET / SAHLIFALAR / SOZLAMALAR ---------- */
+.shbg{background:rgba(0,0,0,.42);backdrop-filter:none;-webkit-backdrop-filter:none}
+.sheet{border-radius:18px 18px 0 0;box-shadow:0 -4px 24px rgba(0,0,0,.12)}
+.sheet .grab{background:var(--chiziq);box-shadow:none}
+body.dark .sheet .grab{background:var(--chiziq);box-shadow:none}
+.rows{background:var(--fon);border:1px solid var(--chiziq);border-radius:14px;box-shadow:none}
+body.dark .rows{box-shadow:none}
+.rows>div:active,.rows>label:active{background:var(--sirt2)}
+.seg{box-shadow:none}
+.seg div.on{box-shadow:none}
+.profcard{box-shadow:none;border-radius:16px}
+.pcbg{background:var(--sirt2)}
+.stile{box-shadow:none}
+body.dark .stile{box-shadow:none}
+.accgrid button{box-shadow:none}
+.accgrid button.on{box-shadow:0 0 0 2px var(--fon),0 0 0 4px var(--asos)}
+.hint{background:var(--sirt2);border:1px solid var(--chiziq)}
+.ctx{box-shadow:0 8px 30px rgba(0,0,0,.14)}
+.cm-pick{background:var(--fon);box-shadow:0 8px 30px rgba(0,0,0,.16)}
+.cm-sort button.on{background:var(--asos);border-color:transparent;color:#fff;box-shadow:none}
+.cm-chip.on{background:var(--asos-och);border-color:var(--xira)}
+.phead{background:var(--fon);backdrop-filter:none;-webkit-backdrop-filter:none}
+body.dark .phead{background:var(--fon)}
+.statgrid .st{box-shadow:none}
+body.dark .statgrid .st{box-shadow:none}
+.upage-prof .bigav .avw{box-shadow:0 4px 14px rgba(0,0,0,.08)}
+
+/* ---------- LENTA / TREND ---------- */
+.post{border-radius:14px;box-shadow:none}
+body.dark .post{box-shadow:none}
+.trendchips{background:var(--fon);backdrop-filter:none;-webkit-backdrop-filter:none}
+body.dark .trendchips{background:var(--fon)}
+.tchip.on{background:var(--asos);color:#fff;border-color:transparent;box-shadow:none}
+.tcard{border-radius:14px;box-shadow:none}
+.tcard .tch{background:var(--sirt2);color:var(--xira);box-shadow:none}
+.tcard.vid .tch{background:rgba(0,0,0,.45);color:#fff;box-shadow:none}
+.tcard.short .tch{background:var(--sirt2);color:var(--xira);box-shadow:none}
+.tins .tbar i{background:var(--asos)}
+
+/* ---------- QO'NG'IROQ (video/functional — faqat gradient tekislandi) ---------- */
+.call{background:#101012}
+.cb.ok{background:var(--yashil);box-shadow:none;animation:none}
+.cb.end{box-shadow:none}
+
+/* ---------- UMUMIY SAYQALLAR ---------- */
+*::-webkit-scrollbar-thumb{background:#D4D4D8;border:2.5px solid transparent;background-clip:content-box}
+*::-webkit-scrollbar-thumb:hover{background:#BDBDC3;border:2.5px solid transparent;background-clip:content-box}
+body.dark *::-webkit-scrollbar-thumb{background:#3F3F46;border:2.5px solid transparent;background-clip:content-box}
