@@ -315,3 +315,30 @@ Stage Summary:
 - MA'LUMOT YO'QOLMAYDI: 15-20 qurilma nusxasi (bor edi) + gone-detektor + to'r→server o'z-o'zini tiklash (v97 yangi) + outbox (offline ushlab, online uzatish) + DATA E2E har pushda kuzatadi.
 - XULQ O'ZGARMAGAN: bor funksiyalar bitta-bitta bir xil (batch natija identik, tiklash fonda, outbox faqat tarmoq-xatosida). APK o'zgarmadi — v97 qulfi barcha qurilmaga ~1 daqiqada yetadi.
 - www 403 holati o'zgarmagan (wildcard route *.50gram.uz/* foydalanuvchida kutilmoqda).
+
+---
+Task ID: 47
+Agent: Super Z (asosiy)
+Task: www wildcard qo'shildi (foydalanuvchi) → v98 XAVFSIZLIK MUHRI: 7 qatlam himoya + hujum ko'rinishi + E2E muhri; SMS Eskiz TEGILMADI (keyinga qoldirildi)
+
+Work Log:
+- www.50gram.uz tekshirildi: wildcard route foydalanuvchi qo'shgandan keyin 522 → 200 OK (apex bilan bir xil, SEC_H sarlavhalari bilan).
+- v98 (commit 7dbdfdc + e2c1f37 + 2762490) — XULQ O'ZGARMAS xavfsizlik kuchaytirish:
+  (1) TRAP kengaytirildi (setup/install/mysql/redis/kubernetes/terraform/... — /api/build bilan TO'QNASHUV TOPILDI va oldindan chiqarildi — route ro'yxati bilan avtomatik solishtirildi, 0 collision) + v98 TRAPX: /api ostida har qanday fayl-kengaytma (.php/.env.bak/.log/.zip/...) = darhol 30 kun blok (invite_hash=alnum tekshirildi — yolg'on musbat yo'q).
+  (2) JSON qat'ii chegara: content-type json + >2MB → 413 (avatar max 600KB — foydalanuvchiga tegmaydi; 26MB JSON parse CPU hujumi yopildi).
+  (3) YUKLASH POSBONI: mediaCreate 600 fayl/soat + mediaPut 4000 bo'lak/soat (~4.8GB) — o'g'irlangan token bilan R2 10GB'ni to'ldirish imkoni yo'q (bosqichli posbon bilan 2-qatlam; 429 — IP bloklanmaydi, CGNAT himoyasi).
+  (4) fwOchko: ochko BLOKGA aylanganda err_jurnal'ga yoziladi (1 soat dedupe, ip oxirgi 6 belgi) — egaga /api/jurnal orqali hujumlar KO'RINADI.
+  (5) SEC_H: HSTS (max-age=31536000; includeSubDomains — www ham) + Permissions-Policy (camera/mic=(self) — qo'ng'iroqlar buzilmaydi; geo/payment/usb yopildi).
+  (6) e2e_sec.mjs + e2e-sec.yml (raqamlar 004-admin/013/014/015/016): trap/trapx/inj×2/ext/401/413/otp-cooldown(429×29)/AUTH BRUTE-FORCE (14 xato kod → DO 24s blok → 404)/BLOK ISBOTI (oddiy 404, ma'lumot sizmaydi)/fw/fix qutqaruv ×2 + tiklanish/v97 stats muhri — 25/25 ✓ PASS.
+  (7) E2E QOTISH MUHRI: barcha test-loginlarga force:1 — «band raqam» 409 qotishi abadiy yopildi (MUHR E2E aynan shu sababdan 1 marta yiqildi: 009 qoldiq sessiya 15 daqiqa faol qolgan; force bilan deterministik).
+  (8) Darslik-1: izolyat-ichki fwLokal hisoblagichlar (otp-100/soat) CI'dan deterministik sinolmaydi (izolyatlar tarqoq) — otp-cooldown 429 bilan sinovda; qat'iy limit DO-ga o'tkazilgan auth-brute orqali muhrlangan.
+  (9) Darslik-2: parallel dispatch → concurrency-group navbatida eski pending run'lar CANCEL bo'ladi — E2E'larni bittama-bitta dispatch qilish kerak (yana bir bor tasdiqlandi).
+- CI yakuni (commit 2762490): Deploy ✅ 37901353497 / smoke ✅ 37901353491 / MUHR (3 ketma-ket qo'ng'iroq) ✅ 37901353526 / DATA ✅ 37901353861 / Qo'ng'iroq MEDIA ✅ 37901850376 / MEDIA ✅ 37901928296 / XAVFSIZLIK ✅ 37901934638 (25/25) / Jurnal ✅ 37901882764 / domen tekshir ✅ 37901893531 (www 200 + www/api/build + www core v98).
+- Jonli isbot: apex+www 200 + HSTS + permissions-policy sarlavhalari; core v98; workers.dev E2E v98 qulfini tasdiqladi.
+
+Stage Summary:
+- 7 QATLAM MUHR: (1) trap-yadro (2) trapx-kengaytma (3) in'ektsiya (4) begona-mijoz (5) json-cap (6) yuklash-posbon (7) brute-force DO-blok — hammasi har pushda E2E bilan qayta isbotlanadi.
+- Hujumlar endi err_jurnal'da KO'RINADI («himoya: IP *xxxxxx bloklandi (root)») — egada dalil bor.
+- R2 10GB: 3-qatlamli himoya tugalladi (yetim-sweep + bosqichli posbon + yuklash-posboni) — to'lib qolish yo'li QOLMADI.
+- www.50gram.uz TIKLANDI (522 → 200) — wildcard route + HSTS includeSubDomains.
+- XULQ 100% O'ZGARMAGAN: SMS Eskiz kodi TEGILMADI (sms.ts + authOtp cooldown mantiqi asl holida), qo'ng'iroq/media/chat/o'r-gimchak to'ri funksiyalari bir-birining o'rnida (barcha E2E yashil isboti bilan).
