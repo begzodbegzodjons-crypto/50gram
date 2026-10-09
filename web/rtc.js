@@ -73,6 +73,25 @@
        yopilmaydi; 'wa' yo'lida ijro metrikasi waGain'DAN KEYIN o'lchanadi (oqim-tap
        yolg'onlari chetlab o'tiladi).
    (4) play() rad etilsa — «Ovozni yoqish» tugmasi (kaskad qayta urinishlar YO'Q).
+
+   v95 (TOZA KAINOT — «1-QO'NG'IROQ ZO'R, KEYINGISI JIM» KASALLIGI HAL QILINDI):
+   Foydalanuvchi dalili: BIRINCHI video qo'ng'iroq mukammal, KEYINGI qo'ng'iroqlarda
+   ovoz yo'qoladi. Bu HAL QILUVCHI dalil — muammo o'rtada (qo'ng'iroq davomida) EMAS,
+   QO'NG'IROQLAR ORASIDA. 3 ta iflos meros manbasi topildi va yo'q qilindi:
+   a) GLOBAL AudioContext qo'ng'iroqlar orasida SAQLANARDI — v94 forenzikasi ko'rsatgan
+      «running lekin ichi o'lik» holatga aynan shu tushardi; 2-qo'ng'iroq o'lik
+      kontekstda tug'ilardi. v95: endCall kontekstni YOPADI, har qo'ng'iroq foydalanuvchi
+      bosishi ichida VIRGIN kontekst ochadi (freshAudioUniverse — 4-marta resume narvoni).
+   b) endCall TARTIBI buzuk edi: speaker(false) (native HAL reset) TIRIK WebRTC
+      sessiyasi ustida ishlar edi — clearCommunicationDevice + MODE_NORMAL jonli
+      yo'lni ostidan tortardi → WebView audio-HAL yarim-yiqilgan holatda qolardi →
+      keyingi qo'ng'iroq pleyout-quvuri o'lik tug'ilardi. v95: avval MEDIA to'liq
+      o'ladi (elementlar srcObject=null → masofa treklari stop → pc.close →
+      mikrofon stop), SO'NG 700ms'dan KEYIN guarded OS-marshrut reset.
+   c) Qo'ng'iroq boshida PROAKTIV audioKick — OS ovoz-yo'li har qo'ng'iroq boshida
+      OLDINDAN 0 dan o'rnatiladi (NORMAL → COMMUNICATION + karnay), avvalgi
+      qo'ng'iroqdan qolgan HAL-zamblikka tayanmaydi. audioKick endi faqat kech
+      qutqaruv EMAS — har qo'ng'iroqning BIRINCHI qadami.
    ═══════════════════════════════════════════════════════════════════════════ */
 'use strict'
 // ─────────────────────────────── ICE / MEDIA ───────────────────────────────
@@ -366,6 +385,41 @@ function unlockAudio(C) {
     if (C && ctx) C.ctx = ctx
     return ctx || null
   } catch { return null }
+}
+// v95: HAR QO'NG'IROQ — VIRGIN AUDIO-KAINOT. Eski global kontekst QO'NG'IROQLAR
+// ORASIDA saqlanmasin: endCall uni yopadi, shu funksiya foydalanuvchi BOSISHI ichida
+// 0 dan ochadi (gesture ichida yaratilgani uchun autoplay-qulfi yangi kontekstga ham
+// taalluqli; «suspended tug'ilish» holatida 4-marta resume narvoni ishlaydi).
+// v92 «hech qachon yopilmaydi» siyosati BEKOR QILINDI — aynan shu saqlanuvchi kontekst
+// qo'ng'iroqlar orasida «running lekin ichi o'lik» holatga tushib, 2+ qo'ng'iroqni jim
+// qilardi (foydalanuvchi dalili: 1-qo'ng'iroq zo'r, keyingilari jim).
+function freshAudioUniverse(C) {
+  try {
+    const old = window.__50actx
+    const ost = old ? old.state : 'yo‘q'
+    if (old && old.state !== 'closed') { try { old.close() } catch {} }
+    window.__50actx = null
+    if (C) { C.ctx = null; C.waSrc = null; C.waGain = null; C.waAn = null; C.an_in = null; C.an_out = null }
+    unlockAudio(C)
+    const ctx = window.__50actx
+    if (ctx && ctx.state !== 'running') {
+      for (const d of [150, 400, 900]) {
+        setTimeout(() => { try { if (window.__50actx === ctx && ctx.state === 'suspended') ctx.resume().catch(() => {}) } catch {} }, d)
+      }
+    }
+    clog('audio-kainot', 'kontekst 0 dan: eski=' + ost + ' yangi=' + (ctx ? ctx.state : 'YARATILMADI'))
+    return ctx || null
+  } catch (e) { try { clog('audio-kainot-xato', String((e && e.message) || e).slice(0, 80)) } catch {}; return null }
+}
+// v95: PROAKTIV NATIVE MARSHRUT — har qo'ng'iroq boshida (foydalanuvchi bosishi ichida,
+// media ochilishidan OLDIN) OS ovoz-yo'li 0 dan o'rnatiladi: ovoz darajalari, NORMAL →
+// COMMUNICATION, video bo'lsa karnay. Avvalgi qo'ng'iroq HALni ifloslatgan bo'lsa ham —
+// bu kick uni YUVADI (audioKick avval faqat kech qutqaruv edi — endi BIRINCHI qadam).
+function nativeRouteStart(video) {
+  try {
+    const A = window.Android50
+    if (A && typeof A.audioKick === 'function') A.audioKick(video ? 1 : 0)
+  } catch {}
 }
 function connectWA(C) {
   try {
@@ -873,7 +927,7 @@ function endCall(status = 'ended', report = true, msg) {
   ringTone(false)
   nativeCallCancel()
   try { holdWake(false) } catch {}
-  try { if (C.video && window.Android50) { window.Android50.keepScreen && window.Android50.keepScreen(false); window.Android50.speaker && window.Android50.speaker(false) } } catch {}
+  try { if (C.video && window.Android50) { window.Android50.keepScreen && window.Android50.keepScreen(false) } } catch {}
   clearTimeout(C.timeout); clearInterval(C.tick); clearTimeout(C.camT)
   const dur = C.started ? Math.round((Date.now() - C.started) / 1000) : 0
   clog('endCall', 'status=' + status + ' | ' + (msg || '') + ' | davomiylik=' + dur + 's | pc=' + (C.pc ? C.pc.connectionState : 'yo\'q') + ' | turn=' + (C.relay === undefined ? '?' : C.relay) + ' | ovoz=' + (C.audioMode || '?'))
@@ -882,14 +936,34 @@ function endCall(status = 'ended', report = true, msg) {
     sig(C.peer.id, { k: 'hangup', call_id: C.id })
     post(`/calls/${C.id}/status`, { status: C.started ? 'ended' : status, duration: dur }).catch(() => {})
   }
-  try { C.pc?.close() } catch {}
-  C.local?.getTracks().forEach((t) => t.stop())
-  try { C.waSrc?.disconnect?.(); C.waGain?.disconnect?.() } catch {}
-  try { C.ctx = null } catch {} // v92: AudioContext GLOBAL — yopilmaydi, faqat aloqasi uziladi
+  // ── v95: TOZA YIQILISH TARTIBI — avval MEDIA to'liq o'ladi, KEYIN OS-marshrut reset ──
+  // (1) elementlar ovoz-sinkni DARHOL qo'yib yuboradi
+  try { const ce = callEls(C); if (ce.v) ce.v.srcObject = null; if (ce.a) ce.a.srcObject = null } catch {}
+  try { // (2) masofa treklari ANIQ to'xtatiladi — receiver pleyout-resurslari ozod bo'ladi
+    if (C.remote) C.remote.getTracks().forEach((t) => { try { t.stop() } catch {} })
+    if (C.remoteA) C.remoteA.getTracks().forEach((t) => { try { t.stop() } catch {} })
+  } catch {}
+  try { C.pc?.close() } catch {} // (3) PC yopiladi
+  C.local?.getTracks().forEach((t) => t.stop()) // (4) mikrofon/kamera ozod
+  try { C.waSrc?.disconnect?.(); C.waGain?.disconnect?.(); C.waAn?.disconnect?.() } catch {}
+  try { // (5) GLOBAL AudioContext YOPILADI — har keyingi qo'ng'iroq VIRGIN kontekst bilan
+        // tug'iladi (eski siyosat uni saqlardi — «running lekin ichi o'lik» merosi 2+
+        // qo'ng'iroqni jim qilardi; v95: endCall yopadi, boshida freshAudioUniverse ochadi)
+    if (window.__50actx && window.__50actx.state !== 'closed') { try { window.__50actx.close() } catch {} }
+    window.__50actx = null
+  } catch {}
+  C.ctx = null
   try { navigator.serviceWorker?.controller?.postMessage({ type: 'callend', tag: 'g50call' + C.id }) } catch {}
   qs('.cst', C.el).textContent = msg || (C.started ? 'Tugadi · ' + fmtDur(dur) : 'Tugadi')
   qs('.cbar', C.el).innerHTML = ''
   setTimeout(() => C.el.remove(), msg ? 3200 : 1200)
+  try { // (6) OS-marshrut reset — media to'liq o'lgandan 700ms KEYIN va faqat yangi
+        // qo'ng'iroq boshlanmagan bo'lsa (guard). AUDIO qo'ng'iroqlar uchun ham: NORMAL
+        // rejimga qaytish keyingi jiringlash/ovozi ham to'g'ri yo'nalgan bo'ladi.
+    if (window.Android50 && typeof window.Android50.speaker === 'function') {
+      setTimeout(() => { try { if (!CALL) window.Android50.speaker(false) } catch {} }, 700)
+    }
+  } catch {}
   try { window.__50buildCheck && window.__50buildCheck() } catch {}
   for (let i = 0; i < 12 && clogBuf.length; i++) shipClog()
 }
@@ -904,7 +978,9 @@ async function callUser(uid, video) {
   // v92: yo'nalish routeFor()da hal qilinadi — APK: video→karnay (spkOn=true),
   // audio→quloqchi; browser: element. AudioContext GLOBAL (unlockAudio ichida).
   CALL = { id: 0, peer, video: !!video, outgoing: true, role: 'offerer', spkOn: !!video, ice: [], el: callUI(peer, video, 'Chaqirilmoqda…'), t0: Date.now(), ringMode: 'out' }
-  unlockAudio(CALL) // FOYDALANUVCHI BOSISHI ICHIDA: AudioContext ochiladi (autoplay qulfidan chiqish)
+  // v95: FOYDALANUVCHI BOSISHI ICHIDA — proaktiv native marshrut + virgin AudioContext
+  nativeRouteStart(!!video)
+  freshAudioUniverse(CALL)
   clog('chaqirildi', 'to=' + uid + ' video=' + !!video)
   startSigPoll()
   purgeStaleSignals()
@@ -947,7 +1023,10 @@ async function acceptCall() {
   ringTone(false); clearTimeout(C.timeout)
   setCallState('Kamera ochilmoqda…')
   callButtons('active')
-  unlockAudio(C) // FOYDALANUVCHI «Javob berish» BOSISHI ICHIDA: audio qulfi ochiladi
+  // v95: FOYDALANUVCHI «Javob berish» BOSISHI ICHIDA — proaktiv native marshrut +
+  // virgin AudioContext (qabul qiluvchi tomonda ham xuddi shu toza-kainot kafolati)
+  nativeRouteStart(!!C.video)
+  freshAudioUniverse(C)
   try {
     const local = await getMedia(C.video)
     if (CALL !== C) { try { local.getTracks().forEach((t) => t.stop()) } catch {}; return }
