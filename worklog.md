@@ -266,3 +266,26 @@ Stage Summary:
 - APK o'zgarmadi — tuzatish 100% JS tomonda, v95 qulfi orqali ~1 daqiqada barcha qurilmalarga yetadi (qo'ng'iroq paytida update xalaqit bermaydi).
 - Keyingi sinov: foydalanuvchi KETMA-KET kamida 3 ta video qo'ng'iroq qiladi (1-qo'ng'iroq tugatilgach, 30-60s kutib 2-sini). Agar baribir jimlik bo'lsa — jurnalda endi 'audio-kainot' + 'endCall' + stat qatorlari aniq qatlamni ko'rsatadi.
 - Eslatma: mening box IP FW'da /api/* bloklangan («Not found») — API tekshiruvlar CI toza IP orqali (domen.yml tekshir) o'tkazildi. www 403 holati o'zgarmagan (wildcard route kutilmoqda).
+
+---
+Task ID: 45
+Agent: Super Z (asosiy)
+Task: v95 MUHRLASH — «1-qo'ng'iroq zo'r, keyingisi jim» kasalligi QAYTMASLIGI kafolati (v96)
+
+Work Log:
+- Foydalanuvchi tasdiqladi: v95'dan keyin qo'ng'iroqlar ishlaydi. Vazifa: holatni mustahkamlash, xulqni O'ZGARTMASDAN muhrlash.
+- v96 (commit 14e5b98) — 3 qatlamli muhr:
+  (1) MUHR E2E — scripts/e2e_call_loop.mjs + .github/workflows/e2e-call-loop.yml: bitta brauzer sessiyasida (reload YO'Q — aynan foydalanuvchi sindromi) 3 ta KETMA-KET video qo'ng'iroq (A→B, A→B regressiya-holati, B→A teskari). Har qo'ng'iroqda ikkala tomonda 8 ta media assertion (PC connected, kiruvchi audio/video baytlar, kadrlar, audio currentTime). Har qo'ng'iroqdan keyin INVARIANTLAR: M1 — shu qo'ng'iroqning o'z AudioContext'i yopiq (JSHandle bilan yopilishdan oldin ushlanadi); M2 — global __50actx=null; M3 — har qo'ng'iroqda yangi kontekst tug'ilgan. Tartib buzilsa — 2-qo'ng'iroq CI'da QIZIL.
+  (2) rtc.js: endCall UI qadamlari try/catch (teardown zanjiri hech qachon uzilmasin) + 'audio-yopildi' MUHR-audit jurnal qatori + header'da M1/M2/M3 MUHR QOIDALARI (kelajagi tahrirlashlar uchun taqiq).
+  (3) Versiya qulfi v96 (worker+core+sw).
+- MUHR E2E sozlash jarayoni (2 marta yiqilib, 2 marta tuzatildi):
+  (a) 1-yiqilish (run 37884867392): MEDIA 3/3 mukammal edi, lekin M1 «BARCHA kontekstlar yopiq» deb tekshirganda core.js beep() toni konteksti (xabar ovozlari, BENIGN — foydalanuvchi muvaffaqiyatli testida ham bor) 'running' chiqdi. YALG'ON QIZIL. Tuzatish (commit 7f8b623): M1 endi faqat SHU qo'ng'iroqning kontekstini tekshiradi (evaluateHandle bilan reference ushlash).
+  (b) 2-yiqilish (run 37885636031): «raqam tarmoqda mavjud» — MUHR o'z concurrency guruhida PARALLEL ishlaydi, e2e_media_send HAM 007/008 ishlatar edi → to'qnashuv. Tuzatish (commit 2ea6c52): MUHR raqamlari 009/010 (faqat o'ziniki).
+- YAKUNIY NATIJA (run 37886051085): MUHR E2E PASS — 67/67 ✓, 0 FAIL. 3 ketma-ket qo'ng'iroq: har birida ikkala tomon ovoz+video to'liq, M1/M2/M3 hammasi yashil, JS xatosi yo'q.
+- Barcha workflowlar (2ea6c52): Deploy ✅ / Smoke ✅ (37886363588 urinish) / Qo'ng'iroq E2E ✅ (37886052099) / MEDIA E2E ✅ / MUHR ✅ / Jurnal ✅.
+- Jonli sayt: core v96, sw 50gram-v96, rtc.js'da MUHR belgilari, APK o'zgarmagan (763312B).
+
+Stage Summary:
+- MUHR QO'YILDI: (1) har pushda CI avtomatik 3 ketma-ket qo'ng'iroqni sinaydi — aynan «keyingi qo'ng'iroq jim» simptomi qaytsa 2-qo'ng'iroq QIZIL bo'ladi; (2) rtc.js'da MUHR qoidalari hujjatlashtirildi (tartib buzilishi taqiqlangan); (3) teardown zanjiri mustahkamlandi (UI xatosi teardown'ni uzolmaydi) + jurnal audit qatori.
+- XULQ 100% O'ZGARMAGAN — faqat kuzatuvchanlik va himoya qo'shildi. Foydalanuvchi hech narsa sezmagan bo'lishi kerak (ilova o'zi v96'ga yangilanadi, qo'ng'iroq paytida yangilanmaydi).
+- Darslik: alohida concurrency guruhdagi workflow'lar boshqa E2E'lar bilan raqam-to'qnashuvga ehtiyot bo'lishi kerak — har testga o'z raqamlari (009/010 endi MUHRniki).
