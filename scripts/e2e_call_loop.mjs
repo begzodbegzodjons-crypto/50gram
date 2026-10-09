@@ -24,9 +24,10 @@ import { chromium } from 'playwright'
 
 const BASE = (process.env.E2E_BASE || 'https://50gram.begzodbegzodjons.workers.dev').replace(/\/$/, '')
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
-// E2E sinov raqamlari: call_media (005/006) va smoke (003/004) bilan to'qnashmasin
-const A = { phone: '998900000007', full: '+998900000007' }
-const B = { phone: '998900000008', full: '+998900000008' }
+// E2E sinov raqamlari: 009/010 — FAQAT shu testniki (007/008 e2e_media_sendniki;
+// MUHR alohida concurrency guruhda parallel ishlaydi — raqam to'qnashuvi taqiqlanadi)
+const A = { phone: '998900000009', full: '+998900000009' }
+const B = { phone: '998900000010', full: '+998900000010' }
 
 let fails = 0
 let tokA = null, tokB = null
