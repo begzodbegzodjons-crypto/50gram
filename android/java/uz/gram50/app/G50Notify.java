@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.service.notification.StatusBarNotification;
 
 /**
  * Xabar bildirishnomalari (v2.9) — «ilova fonda turganda xabardan HECH NARSA ko'rinmasdi»
@@ -80,7 +81,7 @@ public class G50Notify {
       if (chatId == null || chatId.trim().length() == 0) {
         // barcha xabar bildirishnomalari (3000..130000 diapazonidagi bizning idlar)
         if (Build.VERSION.SDK_INT >= 23) {
-          for (Notification.StatusBarNotification sbn : nm.getActiveNotifications()) {
+          for (StatusBarNotification sbn : nm.getActiveNotifications()) {
             int id = sbn.getId();
             if (id >= BASE_ID && id < BASE_ID + 100000) nm.cancel(id);
           }

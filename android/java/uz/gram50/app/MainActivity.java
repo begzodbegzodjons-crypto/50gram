@@ -351,7 +351,7 @@ public class MainActivity extends Activity {
           } catch (Exception ignored) { }
           if (!mimes.isEmpty()) it.putExtra(android.content.Intent.EXTRA_MIME_TYPES, mimes.toArray(new String[0]));
           boolean multi = false;
-          try { multi = (params.getMode() & FileChooserParams.MODE_MULTIPLE) != 0; } catch (Exception ignored) { }
+          try { multi = (params.getMode() & FileChooserParams.MODE_OPEN_MULTIPLE) != 0; } catch (Exception ignored) { }
           it.putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, multi);
           startActivityForResult(android.content.Intent.createChooser(it, "Fayl tanlash"), FILE_REQ);
         } catch (Exception e) {
