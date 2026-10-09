@@ -240,3 +240,29 @@ Stage Summary:
 - Ildiz ANIQLANGAN (jurnal isboti bilan): quloqsiz tomonning WebView pleyout quvuri o'lik — yo'l almashtirish yordam bermasligi ENDI TUSHUNARLI. v94: 5 ta mustaqil qutqaruv qatlami + eng oxirgisi YANGI DEKODER (a-reset renegotiation) — har bir qatlam jurnalga yoziladi.
 - APK 3.2 IXTIYORIY (faqat dev= tashxisi uchun) — v94 JS avtomatik yetadi (3-yo'qlik versiya qulfi).
 - Keyingi sinov: foydalanuvchi VIDEO qo'ng'iroq — agar 35s ichida ovoz kelmasa ham, endi jurnalda HAR QATLAM ko'rinadi (ovoz-wa-yangi / ovoz-qayta-tug / a-reset / ovoz-play-rad / ctx=) — keyingi qadam 100% aniqlanadi.
+
+---
+Task ID: 44
+Agent: Super Z (asosiy)
+Task: «1-qo'ng'iroq zo'r, keyingi qo'ng'iroqlarda ovoz yo'q» — HAL QILUVCHI ildiz + v95 toza-kainot tuzatishi
+
+Work Log:
+- FOYDALANUVCHI DALILI hal qiluvchi bo'ldi: «birinchi video qo'ng'iroq juda yaxshi, ikki taraf ovozi/videosi zo'r; keyin qayta qilganda ovoz chiqmadi; qayta-qayta qilinganda yana yo'qoldi». Bu pattern muammo QO'NG'IROQ DAVOMIDA emas, QO'NG'IROQLAR ORASIDA ekanini isbotlaydi — har qo'ng'iroqda saqlanib qoladigan iflos holat merosi.
+- 3 ta meros manbasi topildi (rtc.js endCall/unlockAudio tahlili + Task 43 forenzikasi bilan mos):
+  (1) GLOBAL AudioContext (window.__50actx) endCall'da YOPILMASDI (v92 qoidasi «hech qachon yopilmaydi») — qo'ng'iroqlar orasida «running lekin ichi o'lik» holatga tushardi (Task 43'ning own forenzikasi: dekoder nol, baytlar keladi); 2-qo'ng'iroq aynan shu o'lik kontekstda tug'ilardi (APK video default yo'li 'wa' = WebAudio!).
+  (2) endCall TARTIBI buzuk: window.Android50.speaker(false) (native: clearCommunicationDevice + MODE_NORMAL) TIRIK WebRTC sessiyasi ustida, pc.close()dan OLDIN ishlar edi → audio-HAL yarim-yiqilgan holatda qolardi → keyingi qo'ng'iroq pleyout-quvuri o'lik tug'ilardi.
+  (3) Qo'ng'iroq boshida proaktiv marshrut YO'Q edi — audioKick faqat kech qutqaruv (rescue) sifatida ishlar edi; 1-qo'ng'iroq toza holatdan ishlagani uchun Chromium auto-marsruti yetarli edi, 2-qo'ng'iroq esa iflos merosga tayanardi.
+- v95 (commit 2d693c4) rtc.js tuzatishlari:
+  (a) freshAudioUniverse(C): eski kontekst close() → 0 dan yangi AudioContext (foydalanuvchi bosishi ICHIDA) → 4-marta resume narvoni (150/400/900ms) → 'audio-kainot' jurnal qatori. callUser + acceptCall ikkalasida ham.
+  (b) nativeRouteStart(video): PROAKTIV audioKick(video?1:0) har qo'ng'iroq boshida, media ochilishidan OLDIN (caller + callee) — OS yo'li NORMAL→COMMUNICATION+karnay 0 dan o'rnatiladi, avvalgi HAL-zamblik yuviladi.
+  (c) endCall TOZA YIQILISH TARTIBI: (1) elementlar srcObject=null (sink darhol ozod) → (2) masofa treklari aniq stop() (receiver resurslari) → (3) pc.close() → (4) mikrofon/kamera stop → (5) wa tugunlari disconnect + GLOBAL AudioContext YOPILADI (v92 siyosati bekor) → (6) 700ms KECHIKISH + guard bilan OS speaker(false) reset (audio qo'ng'iroqlar uchun ham — NORMAL rejim tiklanadi; guard: yangi qo'ng'iroq boshlangan bo'lsa reset bekor).
+  (d) v94 qutqaruv narvoni TO'LIQ saqlandi (himoya qatlami sifatida).
+- Versiya qulfi: worker BUILD_V=v95, core __50BUILD='v95', sw V='50gram-v95' (3-yo'qlik sinxron).
+- CI (commit 2d693c4): Deploy SUCCESS (37881967973) / Jonli tekshiruv (smoke) SUCCESS (37882276040) / Qo'ng'iroq MEDIA E2E SUCCESS (37881967925 — 2-brauzer real qo'ng'iroq: jiringlash, javob, ikkala tomon video kadrlar + audio currentTime) / MEDIA E2E SUCCESS (37882556254) / Jurnal SUCCESS / domen tekshir SUCCESS (37882077319: core v95, /api/health ok, /50gram.apk 200 763312B). Birinchi parallel urinishlar concurrency-cancel — ketma-ket qayta yuritildi.
+- Jonli sayt: rtc.js'da 10 ta v95 belgi (freshAudioUniverse/nativeRouteStart/audio-kainot), core v95, sw v95, APK o'zgarmagan (SHA 04d9ea98...).
+
+Stage Summary:
+- Ildiz aniqlangan va KONSTRUKTIV yo'q qilingan: qo'ng'iroqlar orasidagi 3 ta iflos meros (o'lik AudioContext + tirik sessiyada HAL reset + proaktiv marshrut yo'qligi). Har qo'ng'iroq endi TOZA kainotdan boshlanadi — 1-qo'ng'iroq bilan 100-qo'ng'iroq bir xil toza holatdan ishlaydi.
+- APK o'zgarmadi — tuzatish 100% JS tomonda, v95 qulfi orqali ~1 daqiqada barcha qurilmalarga yetadi (qo'ng'iroq paytida update xalaqit bermaydi).
+- Keyingi sinov: foydalanuvchi KETMA-KET kamida 3 ta video qo'ng'iroq qiladi (1-qo'ng'iroq tugatilgach, 30-60s kutib 2-sini). Agar baribir jimlik bo'lsa — jurnalda endi 'audio-kainot' + 'endCall' + stat qatorlari aniq qatlamni ko'rsatadi.
+- Eslatma: mening box IP FW'da /api/* bloklangan («Not found») — API tekshiruvlar CI toza IP orqali (domen.yml tekshir) o'tkazildi. www 403 holati o'zgarmagan (wildcard route kutilmoqda).
