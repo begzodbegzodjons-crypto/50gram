@@ -342,3 +342,25 @@ Stage Summary:
 - R2 10GB: 3-qatlamli himoya tugalladi (yetim-sweep + bosqichli posbon + yuklash-posboni) — to'lib qolish yo'li QOLMADI.
 - www.50gram.uz TIKLANDI (522 → 200) — wildcard route + HSTS includeSubDomains.
 - XULQ 100% O'ZGARMAGAN: SMS Eskiz kodi TEGILMADI (sms.ts + authOtp cooldown mantiqi asl holida), qo'ng'iroq/media/chat/o'r-gimchak to'ri funksiyalari bir-birining o'rnida (barcha E2E yashil isboti bilan).
+
+---
+Task ID: 48
+Agent: Super Z (asosiy)
+Task: ICHKI DIZAYN «SIMPLE» (v99) — ChatGPT-uslubi: oq fon + qora yozuv + tekis yuzalar + sodda dock. FAQAT KO'RINISH — funksiya ishlash tizimiga BITTA BAYT tegilmadi. Kirish ekrani (#auth) avvalgi ko'rinishida qoldi.
+
+Work Log:
+- Talqin: foydalanuvchi ichki dizayn yoqmasligini aytdi — ro'yxatdan o'tish QISMI QOLSIN, ichkarida (login'dan keyin) oddiy qora yozuv, sodda sidebar/dock, ChatGPT ichki ko'rinishi. Faqat dizayn, boshqa hech narsaga tegmaslik.
+- AUDIT (avval): style.css 1192 qator «AURORA GLASS/PRIZMA 3D» (gradient/glass/3D-soya); deyarli hammasi CSS-o'zgaruvchilarda (:root); classList orqali JS toglaydigan class'lar xaritasi chizildi (hide/on/off/open/rec/selmode/dark/fly/gone...); overlay'lar (.page/.shbg/.over) body'ga qo'shiladi; aksent tanlagich (manage.js applyAcc → html inline --asos/--asos2/--grad), fon-rasm (WALLS → #msgs inline), --msgfs/--mrad sozlamalari — HECH BIRI BUZILMASLIGI SHART.
+- YONDASHUV — xavfsiz arxitektura: (1) body darajasida yangi sodda palitra (--fon:#FFF/--matn:#0D0D0D/--chiziq:#ECECF1/--sirt2:#F7F7F8 ChatGPT qiymatlari) — butun ichki UI'ga tarqaladi; (2) #auth o'z qoidasida BARCHA o'zgaruvchilarning ASL qiymatlari bilan tiklanadi (light+dark) — kirish ekrani 100% avvalgi «AURORA» ko'rinishida; (3) --grad/--gradb/--ring → var(--asos) (aksent tanlagich ISHLAYDI, faqat TEKIS render); (4) --bez-i/--bez-u → none (gloss yo'q); (5) yangi --fokus/--tugma-glow o'zgaruvchilari (jarrohlik: .btn/.inp/.phone-in/.code-in'dagi 5 ta qattiq rgba — var'ga almashtirildi, default asl qiymat, body'da none, #auth'da asl) — kirish ekraniga TEGMAYDI.
+- Override bloki (style.css oxiriga, ~165 qator): #main/.top/.dock/.chead — tekis fon + 1px chiziq (glass/blur yo'q); .dock — suzuvchi 3D orol → tekis pastki panel (per-tab ranglar neytral, active = kulrang plitka + qora nuqta); .m pufaklar — kiruvchi #F7F7F8, chiquvchi var(--asos) (default QORA, oq matn — .mrow.me'nli oq-matn qoidalari o'z-o'zidan ishlaydi); .yoz/.inwrap — tekis; .sheet/.rows/.seg/.profcard/.post/.tcard — radius kichraytirildi, soya/gloss yo'q; .call radial → #101012; scrollbar neytral; body.dark uchun to'liq sodda qora palitra (#171717/#212121/#2F2F2F ChatGPT-dark). XULQ-classlarga TEGILMADI (faqat rang/soya/radius) — .hide/.on/.open/.rec semantikasi o'zgarmas.
+- Ehtiyot choralari: accent-picker inline html --asos → body-dagi redeclaratsiyani yengadi (picker ISHLAYDI); WALLS inline #msgs — ishlaydi; --mrad/--msgfs TEGILMAGAN (sozlamalar buzilmasin); index.html O'ZGARMAGAN (0 bayt); rtc.js/chat.js/core.js mantig'i O'ZGARMAGAN (faqat __50BUILD versiya satri).
+- Versiya qulfi v99: worker BUILD_V + core __50BUILD + sw V (node --check OK, CSS brace balans 1210/1210).
+- CI DARSLIK: (a) push'da 8 workflow birdan ishga tushdi — parallel to'qnashuv: Smoke/Call/Media/Data CANCELLED (MUHR/SEC/Jurnal birinchi urinishdayoq YASHIL — yangi dizayn qo'ng'iroqlarni buzmaganini isbotladi); (b) nohup fon-jarayonlari sandbox'da o'chayotgan ekan — ketma-ketlikni OLD TOMPON bash-qo'ng'iroqlar bilan yuritildi (rerun API: POST /runs/{id}/rerun — 201, dispatch emas); (c) rerun tartibi: Smoke → Call E2E → Media E2E → Data E2E → domen tekshir (dispatch mode=tekshir ishladi).
+- CI YAKUNIY (commit 0475ff8): Deploy ✅ / Smoke ✅ / Qo'ng'iroq E2E (2-brauzer) ✅ / Media E2E ✅ / MUHR E2E 3-ketma-ket ✅ (67 assertion — birinchi urinishda!) / Data E2E ✅ / XAVFSIZLIK E2E ✅ / Jurnal ✅ / Domen tekshir ✅ (apex+www+health+apk+v99) — 9/9 YASHIL.
+- Jonli isbot: apex 200 + www 200 + apk 200; style.css'da «SIMPLE» bloki + --tugma-glow:none; core v99; sw 50gram-v99; CSS 117610 bayt.
+
+Stage Summary:
+- ICHKI DIZAYN ALMASHTIRILDI: login'dan keyin hamma joyda (chatlar, ro'yxat, lenta, reels-panellari, kanallar, sozlamalar, sheetlar, to'liq ekran sahifalar) ChatGPT-uslubidagi sodda oq fon + qora yozuv + tekis yuzalar + sodda pastki panel. Kirish ekrani avvalgi rangli ko'rinishida.
+- FUNKSIYA KAFOLATI: barcha 9 CI workflow yashil — qo'ng'iroq (MUHR 3-ketma-ket), media, data/tor, xavfsizlik, jurnal — HAMMASI birinchi kungidek. JS/HTML/worker mantig'i o'zgarmagan. Aksent tanlash, fon rasmi, shrift kattaligi, pufak radiusi sozlamalari ISHLAYDI.
+- Dark rejim ham sodda qora palitrada qayta yozildi (auth'dagi dark avvalgidek).
+- Darslik: (1) fon-jarayonlar sandbox'da o'chishi mumkin — CI ketma-ketligini old tomonda yuritish kerak; (2) rerun API (workflow-scope'siz) dispatch o'rniga ishlaydi; (3) #auth'ni alohida o'zgaruvchi-tiklash bilan ajratish — «kirish ekrani qolsin» talabining toza yechimi.
