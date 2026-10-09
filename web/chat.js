@@ -626,7 +626,16 @@ async function sendRaw(chatId, b, temp) {
     if (S.cur === chatId) renderMsgs(true)
     renderChats()
     return m
-  } catch (e) { dropTemp(chatId, temp); toast('⚠️ ' + e.message); throw e }
+  } catch (e) {
+    // v97 OUTBOX: internet uzilgan bo'lsa xabar NAVBATDA ushlanidi (🕓 qoladi) —
+    // internet qaytganda avtomatik yuboriladi. Serverning o'zi rad etsa — eskisi kabi xato.
+    if (typeof Outbox !== 'undefined' && Outbox.netErr(e)) {
+      await Outbox.add({ type: 'msg', client_id: temp.client_id, chat: chatId, kind: b.kind, body: b.body, meta: b.meta || {} })
+      toast('⏳ Internet yo‘q — xabar internet qaytganda yuboriladi')
+      return null
+    }
+    dropTemp(chatId, temp); toast('⚠️ ' + e.message); throw e
+  }
 }
 async function sendText() {
   const inp = $('inp'), text = inp.value.trim()
@@ -653,10 +662,11 @@ async function sendFile(file, kind, extra = {}, chatId0) {
   if (file.size > 30 * 1024 * 1024) { mediaLog('sendFile-hajm', new Error('hajm=' + file.size + ' limitdan katta'), { kind, size: file.size, mime: file.type }); return toast('⚠️ Fayl 30 MB dan katta bo‘lmasin') }
   mediaLog('sendFile-boshlanmoqda', new Error('kind=' + kind + ' hajm=' + file.size + ' mime=' + (file.type || '?') + ' chat=' + chatId), { kind, size: file.size, mime: file.type }, 'qadam')
   let temp = null
+  let baseMeta = null
   try {
     let local = null
     try { local = ['photo', 'video', 'voice', 'round'].includes(kind) ? URL.createObjectURL(file) : null } catch (e) { mediaLog('sendFile-local', e, { kind }) }
-    const baseMeta = withReply({ ...(extra.meta || {}), name: file.name || kind, fsize: file.size })
+    baseMeta = withReply({ ...(extra.meta || {}), name: file.name || kind, fsize: file.size })
     temp = pushTemp(chatId, kind, extra.body, { ...baseMeta, local })
     let blob = file
     if (kind === 'photo' && file.type !== 'image/gif') {
@@ -674,7 +684,18 @@ async function sendFile(file, kind, extra = {}, chatId0) {
     mediaLog('sendFile-yuklandi', new Error('media=' + id), { kind }, 'qadam')
     await sendRaw(chatId, { kind, body: extra.body || undefined, meta: { ...baseMeta, ...mediaInfo(id), fsize: blob.size } }, temp)
     mediaLog('sendFile-YUBORILDI', new Error('ok'), { kind }, 'qadam')
-  } catch (e) { if (temp) dropTemp(chatId, temp); toast('⚠️ ' + (e.message || 'Yuborishda xato')); mediaLog('sendFile', e, { kind, size: file.size, mime: file.type }) }
+  } catch (e) {
+    // v97 OUTBOX: fayl yuklashi tarmoqda uzilsa — FAYL NAVBATDA ushlanadi (30 MB gacha),
+    // internet qaytganda Outbox o'zi qayta yuboradi (foydalanuvchi talabi: yo'qolmasin)
+    if (baseMeta && typeof Outbox !== 'undefined' && Outbox.netErr(e) && file.size <= 30 * 1024 * 1024) {
+      await Outbox.add({ type: 'file', chat: chatId, kind, blob: file, extra: { body: extra.body, meta: baseMeta } })
+      if (temp) dropTemp(chatId, temp)
+      toast('⏳ Internet yo‘q — fayl internet qaytganda yuboriladi')
+      mediaLog('sendFile-navbat', new Error('offline navbatga qo‘yildi'), { kind, size: file.size }, 'qadam')
+      return
+    }
+    if (temp) dropTemp(chatId, temp); toast('⚠️ ' + (e.message || 'Yuborishda xato')); mediaLog('sendFile', e, { kind, size: file.size, mime: file.type })
+  }
 }
 // MEDIA XATO JURNALI: «rasm yuborib bo'lmayapti» shikoyatlari avval JIMS yo'qolardi —
 // endi har media-xato /api/clog orqali egaga jurnaliga yoziladi (aniq sabab: qadam,

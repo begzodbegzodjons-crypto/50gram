@@ -233,12 +233,15 @@ const IDB = {
     if (this.db) return Promise.resolve(this.db)
     return new Promise((res) => {
       try {
-        const r = indexedDB.open('50gram', 3)
+        const r = indexedDB.open('50gram', 4)
         r.onupgradeneeded = () => {
           const d = r.result
           if (!d.objectStoreNames.contains('chats')) d.createObjectStore('chats')
           if (!d.objectStoreNames.contains('media')) d.createObjectStore('media')
           if (!d.objectStoreNames.contains('idx')) d.createObjectStore('idx') // fayl hajmi/chat/oxirgi foydalanish
+          // v97 OUTBOX: internet uzilgan paytda yuborilgan xabar/fayllar shu yerda ushlanadi —
+          // onlayn bo'lganda avtomatik yuboriladi (foydalanuvchi talabi: hech narsa yo'qolmasin)
+          if (!d.objectStoreNames.contains('outbox')) d.createObjectStore('outbox')
         }
         r.onsuccess = () => { this.db = r.result; res(this.db) }
         r.onerror = () => res(null)
@@ -286,6 +289,67 @@ async function loadChatLocal(chatId) {
   S.msgs.set(chatId, d?.messages || [])
   if (d?.since) S.since.set(chatId, d.since)
 }
+
+// ---------------- OUTBOX (v97): internet yo'q — xabar NAVBATDA ushlanadi ----------------
+// Foydalanuvchi talabi (Task 46): «onlayn/oflayn holatlari yuzaga kelganda vaqtincha
+// ushlanib, onlayn bo'lganda uzatilsin — hech narsa yo'qolmasin». Tarmoq-xatosi bilan
+// yuborilmagan xabar/fayl shu yerda saqlanadi; internet qaytganda (online hodisa /
+// WS ulanganda / 45s) avtomatik yuboriladi. Server QAT'IY rad etsa (4xx/5xx) —
+// qayta urinish ma'nosiz, navbatdan o'chadi (xulq eskisi bilan bir xil).
+const Outbox = (() => {
+  const MAXN = 40, MAXB = 60 * 1024 * 1024
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+  let flushing = false
+  const netErr = (e) => !!e && !e.status && /internet|tarmoq|javob bermadi|yuklashda xato/i.test(String((e && e.message) || e))
+  const all = async () => (await IDB.entries('outbox')).map(([, v]) => v).sort((a, b) => (a.at || 0) - (b.at || 0))
+  async function add(item) {
+    try {
+      item.client_id = item.client_id || ('c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7))
+      item.at = Date.now(); item.tries = 0
+      const list = await all()
+      let bytes = list.reduce((a, x) => a + ((x.blob && x.blob.size) || 0), 0)
+      // chegara: 40 element / 60 MB — eski avval chiqariladi (navbat abadiy o'smaydi)
+      while ((list.length >= MAXN || bytes + ((item.blob && item.blob.size) || 0) > MAXB) && list.length) {
+        const old = list.shift(); bytes -= (old.blob && old.blob.size) || 0
+        await IDB.del('outbox', old.client_id)
+      }
+      await IDB.put('outbox', item.client_id, item)
+      try { console.info('[outbox] navbat: ' + item.client_id + ' ' + (item.kind || '')) } catch {}
+    } catch {}
+  }
+  const del = (id) => IDB.del('outbox', id)
+  async function flush() {
+    if (flushing || !navigator.onLine || !S.token) return
+    const list = await all()
+    if (!list.length) return
+    flushing = true
+    try {
+      for (const it of list) {
+        if ((it.tries || 0) > 7) { await del(it.client_id); try { console.info('[outbox] 7 urinishdan oshdi — tashlandi', it.client_id) } catch {}; continue }
+        if (!navigator.onLine) break
+        try {
+          if (it.type === 'file' && it.blob && typeof sendFile === 'function') {
+            await sendFile(it.blob, it.kind, it.extra || {}, it.chat)
+          } else if (typeof sendRaw === 'function') {
+            // eski vaqtinchalik bubble hali ekranda bo'lsa — SHU bubble'dan davom etamiz
+            const temp = (S.msgs.get(it.chat) || []).find((m) => m.pending && m.client_id === it.client_id)
+            await sendRaw(it.chat, { kind: it.kind, body: it.body, meta: it.meta || {} }, temp)
+          } else break
+          await del(it.client_id)
+        } catch (e) {
+          if (e && e.status) { await del(it.client_id) } // server rad etdi — eskisi kabi xato, qayta urinilmaydi
+          else {
+            it.tries = (it.tries || 0) + 1
+            await IDB.put('outbox', it.client_id, it)
+            break // tarmoq hali yo'q — keyingi flush'dan davom
+          }
+        }
+        await wait(400)
+      }
+    } finally { flushing = false }
+  }
+  return { add, del, flush, netErr, all }
+})()
 
 // ---------------- Media ----------------
 const CHUNK = 512 * 1024
@@ -391,7 +455,31 @@ async function getCipher(id) {
     meta = null
   }
   // Serverda o'chgan — nusxasi bor onlayn qurilmadan olamiz
-  return P2P.fetchMedia(id)
+  const cipher = await P2P.fetchMedia(id)
+  restoreToServer(id, cipher) // v97 fonda: to'r server keshini o'zi tiklaydi (kimdir kutmaydi)
+  return cipher
+}
+// v97 TO'R → SERVER TIKLASH: server nusxasi yo'qolgan (gone=1) faylni boshqa qurilmadan
+// olgach, ilova FONDA o'sha SHIFRLANGAN nusxani serverga qayta yuklaydi — R2 keshi o'zi
+// to'planadi (foydalanuvchi talabi: «R2 xotira bo'shatilsin va kerakli foydalanuvchilarga
+// yetkazilishi»). Butunlik kafolati: sha256 mos emasa server YO'Q deyadi.
+const restored = new Set()
+async function restoreToServer(id, cipher) {
+  if (restored.has(id) || !S.token || !cipher || !navigator.onLine) return
+  restored.add(id)
+  try {
+    const info = await api('/media/' + id + '/restore-info')
+    if (!info || !info.gone || !info.chunks) return
+    const mysha = await P2P.sha256Hex(cipher)
+    if (info.sha && mysha !== info.sha) { try { console.info('[tiklash] sha mos emadi', String(id).slice(0, 8)) } catch {}; return }
+    for (let i = 0; i < info.chunks; i++) {
+      const part = cipher.slice(i * CHUNK, (i + 1) * CHUNK)
+      const r = await fetch(API + '/media/' + id + '/' + i, { method: 'PUT', headers: { Authorization: 'Bearer ' + S.token, 'content-type': 'application/octet-stream' }, body: part })
+      if (!r.ok) return
+    }
+    await post('/media/' + id + '/done', { sha: mysha })
+    try { console.info('[tiklash] server nusxa tiklandi', String(id).slice(0, 8)) } catch {}
+  } catch (e) { try { console.info('[tiklash]', String((e && e.message) || e).slice(0, 80), String(id).slice(0, 8)) } catch {} }
 }
 const mediaProgs = new Map()
 function onMediaProg(id, done, total) { const f = mediaProgs.get(id); if (f) f(done / total) }
@@ -787,7 +875,7 @@ function wsConnect() {
   try {
     const ws = new WebSocket(API.replace(/^http/, 'ws') + '/ws?token=' + encodeURIComponent(S.token))
     S.ws = ws
-    ws.onopen = () => { S.wsOk = true; wsRetry = 1000; lastWsRecv = Date.now(); setConn(); syncAll(); try { console.info('[ws] ochildi') } catch {} ; try { window.__50wsOpen && window.__50wsOpen() } catch {} }
+    ws.onopen = () => { S.wsOk = true; wsRetry = 1000; lastWsRecv = Date.now(); setConn(); syncAll(); try { console.info('[ws] ochildi') } catch {} ; try { window.__50wsOpen && window.__50wsOpen() } catch {}; try { Outbox.flush() } catch {} }
     ws.onmessage = (e) => { lastWsRecv = Date.now(); let ev; try { ev = JSON.parse(e.data) } catch { return } if (ev.type !== 'pong') dispatch(ev) }
     ws.onclose = (ev) => { S.wsOk = false; setConn(); try { console.info('[ws] yopildi code=' + (ev && ev.code) + ' clean=' + !!(ev && ev.wasClean)) } catch {}; if (S.ws === ws) S.ws = null; if (S.token) setTimeout(wsConnect, wsRetry); wsRetry = Math.min(wsRetry * 2, 20000) }
     ws.onerror = () => { try { console.info('[ws] xato (socket error)') } catch {} }
@@ -1001,9 +1089,11 @@ async function startApp() {
   }
   initPush()
 }
-window.addEventListener('online', () => { setConn(); if (!S.wsOk) wsConnect() })
+window.addEventListener('online', () => { setConn(); if (!S.wsOk) wsConnect(); setTimeout(() => { try { Outbox.flush() } catch {} }, 2500) })
+// v97: har 45s — navbatdagi (offline paytdagi) xabar/fayllarni yuborish urinishi
+setInterval(() => { try { Outbox.flush() } catch {} }, 45000)
 window.addEventListener('offline', setConn)
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.token) { g50SoftUpdate(); checkBuildSafe(); poll(); if (S.cur) markRead(S.cur) } })
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.token) { g50SoftUpdate(); checkBuildSafe(); poll(); if (S.cur) markRead(S.cur); try { Outbox.flush() } catch {} } })
 // Task 39: APK/brauzer ESKI sahifani xotirada saqlab qolmasin — 5 soatdan eski ochiq sahifa
 // qayta yuklanadi (yangi versiya + TEST rejimi banneri darhol ko'rinadi). Faol qo'ng'iroq/efir
 // yoki ochiq oyna paytida hech qachon uzilmaydi — keyingi qaytishda yangilanadi.
@@ -1030,7 +1120,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v96'
+window.__50BUILD = 'v97'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return

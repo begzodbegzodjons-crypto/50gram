@@ -71,6 +71,15 @@ TURN bo‘lmasa, ko‘p hollarda faqat STUN bilan ulanadi. Lekin ayrim mobil ope
   signal navbati — tozalaydi, yozishmalarga tegmaydi).
 - Serverdan o‘chgan faylni ilova **onlayn turgan boshqa a’zolar qurilmasidan** WebRTC orqali olib beradi (“o‘rgimchak to‘ri”).
 - Har foydalanuvchi qurilmasidan sozlamada tanlagan hajmda (maksimal 30 GB) joy beradi. Har fayl 15–20 ta qurilmada nusxalanadi.
+- **O‘Z-O‘ZINI TIKLASH (v97)**: server nusxasi yo‘qolgan faylga kimlab kirsa, fayl “gone” deb belgilanadi
+  va to‘r darhol nusxa-yig‘ish vazifalarini tuzadi; to‘rdan faylni olgan onlayn qurilma o‘z
+  shifrlangan nusxasini fonda serverga qayta yuklaydi — R2 keshi o‘zi to‘planadi. Hech narsa yo‘qolmaydi.
+- **OUTBOX (v97)**: internet uzilgan paytda yuborilgan xabar/fayl navbatda ushlanadi va internet
+  qaytganda avtomatik yuboriladi.
+- **R2 gigiyena (v97)**: shifrlangan bo‘laklar R2 va bazadan BITTA batchda o‘chadi (yetim obyekt
+  qolmaydi) + har cron‘da yetim kalitlar sweep qilinadi — 10 GB chegara to‘lib qolmaydi.
+  To‘r mantiqi alohida modulda (`worker/src/spiderweb.ts`) — 100–100 000 bir vaqtda
+  foydalanuvchi uchun batch-so‘rovlar bilan optimallashtirilgan.
 
 ### Halol cheklovlar
 

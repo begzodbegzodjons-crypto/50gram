@@ -7,6 +7,8 @@ import { signJwt, verifyJwt, sha256, randomStr, randomCode, hmacHex } from "./au
 import { sendSms, smsConfigured } from "./sms"
 import { pushUsers } from "./push"
 import { SecFirewall } from "./firewall"
+// v97: O'RGIMCHAK TO'RI — taqsimlangan xotira tizimi ALOHIDA modulda (Task 46)
+import { makeSpiderWeb } from "./spiderweb"
 export { UserSocket } from "./realtime"
 export { SecFirewall }
 
@@ -235,7 +237,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v96"
+const BUILD_V = "v97"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -878,7 +880,7 @@ async function deleteChat(c: C) {
   if (ch.type === "direct") { if (!m) fail("Ruxsat yo‘q", 403) }
   else if (ch.owner_id !== c.uid) fail("Faqat egasi o‘chira oladi", 403)
   const ids = (await c.db.q("SELECT user_id FROM chat_members WHERE chat_id=? LIMIT 41", [id])).map((r) => r.user_id)
-  await dropMedia(c.db, "chat_id=?", [id])
+  await SW.dropMedia(c.db, "chat_id=?", [id])
   await c.db.run("DELETE FROM messages WHERE chat_id=?", [id])
   await c.db.run("DELETE FROM chat_members WHERE chat_id=?", [id])
   await c.db.run("DELETE FROM join_requests WHERE chat_id=?", [id])
@@ -1143,7 +1145,7 @@ async function sendMessage(c: C) {
     c.db.run("UPDATE chat_members SET last_read=? WHERE chat_id=? AND user_id=?", [mid, id, c.uid]),
     mediaId ? c.db.run("UPDATE media SET expires_at=?, keep=1, chat_id=?, next_check=0 WHERE id=? AND owner_id=?", [exp, id, String(mediaId), c.uid]) : Promise.resolve(),
   ])
-  if (mediaId) c.wait(planReplicas(c.db, 1, String(mediaId)))
+  if (mediaId) c.wait(SW.planReplicas(c.db, 1, String(mediaId)))
   const out = (await enrich(c, [await c.db.one("SELECT * FROM messages WHERE id=?", [mid])]))[0]
   out.client_id = c.b.client_id || null
   notifyChat(c, id, { type: "message", chat_id: id, message: out })
@@ -1186,7 +1188,7 @@ async function deleteMessage(c: C) {
     if (!can) fail("Faqat o‘z xabaringiz", 403)
   }
   const mid = parse(m.meta, {}).media_id
-  if (mid) await dropMedia(c.db, "id=?", [String(mid)])
+  if (mid) await SW.dropMedia(c.db, "id=?", [String(mid)])
   await c.db.run("UPDATE messages SET deleted=1, body=NULL, meta=NULL, updated_at=? WHERE id=?", [now(), m.id])
   // Qadalgan xabar o'chirilsa — qadash ham olinadi
   await c.db.run("UPDATE chats SET pinned_id=0 WHERE id=? AND pinned_id=?", [m.chat_id, m.id]).catch(() => {})
@@ -1341,8 +1343,11 @@ async function mediaCreate(c: C) {
   return json({ id })
 }
 async function mediaPut(c: C) {
-  const m = await c.db.one("SELECT owner_id,chunks FROM media WHERE id=?", [c.p.id])
-  if (!m || m.owner_id !== c.uid) fail("Topilmadi", 404)
+  const m = await c.db.one("SELECT owner_id,chunks,gone,chat_id FROM media WHERE id=?", [c.p.id])
+  // v97 O'Z-O'ZINI TIKLASH: server nusxasi yo'qolgan (gone=1) faylga to'r a'zosi
+  // (egasi / chat a'zosi / pin-job egasi) shifrlangan bo'laklarni QAYTA yuklashi mumkin
+  const tiklaydi = !!m && m.gone === 1 && (m.owner_id === c.uid || (await canSee(c, c.uid, Number(m.chat_id))) || (await SW.hasJob(c, String(c.p.id), c.uid)))
+  if (!m || (m.owner_id !== c.uid && !tiklaydi)) fail("Topilmadi", 404)
   const idx = +c.p.idx
   if (!(idx >= 0 && idx < m.chunks)) fail("Bo‘lak raqami noto‘g‘ri")
   // Yangi mijozlar binary (33% kam trafik, tezroq), eski mijozlar base64 text — ikkalasi ham qo‘llanadi
@@ -1369,14 +1374,23 @@ async function mediaPut(c: C) {
     } catch (e) { jurnalYoz(c.env, "mediaPut", c.uid, "r2", String(e).slice(0, 200)) }
   }
   await c.db.run("REPLACE INTO media_chunks(media_id,idx,data) VALUES(?,?,?)", [c.p.id, idx, r2ok ? "" : data])
-  return json({ ok: true, r2: r2ok })
+  return json({ ok: true, r2: r2ok, tik: tiklaydi ? 1 : 0 })
 }
 async function mediaDone(c: C) {
-  const m = await c.db.one("SELECT owner_id,chunks FROM media WHERE id=?", [c.p.id])
-  if (!m || m.owner_id !== c.uid) fail("Topilmadi", 404)
+  const m = await c.db.one("SELECT owner_id,chunks,gone,chat_id,sha FROM media WHERE id=?", [c.p.id])
+  // v97 TIKLASH: gone=1 faylni egasi yoki to'r a'zosi (chat a'zosi / pin-job egasi) yakunlaydi
+  const tiklaydi = !!m && m.gone === 1 && (m.owner_id === c.uid || (await canSee(c, c.uid, Number(m.chat_id))) || (await SW.hasJob(c, String(c.p.id), c.uid)))
+  if (!m || (m.owner_id !== c.uid && !tiklaydi)) fail("Topilmadi", 404)
   const r = await c.db.one("SELECT COUNT(*) AS cnt FROM media_chunks WHERE media_id=?", [c.p.id])
   if (Number(r?.cnt) !== m.chunks) fail("Fayl to‘liq yuklanmadi")
   const sha = /^[a-f0-9]{64}$/.test(String(c.b.sha || "")) ? String(c.b.sha) : null
+  if (tiklaydi) {
+    // BUTUNLIK MUHRI: serverda eski sha bor bo'lsa — tiklangan nusxa AYNAN shu bo'lishi shart
+    if (m.sha && sha && sha !== m.sha) fail("Tiklangan fayl butunligi mos emadi")
+    await c.db.run("UPDATE media SET complete=1, gone=0, sha=? WHERE id=?", [m.sha || sha, c.p.id])
+    jurnalYoz(c.env, "mediaDone", c.uid, "tikla", "server nusxa to'rdan tiklandi " + String(c.p.id).slice(0, 8))
+    return json({ ok: true, id: c.p.id, tik: 1 })
+  }
   await c.db.run("UPDATE media SET complete=1, sha=? WHERE id=?", [sha, c.p.id])
   return json({ ok: true, id: c.p.id })
 }
@@ -1401,9 +1415,10 @@ async function mediaChunk(c: C) {
     } catch (e) { jurnalYoz(c.env, "mediaChunk", c.uid, "r2", String(e).slice(0, 200)) }
   }
   const r = await c.db.one("SELECT data FROM media_chunks WHERE media_id=? AND idx=?", [c.p.id, +c.p.idx])
-  if (!r) fail("Topilmadi", 404)
-  // Bo'sh marker = R2'da bo'lishi kerak edi lekin topilmadi (bucket tozalangan) — yo'q
-  if (!String(r.data || "").length) fail("Bo‘lak R2 omborida yo‘q", 404)
+  if (!r) { await goneDetect(c, String(c.p.id)); fail("Topilmadi", 404) }
+  // Bo'sh marker = R2'da bo'lishi kerak edi lekin topilmadi (bucket tozalangan) — yo'q.
+  // v97: shu yerda to'r o'z-o'zini davolaydi (gone=1 → planReplicas → tiklash)
+  if (!String(r.data || "").length) { await goneDetect(c, String(c.p.id)); fail("Bo‘lak R2 omborida yo‘q", 404) }
   if (wantBin) return new Response(b64ToU8(String(r.data)), { headers: { "content-type": "application/octet-stream", ...cc } })
   return new Response(r.data, { headers: { "content-type": "text/plain", ...cc } })
 }
@@ -2578,7 +2593,7 @@ async function createPost(c: C) {
     [id, c.uid, chatId, text || null, c.b.media_id || null, c.b.media_id ? (c.b.media_kind === "video" ? "video" : "photo") : null, meta, now()])
   if (c.b.media_id) {
     await c.db.run("UPDATE media SET expires_at=?, keep=1, chat_id=0, next_check=0 WHERE id=? AND owner_id=?", [now() + 100 * 365 * DAY, String(c.b.media_id), c.uid])
-    c.wait(planReplicas(c.db, 1, String(c.b.media_id)))
+    c.wait(SW.planReplicas(c.db, 1, String(c.b.media_id)))
   }
   return json((await postsOut(c, [await c.db.one("SELECT * FROM posts WHERE id=?", [id])]))[0])
 }
@@ -2586,7 +2601,7 @@ async function deletePost(c: C) {
   const p = await c.db.one("SELECT author_id, chat_id, media_id FROM posts WHERE id=?", [+c.p.id])
   if (!p) fail("Post topilmadi", 404)
   if (p.author_id !== c.uid && !(p.chat_id && isAdm(await member(c, p.chat_id)))) fail("Ruxsat yo‘q", 403)
-  if (p.media_id) await dropMedia(c.db, "id=?", [String(p.media_id)])
+  if (p.media_id) await SW.dropMedia(c.db, "id=?", [String(p.media_id)])
   for (const t of ["post_likes", "post_comments"]) await c.db.run(`DELETE FROM ${t} WHERE post_id=?`, [+c.p.id])
   await c.db.run("DELETE FROM posts WHERE id=?", [+c.p.id])
   return json({ ok: true })
@@ -3162,175 +3177,34 @@ async function canSee(c: C, uid: number, chatId: number) {
   if (r.status === "active") return true
   return r.status !== "banned" && r.type !== "direct" && !!r.is_public
 }
-async function p2pHave(c: C) {
-  const items = (Array.isArray(c.b.items) ? c.b.items : []).slice(0, 200)
-    .map((x: any) => ({ m: str(x?.m, 32), c: Math.max(0, Number(x?.c) || 0), p: x?.p ? 1 : 0, s: Math.max(0, Number(x?.s) || 0) }))
-    .filter((x: any) => /^[A-Za-z0-9_-]{6,32}$/.test(x.m))
-  const chats = [...new Set(items.map((x: any) => x.c))] as number[]
-  const ok = new Set<number>()
-  for (const ch of chats) if (await canSee(c, c.uid, ch)) ok.add(ch)
-  const t = now()
-  let n = 0
-  for (const x of items) {
-    // Server topshirgan vazifa bo'yicha saqlangan nusxa (chat a'zosi bo'lmasa ham — fayl shifrlangan)
-    const job = await c.db.one("SELECT chat_id FROM pin_jobs WHERE media_id=? AND user_id=?", [x.m, c.uid])
-    if (job) { x.c = job.chat_id; x.p = 1 } else if (!ok.has(x.c)) continue
-    const med = await c.db.one("SELECT chat_id, dropped FROM media WHERE id=?", [x.m])
-    if (!med || med.dropped || med.chat_id !== x.c) { if (job) await c.db.run("DELETE FROM pin_jobs WHERE media_id=? AND user_id=?", [x.m, c.uid]); continue }
-    await c.db.run("REPLACE INTO peer_have(media_id,user_id,chat_id,pinned,size,updated_at) VALUES(?,?,?,?,?,?)", [x.m, c.uid, x.c, x.p, x.s, t])
-    if (job) await c.db.run("DELETE FROM pin_jobs WHERE media_id=? AND user_id=?", [x.m, c.uid])
-    n++
-  }
-  return json({ ok: true, saved: n })
-}
-async function p2pPeers(c: C) {
-  const chatId = Math.max(0, +(c.url.searchParams.get("chat") || 0))
-  const media = str(c.url.searchParams.get("media"), 32)
-  if (!media && !chatId) fail("chat yoki media kerak")
-  if (!(await canSee(c, c.uid, chatId)) && !(media && (await hasJob(c, media, chatId)))) fail("Ruxsat yo‘q", 403)
-  const since = now() - ONLINE_MS
-  const rows = media
-    ? await c.db.q(
-      `SELECT h.user_id FROM peer_have h JOIN users u ON u.id=h.user_id LEFT JOIN nodes n ON n.user_id=h.user_id
-       WHERE h.media_id=? AND h.chat_id=? AND h.user_id<>? AND u.last_seen>? ORDER BY COALESCE(n.score,0) DESC, u.last_seen DESC LIMIT 8`,
-      [media, chatId, c.uid, since])
-    : await c.db.q(
-      `SELECT m.user_id FROM chat_members m JOIN users u ON u.id=m.user_id
-       WHERE m.chat_id=? AND m.status='active' AND m.user_id<>? AND u.last_seen>? ORDER BY u.last_seen DESC LIMIT 8`,
-      [chatId, c.uid, since])
-  return json({ peers: rows.map((r) => r.user_id) })
-}
-async function p2pSignal(c: C) {
-  const to = +c.b.to, chatId = Math.max(0, +c.b.chat || 0), data = c.b.data
-  if (!to || to === c.uid || !data || typeof data !== "object") fail("Noto‘g‘ri signal")
-  if (JSON.stringify(data).length > 30000) fail("Signal juda katta")
-  if (data.t === "offer") {
-    // So'rovni server tekshiradi: so'rovchi chatni ko'ra oladimi va manba qurilmada shu chatga tegishli fayl bormi
-    const w = data.want || {}
-    if (!(await canSee(c, c.uid, chatId)) && !(w.type === "media" && (await hasJob(c, str(w.id, 32), chatId)))) fail("Ruxsat yo‘q", 403)
-    if (w.type === "media") {
-      const h = await c.db.one("SELECT 1 AS ok FROM peer_have WHERE media_id=? AND user_id=? AND chat_id=?", [str(w.id, 32), to, chatId])
-      if (!h) fail("Manba topilmadi", 404)
-    } else if (w.type === "hist") {
-      if (!chatId) fail("chat kerak")
-      const mm = await c.db.one("SELECT status FROM chat_members WHERE chat_id=? AND user_id=?", [chatId, to])
-      if (mm?.status !== "active") fail("Manba topilmadi", 404)
-    } else fail("So‘rov turi noto‘g‘ri")
-  } else {
-    // offer/answer/ice: ikki tomondan biri kanalni ko'ra olishi yoki tarmoq vazifasi bo'lishi kerak
-    if (!(await canSee(c, c.uid, chatId)) && !(await canSee(c, to, chatId)) && !(await anyJob(c, c.uid, to, chatId))) fail("Ruxsat yo‘q", 403)
-  }
-  await notify(c.env, [to], { type: "p2p", from: c.uid, chat: chatId, data })
-  return json({ ok: true })
-}
-// Boshqa qurilmadan olingan eski xabarlar haqiqiyligini tekshirish (server imzosi bo'yicha)
-async function p2pVerify(c: C) {
-  const chatId = +c.b.chat_id
-  if (!chatId || !(await canSee(c, c.uid, chatId))) fail("Ruxsat yo‘q", 403)
-  const list = (Array.isArray(c.b.messages) ? c.b.messages : []).slice(0, 500)
-  const ok: number[] = []
-  for (const m of list) {
-    if (!m || m.chat_id !== chatId || m.deleted || typeof m.sig !== "string") continue
-    if ((await signMsg(c.env, m)) === m.sig) ok.push(m.id)
-  }
-  return json({ ok })
+// ------------------------- O'RGIMCHAK TO'RI — ALOHIDA MODUL (spiderweb.ts, Task 46) -------------------------
+// To'r mantiqining O'ZI endi spiderweb.ts'da (alohida yozilgan, masshtablangan: 100–100 000
+// foydalanuvchi). Bu yerda faqat fabrika chaqiriladi va fayl-tiklash (o'z-o'zini davolash)
+// endpointlari turadi — baytlar hech qachon serverda ko'paymaydi, server faqat ko'prik.
+const SW = makeSpiderWeb({ str, json, fail, now, ph, canSee, notify, signMsg, ONLINE_MS })
+
+// v97 TO'R O'Z-O'ZINI TIKLASH — detektor: o'qish paytida bo'lak topilmasa fayl «gone=1»
+// (server nusxasi yo'q) deb belgilanadi va to'r DARHOL nusxa-yig'ish vazifalarini tuzadi
+// (planReplicas). Fayl nusxalari qurilmalarda saqlangan — keyingi onlayn a'zo uni olib,
+// /media/:id/restore-info → PUT → done yo'li bilan server nusxasini O'ZI tiklaydi.
+// Hech narsa yo'qolmaydi: server kesh qilib bo'lguncha to'r o'zi yetkazadi.
+async function goneDetect(c: C, id: string) {
+  try {
+    const m = await c.db.one("SELECT id FROM media WHERE id=? AND keep=1 AND complete=1 AND dropped=0 AND gone=0", [id])
+    if (!m) return
+    await c.db.run("UPDATE media SET gone=1, next_check=0 WHERE id=?", [id])
+    c.wait(SW.planReplicas(c.db, 1, id))
+    jurnalYoz(c.env, "mediaChunk", c.uid, "gone", "nusxa yoq — torga topshirildi " + id.slice(0, 8))
+  } catch {}
 }
 
-// ------------------------- Taqsimlangan xotira (har qurilma ≤ 30 GB) -------------------------
-// Har bir fayl 15–20 ta qurilmada nusxa bo'lib saqlanadi. Server qaysi qurilmada nima borligini
-// kuzatadi, ishonchli (ko'p onlayn) qurilmalarni tanlaydi va nusxa kamaysa avtomatik tiklaydi.
-// Fayllar qurilmaga yuborilishidan oldin shifrlanadi (AES-256-GCM), kalit faqat chat a'zolarida.
-const GB = 1024 * 1024 * 1024
-const NODE_MAX = 30 * GB
-const REPLICA_MIN = 15, REPLICA_MAX = 20
-const NODE_ALIVE = 7 * DAY        // shu muddatda ko'rinmagan qurilma nusxasi hisobga olinmaydi
-const NODE_MAX_JOBS = 25
-async function hasJob(c: C, media: string, chatId: number) {
-  return !!(await c.db.one("SELECT 1 AS x FROM pin_jobs WHERE media_id=? AND user_id=? AND chat_id=?", [media, c.uid, chatId]))
-}
-async function anyJob(c: C, a: number, b: number, chatId: number) {
-  return !!(await c.db.one("SELECT 1 AS x FROM pin_jobs WHERE user_id IN (?,?) AND chat_id=? LIMIT 1", [a, b, chatId]))
-}
-async function dropMedia(db: Db, where: string, params: unknown[]) {
-  await db.run(`UPDATE media SET dropped=1 WHERE ${where}`, params)
-  await db.run(`DELETE FROM pin_jobs WHERE media_id IN (SELECT id FROM media WHERE dropped=1 AND ${where})`, params)
-}
-// Nusxalar sonini tekshirib, yetishmasa yangi qurilmalarga vazifa beradi
-async function planReplicas(db: Db, limit = 200, onlyId?: string) {
-  const t = now()
-  const list = onlyId
-    ? await db.q("SELECT id,size,chat_id,gone FROM media WHERE id=? AND keep=1 AND dropped=0 AND complete=1", [onlyId])
-    : await db.q("SELECT id,size,chat_id,gone FROM media WHERE keep=1 AND dropped=0 AND complete=1 AND next_check<? ORDER BY next_check LIMIT " + Math.min(1000, limit), [t])
-  for (const m of list) {
-    const r = await db.one(
-      `SELECT COUNT(*) AS cnt, SUM(CASE WHEN n.score>=0.5 THEN 1 ELSE 0 END) AS strong
-       FROM peer_have h JOIN nodes n ON n.user_id=h.user_id WHERE h.media_id=? AND n.last_beat>?`, [m.id, t - NODE_ALIVE])
-    const have = Number(r?.cnt || 0), strong = Number(r?.strong || 0)
-    const j = await db.one("SELECT COUNT(*) AS cnt FROM pin_jobs WHERE media_id=?", [m.id])
-    const pending = Number(j?.cnt || 0)
-    let need = Math.max(0, REPLICA_MIN - have - pending)
-    if (have + pending < REPLICA_MAX && strong < 2) need = Math.max(need, 2 - strong) // kamida 2 ta "doimiy onlayn" qurilma
-    if (need > 0) {
-      // Yarmi eng ishonchli qurilmalardan, yarmi tasodifiy (yuk bir joyga to'planmasin)
-      const seed = Math.floor(Math.random() * 100000)
-      const cand = await db.q(
-        `SELECT n.user_id FROM nodes n
-         WHERE n.last_beat>? AND n.quota-n.used>?
-           AND n.user_id NOT IN (SELECT user_id FROM peer_have WHERE media_id=?)
-           AND n.user_id NOT IN (SELECT user_id FROM pin_jobs WHERE media_id=?)
-           AND (SELECT COUNT(*) FROM pin_jobs p WHERE p.user_id=n.user_id) < ?
-         ORDER BY (n.score * 0.6 + ((n.user_id * 7919 + ?) % 1000) / 2500.0) DESC LIMIT ?`,
-        [t - DAY, Number(m.size) * 2 + 50 * 1024 * 1024, m.id, m.id, NODE_MAX_JOBS, seed, need])
-      for (const x of cand)
-        await db.run("REPLACE INTO pin_jobs(media_id,user_id,chat_id,created_at) VALUES(?,?,?,?)", [m.id, x.user_id, m.chat_id, t])
-    }
-    const healthy = have >= REPLICA_MIN && strong >= 2
-    await db.run("UPDATE media SET replicas=?, next_check=? WHERE id=?", [have, t + (healthy ? 6 * 3600000 : 20 * 60000), m.id])
-  }
-  return list.length
-}
-// Qurilma har daqiqada: "men onlaynman, shuncha joy berdim, shunchasi band" — javobda vazifalar
-async function storageBeat(c: C) {
-  const t = now()
-  const quota = Math.max(0, Math.min(NODE_MAX, Number(c.b.quota) || 0))
-  const used = Math.max(0, Math.min(NODE_MAX * 2, Number(c.b.used) || 0))
-  const n = await c.db.one("SELECT * FROM nodes WHERE user_id=?", [c.uid])
-  if (!n) {
-    await c.db.run("INSERT INTO nodes(user_id,quota,used,online_ms,score,first_beat,last_beat) VALUES(?,?,?,0,0,?,?)", [c.uid, quota, used, t, t])
-  } else {
-    const gap = t - n.last_beat
-    const online = n.online_ms + (gap > 0 && gap < 150000 ? gap : 0)
-    const score = Math.min(1, online / Math.max(DAY, t - n.first_beat))
-    await c.db.run("UPDATE nodes SET quota=?, used=?, online_ms=?, score=?, last_beat=? WHERE user_id=?", [quota, used, online, score, t, c.uid])
-  }
-  // last_seen + token_exp (sliding sessiya): faol qurilma sessiyasini hech qachon o'chirib qo'ymaydi
-  await c.db.run("UPDATE users SET last_seen=?, token_exp=? WHERE id=?", [t, t + 180 * 86400 * 1000, c.uid])
-  const drops = (await c.db.q(
-    "SELECT h.media_id FROM peer_have h JOIN media m ON m.id=h.media_id WHERE h.user_id=? AND m.dropped=1 LIMIT 200", [c.uid])).map((r) => r.media_id)
-  if (drops.length) await c.db.run(`DELETE FROM peer_have WHERE user_id=? AND media_id IN (${ph(drops)})`, [c.uid, ...drops])
-  const jobs = quota > 0 && c.b.accept !== false
-    ? await c.db.q(
-      `SELECT j.media_id, j.chat_id, m.size, m.sha, m.mime, m.gone FROM pin_jobs j JOIN media m ON m.id=j.media_id
-       WHERE j.user_id=? AND m.dropped=0 ORDER BY j.created_at LIMIT 10`, [c.uid])
-    : []
-  const st = await c.db.one("SELECT COUNT(*) AS cnt, SUM(size) AS used FROM peer_have WHERE user_id=? AND pinned=1", [c.uid])
-  return json({ jobs, drops, pinned: Number(st?.cnt || 0), pinned_bytes: Number(st?.used || 0), target: [REPLICA_MIN, REPLICA_MAX] })
-}
-// Qurilma joy bo'shatdi — server darhol boshqa qurilmaga nusxa buyuradi
-async function storageDrop(c: C) {
-  const ids = (Array.isArray(c.b.ids) ? c.b.ids : []).slice(0, 500).map((x: unknown) => str(x, 32)).filter(Boolean)
-  if (!ids.length) return json({ ok: true })
-  await c.db.run(`DELETE FROM peer_have WHERE user_id=? AND media_id IN (${ph(ids)})`, [c.uid, ...ids])
-  await c.db.run(`DELETE FROM pin_jobs WHERE user_id=? AND media_id IN (${ph(ids)})`, [c.uid, ...ids])
-  await c.db.run(`UPDATE media SET next_check=0 WHERE id IN (${ph(ids)})`, ids)
-  c.wait(planReplicas(c.db, 50))
-  return json({ ok: true })
-}
-async function storageStats(c: C) {
-  const t = now()
-  const nodes = await c.db.one("SELECT COUNT(*) AS cnt, SUM(quota) AS quota, SUM(used) AS used FROM nodes WHERE last_beat>?", [t - NODE_ALIVE])
-  const media = await c.db.one("SELECT COUNT(*) AS cnt, SUM(CASE WHEN replicas>=? THEN 1 ELSE 0 END) AS jobs FROM media WHERE keep=1 AND dropped=0", [REPLICA_MIN])
-  return json({ nodes: Number(nodes?.cnt || 0), quota: Number(nodes?.quota || 0), used: Number(nodes?.used || 0), files: Number(media?.cnt || 0), healthy: Number(media?.jobs || 0) })
+// v97: TIKLASH MA'LUMOTI — server nusxasi yo'qolgan (gone=1) fayl uchun to'r a'zosi
+// bo'laklar soni va sha'sini oladi, o'zidagi shifrlangan nusxani qayta yuklab serverni tiklaydi
+async function mediaRestoreInfo(c: C) {
+  const m = await c.db.one("SELECT id,owner_id,chat_id,chunks,sha,size,gone,dropped,complete FROM media WHERE id=?", [c.p.id])
+  if (!m || !m.complete || m.dropped || m.gone !== 1) fail("Topilmadi", 404)
+  if (m.owner_id !== c.uid && !(await canSee(c, c.uid, Number(m.chat_id))) && !(await SW.hasJob(c, m.id, c.uid))) fail("Ruxsat yo‘q", 403)
+  return json({ gone: 1, chunks: m.chunks, sha: m.sha, size: m.size })
 }
 
 // XATO JURNALINI O'QISH — FAQAT EGAGA (DEV_PHONES). Boshqa har kim uchun yo'l mavjudligi
@@ -3407,6 +3281,7 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/media/:id/done", mediaDone],
   ["GET", "/media/:id", mediaMeta],
   ["GET", "/media/:id/:idx", mediaChunk],
+  ["GET", "/media/:id/restore-info", mediaRestoreInfo], // v97: to'r → server tiklash
   ["GET", "/stories", listStories],
   ["POST", "/stories", createStory],
   ["POST", "/stories/:id/view", viewStory],
@@ -3436,13 +3311,13 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/clog", callLog],
   ["POST", "/signal", signal],
   ["GET", "/signal/queue", signalQueue],
-  ["POST", "/p2p/have", p2pHave],
-  ["GET", "/p2p/peers", p2pPeers],
-  ["POST", "/p2p/signal", p2pSignal],
-  ["POST", "/p2p/verify", p2pVerify],
-  ["POST", "/storage/beat", storageBeat],
-  ["POST", "/storage/drop", storageDrop],
-  ["GET", "/storage/stats", storageStats],
+  ["POST", "/p2p/have", SW.p2pHave],
+  ["GET", "/p2p/peers", SW.p2pPeers],
+  ["POST", "/p2p/signal", SW.p2pSignal],
+  ["POST", "/p2p/verify", SW.p2pVerify],
+  ["POST", "/storage/beat", SW.storageBeat],
+  ["POST", "/storage/drop", SW.storageDrop],
+  ["GET", "/storage/stats", SW.storageStats],
   ["GET", "/lives", listLives],
   ["GET", "/lives/top", listTopLives],
   ["POST", "/lives", startLive],
@@ -3488,25 +3363,54 @@ async function cleanup(env: Env) {
   // MIGRATSIYA-HIMOYA: eskirgan qisqa-TTL yozishmalar (eski versiya qoldiqlari) tasodifan tozalanib qolmasin.
   await db.run("UPDATE messages SET expires_at=? WHERE expires_at>0 AND expires_at<?", [t + 100 * 365 * DAY, t + 30 * DAY])
   await db.run("UPDATE media SET expires_at=?, keep=1, next_check=0 WHERE expires_at>0 AND expires_at<? AND dropped=0 AND gone=0 AND (keep=1 OR chat_id>0)", [t + 100 * 365 * DAY, t + 30 * DAY])
-  // v79: R2'dagi o'lik bo'laklarni ham o'chirish (D1'da o'chirilishidan OLDIN — aks holda
-  // id yo'qoladi va R2 obyektlari yetim qolardi). Har yugurishda 100 faylgacha; qolganlari
-  // keyingi yugurishda (shart o'z-o'zidan qoladi). Fayl ≤80 bo'lak — parallel emas, ketma-ket.
+  // v97 R2 KASBIY BOSHQARUV (Task 46: «shifrlangan kodlar tozalanib tursin, to'lib qolmay»):
+  // (1) TENGLASHTIRILGAN O'CHIRISH: avvalgi versiyada R2 faqat 100 fayl o'chirdi, D1 esa
+  //     HAMMASINI — 100 dan ortiq o'lik fayl bo'lsa R2'da YETIM obyektlar qolardi (ko'rinmas
+  //     o'sish, 10 GB to'lib qolish xavfi). Endi R2 va D1 o'chirish BITTA batchda — yetim
+  //     obyekt KAFOLATGAN yo'q. (2) YETIM SWEEP: R2 ro'yxatidan (≤1000 kalit) media yozuvi
+  //     yo'q kalitlar o'chadi — tarixiy sizib qolganlar ham tozalanadi. (3) 5 batch = 500 fayl.
   try {
     if (env.BUCKET) {
-      const dead = await db.q("SELECT id, chunks FROM media WHERE ((expires_at>0 AND expires_at<?) OR dropped=1) AND gone=0 LIMIT 100", [t])
-      let n = 0
-      for (const drow of dead) {
-        const keys: string[] = []
-        for (let i = 0; i < Math.min(80, +drow.chunks || 1); i++) keys.push(`m/${drow.id}/${i}`)
-        await Promise.all(keys.map((k) => env.BUCKET!.delete(k).catch(() => {})))
-        n += keys.length
+      for (let batch = 0; batch < 5; batch++) {
+        const dead = await db.q("SELECT id, chunks FROM media WHERE ((expires_at>0 AND expires_at<?) OR dropped=1) AND gone=0 LIMIT 100", [t])
+        if (!dead.length) break
+        let n = 0
+        for (const drow of dead) {
+          const keys: string[] = []
+          for (let i = 0; i < Math.min(80, +drow.chunks || 1); i++) keys.push(`m/${drow.id}/${i}`)
+          await Promise.all(keys.map((k) => env.BUCKET!.delete(k).catch(() => {})))
+          n += keys.length
+        }
+        const ids = dead.map((drow: any) => drow.id)
+        await db.run(`DELETE FROM media_chunks WHERE media_id IN (${ph(ids)})`, ids)
+        await db.run(`DELETE FROM media WHERE id IN (${ph(ids)}) AND (expires_at>0 AND expires_at<? AND keep=0)`, [...ids, t])
+        console.log("R2 tozalash:", n, "bo'lak,", ids.length, "fayl (D1 birga, yetimsiz)")
       }
-      if (n) console.log("R2 tozalash:", n, "bo'lak o'chirildi")
+      // YETIM SWEEP: media yozuvi yo'q R2 kalitlari (tarixiy siziblar ham shu yerda yopiladi)
+      if (env.BUCKET.list) {
+        const lst = await env.BUCKET.list({ prefix: "m/", limit: 1000 }).catch(() => null)
+        const objs = lst?.objects || []
+        if (objs.length) {
+          const rids = [...new Set(objs.map((o: any) => String(o.key).split("/")[1]).filter(Boolean))]
+          const alive = new Set((await db.q(`SELECT id FROM media WHERE id IN (${ph(rids)})`, rids)).map((r: any) => r.id))
+          const yetim = rids.filter((id) => !alive.has(id))
+          if (yetim.length) {
+            let kn = 0
+            for (const y of yetim) {
+              const ykeys = objs.filter((o: any) => String(o.key).startsWith(`m/${y}/`)).map((o: any) => o.key)
+              await Promise.all(ykeys.map((k) => env.BUCKET!.delete(k).catch(() => {})))
+              kn += ykeys.length
+            }
+            console.log("R2 yetim tozalash:", yetim.length, "fayl,", kn, "kalit")
+          }
+        }
+      }
+    } else {
+      await db.run("DELETE FROM media_chunks WHERE media_id IN (SELECT id FROM media WHERE ((expires_at>0 AND expires_at<?) OR dropped=1) AND gone=0)", [t])
+      await db.run("DELETE FROM media WHERE expires_at>0 AND expires_at<? AND keep=0", [t])
     }
+    await db.run("DELETE FROM media WHERE dropped=1 AND created_at<? AND id NOT IN (SELECT media_id FROM peer_have)", [t - 30 * DAY])
   } catch (e) { console.log("R2 tozalash xatosi", String(e)) }
-  await db.run("DELETE FROM media_chunks WHERE media_id IN (SELECT id FROM media WHERE ((expires_at>0 AND expires_at<?) OR dropped=1) AND gone=0)", [t])
-  await db.run("DELETE FROM media WHERE expires_at>0 AND expires_at<? AND keep=0", [t])
-  await db.run("DELETE FROM media WHERE dropped=1 AND created_at<? AND id NOT IN (SELECT media_id FROM peer_have)", [t - 30 * DAY])
   await db.run("DELETE FROM pin_jobs WHERE created_at<?", [t - 2 * DAY])
   // Qo'ng'iroq signal navbati: 2 daqiqadan eski yozuvlar savat (yetib bo'lgan/emirilgan)
   await db.run("DELETE FROM call_signals WHERE created_at<?", [t - 2 * 60000])
@@ -3515,7 +3419,7 @@ async function cleanup(env: Env) {
   await db.run("UPDATE calls SET status='missed', ended_at=? WHERE ended_at=0 AND status='ringing' AND started_at<?", [t, t - 5 * 60000])
   // Uzilgan qo'ng'iroqlar gigiyenasi: 3 soatdan eski "active" lekin hech kim tugatmagan yozuvlar yopiladi
   await db.run("UPDATE calls SET status='ended', ended_at=? WHERE ended_at=0 AND status='active' AND started_at<?", [t, t - 3 * 3600000])
-  await planReplicas(db, 300)
+  await SW.planReplicas(db, 300)
   await db.run("DELETE FROM otp WHERE expires_at<?", [t])
   await db.run("DELETE FROM push_subs WHERE updated_at<?", [t - 90 * DAY]) // 90 kun ishlatilmagan obunalar
   await db.run("DELETE FROM peer_have WHERE updated_at<?", [t - 120 * DAY])
@@ -3530,14 +3434,17 @@ async function cleanup(env: Env) {
   // fayl qurilmalar orasidan topiladi; server joyi abadiy o'smaydi.
   try {
     const MEDIA_KEEP_BYTES = env.BUCKET ? 8 * 1024 * 1024 * 1024 : 2.5 * 1024 * 1024 * 1024
-    const msz = await db.one("SELECT COALESCE(SUM(size),0) AS n FROM media WHERE dropped=0 AND gone=0 AND keep=1")
-    if (Number(msz?.n || 0) > MEDIA_KEEP_BYTES) {
+    // v97 BOSQICHLI POSBON: chegaradan oshsa bir yugurishda 3 bosqich (300 fayl)gacha
+    // bo'shatadi — R2 bepul 10 GB chegara hech qachon to'lib qolmaydi. Fayllar serverdan
+    // faqat KAMIDA 2 ta qurilmada ishonchli nusxasi bor bo'lsa bo'shatiladi (yo'qolmaydi).
+    for (let round = 0; round < 3; round++) {
+      const msz = await db.one("SELECT COALESCE(SUM(size),0) AS n FROM media WHERE dropped=0 AND gone=0 AND keep=1")
+      if (Number(msz?.n || 0) <= MEDIA_KEEP_BYTES) break
       const cands = await db.q("SELECT id FROM media WHERE dropped=0 AND gone=0 AND keep=1 AND replicas>=2 ORDER BY created_at LIMIT 100")
-      if (cands.length) {
-        const ids = cands.map((x) => x.id)
-        await db.run(`UPDATE media SET dropped=1 WHERE id IN (${ph(ids)})`, ids)
-        console.log("Xotira posboni:", ids.length, "fayl serverdan bo'shatildi (nusxalari qurilmalarda)")
-      }
+      if (!cands.length) break
+      const ids = cands.map((x) => x.id)
+      await db.run(`UPDATE media SET dropped=1 WHERE id IN (${ph(ids)})`, ids)
+      console.log("Xotira posboni:", ids.length, "fayl serverdan bo'shatildi (nusxalari qurilmalarda), bosqich", round + 1)
     }
   } catch (e) { console.log("Xotira posboni xatosi", String(e)) }
 }

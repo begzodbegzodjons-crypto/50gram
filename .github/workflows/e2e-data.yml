@@ -1,0 +1,23 @@
+name: DATA quvuri E2E (tor + R2 + tiklash)
+on:
+  workflow_dispatch:
+  push:
+    branches:
+
+      - main
+concurrency:
+  group: testlar-zanjiri
+  cancel-in-progress: false
+jobs:
+  data-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: DATA E2E — jonli saytga qarshi (API quvuri, brauzersiz)
+        env:
+          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+        run: node scripts/e2e_data.mjs
