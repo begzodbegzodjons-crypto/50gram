@@ -1402,6 +1402,9 @@ async function mediaMeta(c: C) {
 async function mediaChunk(c: C) {
   const cc = { "cache-control": "private, max-age=31536000, immutable", ...CORS }
   const wantBin = (c.req.headers.get("accept") || "").includes("octet-stream")
+  // v97: idx faqat butun son — aks holda NaN DB'ga yetib 500 bo'lardi va gone-detektor
+  // yolg'on yonardi (yo'l soya-si: /media/:id/restore-info kabi 3-bo'lakli so'rovlar)
+  if (!Number.isInteger(+c.p.idx) || +c.p.idx < 0) fail("Topilmadi", 404)
   // v79 R2 ASOSIY YO'L: yangi bo'laklar R2'da (D1'da marker ''). Eski fayllar D1'da
   // base64 — ikkalasi ham o'qiladi (klient Accept sarlavhasi bo'yicha binary/base64).
   if (c.env.BUCKET) {
@@ -3280,8 +3283,8 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["PUT", "/media/:id/:idx", mediaPut],
   ["POST", "/media/:id/done", mediaDone],
   ["GET", "/media/:id", mediaMeta],
+  ["GET", "/media/:id/restore-info", mediaRestoreInfo], // v97: to'r → server tiklash (mediaChunk'dan OLDIN — 3-bo'lakli yo'llar tartib bilan mos keladi!)
   ["GET", "/media/:id/:idx", mediaChunk],
-  ["GET", "/media/:id/restore-info", mediaRestoreInfo], // v97: to'r → server tiklash
   ["GET", "/stories", listStories],
   ["POST", "/stories", createStory],
   ["POST", "/stories/:id/view", viewStory],
