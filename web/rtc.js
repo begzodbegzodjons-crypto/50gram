@@ -92,6 +92,23 @@
       OLDINDAN 0 dan o'rnatiladi (NORMAL → COMMUNICATION + karnay), avvalgi
       qo'ng'iroqdan qolgan HAL-zamblikka tayanmaydi. audioKick endi faqat kech
       qutqaruv EMAS — har qo'ng'iroqning BIRINCHI qadami.
+
+   v96 (MUHR — bu holat QATTIQ MUHRLANDI, xulq bir xil qoladi):
+   Foydalanuvchi tasdiqladi: v95'dan keyin qo'ng'iroqlar ISHLAYDI. Bu holatni
+   abadiylashtirish uchun: (1) quyidagi tartib MUHRLANDI — O'ZGARTIRILMASIN,
+   (2) CI'da «Qo'ng'iroq MUHR E2E» (e2e-call-loop.yml) har pushda aynan foydalanuvchi
+   sindromini sinaydi: bitta sessiyada 3 ta KETMA-KET qo'ng'iroq + har biridan keyin
+   M1/M2/M3 invariantlari (barcha AudioContext yopiq / global __50actx null / har
+   qo'ng'iroqda yangi kontekst). Agar kimdir tartibni buza bo'lsa — 2-qo'ng'iroqning
+   o'zi CI'da QIZIL bo'ladi.
+   MUHR QOIDALARI (buzilishi taqiqlangan — buzilsa «keyingi qo'ng'iroq jim» qaytadi):
+   M1: AudioContext qo'ng'iroqlar ORASIDA 'running' qolmasin — endCall yopadi,
+       har qo'ng'iroq boshida freshAudioUniverse 0 dan ochadi.
+   M2: OS-marshrut reset (speaker false) TIRIK sessiya ustida ishlamasin — faqat
+       pc.close + track stop'dan KEYIN, kechikish bilan, va yangi qo'ng'iroq
+       boshlanmagan bo'lsa (guard).
+   M3: Har qo'ng'iroq boshida (caller + callee, bosish ichida, media'dan OLDIN)
+       nativeRouteStart(video) — audioKick OLDINDAN.
    ═══════════════════════════════════════════════════════════════════════════ */
 'use strict'
 // ─────────────────────────────── ICE / MEDIA ───────────────────────────────
@@ -953,10 +970,15 @@ function endCall(status = 'ended', report = true, msg) {
     window.__50actx = null
   } catch {}
   C.ctx = null
+  // v96 MUHR-AUDIT: toza-yiqilish yakunlandi — bu qator JURNALDA bo'lishi SHART
+  // (keyingi shikoyatda bir qarorda: endCall'dan keyin kontekst yopilganmi?)
+  try { clog('audio-yopildi', 'toza-yiqilish OK | ctx=null | muhr=v96') } catch {}
   try { navigator.serviceWorker?.controller?.postMessage({ type: 'callend', tag: 'g50call' + C.id }) } catch {}
-  qs('.cst', C.el).textContent = msg || (C.started ? 'Tugadi · ' + fmtDur(dur) : 'Tugadi')
-  qs('.cbar', C.el).innerHTML = ''
-  setTimeout(() => C.el.remove(), msg ? 3200 : 1200)
+  try { // v96: UI yangilanishi endCall PASTKI qadamlarini hech qachon to'xtatmasin
+    qs('.cst', C.el).textContent = msg || (C.started ? 'Tugadi · ' + fmtDur(dur) : 'Tugadi')
+    qs('.cbar', C.el).innerHTML = ''
+    setTimeout(() => C.el.remove(), msg ? 3200 : 1200)
+  } catch {}
   try { // (6) OS-marshrut reset — media to'liq o'lgandan 700ms KEYIN va faqat yangi
         // qo'ng'iroq boshlanmagan bo'lsa (guard). AUDIO qo'ng'iroqlar uchun ham: NORMAL
         // rejimga qaytish keyingi jiringlash/ovozi ham to'g'ri yo'nalgan bo'ladi.

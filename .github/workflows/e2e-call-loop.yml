@@ -1,0 +1,41 @@
+name: Qo'ng'iroq MUHR E2E (3 ketma-ket)
+# ═══ MUHR (v96) — «1-qo'ng'iroq zo'r, keyingisi jim» kasalligi QAYTMASLIGI kafolati ═══
+# Har pushda: bitta brauzer sessiyasida (reload YO'Q) 3 ta KETMA-KET video qo'ng'iroq
+# qilinadi (A→B, A→B, B→A). Har qo'ng'iroqda ikkala tomonda to'liq media (audio+video)
+# tekshiriladi + MUHR invariantlari:
+#   M1: qo'ng'iroqdan keyin BARCHA AudioContext'lar yopiq bo'lishi kerak
+#   M2: global __50actx tozalangan bo'lishi kerak
+#   M3: har qo'ng'iroq KAMIDA bitta YANGI AudioContext yaratgan bo'lishi kerak
+# Agar v95'dagi toza-yiqilish tartibi buza bo'lsa — 2-qo'ng'iroqning o'zi QIZIL bo'ladi.
+# ALOHIDA concurrency guruh: boshqa testlar bilan poygaga kirib BEKOR qilinmasin
+# (o'z test-raqamlari 007/008 — parallel ishga xavfsiz).
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+concurrency:
+  group: muhr-zanjiri
+  cancel-in-progress: false
+jobs:
+  muhr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Playwright o'rnatish (chromium)
+        run: |
+          cd scripts
+          npm init -y >/dev/null 2>&1 || true
+          npm i playwright@1.63.0 --no-audit --no-fund >/dev/null
+          npx playwright install chromium
+          npx playwright install-deps chromium >/dev/null || sudo npx playwright install-deps chromium
+      - name: Deploy tugashini kutish
+        run: sleep 90
+      - name: MUHR E2E — 3 ketma-ket qo'ng'iroq + invariantlar
+        env:
+          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+        run: node scripts/e2e_call_loop.mjs
