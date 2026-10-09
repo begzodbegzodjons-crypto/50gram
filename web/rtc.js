@@ -391,6 +391,43 @@ function connectWA(C) {
     return ctx.state === 'running' // v92: suspended = ISHLAMAYDI (pill chiqadi — aniqlangan)
   } catch (e) { clog('ovoz-wa-xato', String((e && e.message) || e).slice(0, 100)); return false }
 }
+// v94: YANGI OQIM-O'RAM BILAN manba tuguni — MediaStreamAudioSourceNode oqim-OBJEKTiga
+// bog'lanadi. Ba'zi WebView'larda (Chrome/154 WebView dalillari: k=0% smp=+0 lekin
+// baytlar keladi) eski oqim-obyektga bog'langan tugun TIRIK trekkadan ham jim oqadi.
+// Davo: track atrofida BITTA YANGI MediaStream o'raymiz — tugun toza tug'iladi.
+function freshWASource(C) {
+  try {
+    const tr = (C.remoteA || C.remote) && (C.remoteA || C.remote).getAudioTracks()[0]
+    if (!tr) return false
+    const ctx = C.ctx || unlockAudio(C)
+    if (!ctx) return false
+    try { if (C.waSrc) { C.waSrc.disconnect(); C.waSrc = null } } catch {}
+    try { if (C.waAn) { C.waAn.disconnect(); C.waAn = null } } catch {}
+    const fs = (typeof MediaStream === 'function') ? new MediaStream([tr]) : (C.remoteA || C.remote)
+    C.waSrc = ctx.createMediaStreamSource(fs)
+    C.waGain = ctx.createGain(); C.waGain.gain.value = 1
+    C.waSrc.connect(C.waGain); C.waGain.connect(ctx.destination)
+    try { C.waAn = ctx.createAnalyser(); C.waAn.fftSize = 512; C.waGain.connect(C.waAn) } catch { C.waAn = null }
+    clog('ovoz-wa-yangi', 'manba YANGI o\u2018ramdan qurildi (trek=' + tr.readyState + ', ctx=' + ctx.state + ')')
+    return true
+  } catch (e) { clog('ovoz-wa-yangi-xato', String((e && e.message) || e).slice(0, 100)); return false }
+}
+// v94: AUDIOCONTEXT QAYTA TUG'ILISHI — kontekst "running" ko'rinsa-da ICHKI HOLATI
+// o'lik bo'lishi mumkin (Chrome/154 WebView gumoni: masofa ovozi barcha o'lchovlarda
+// nol, mikrofon o'lchovi ishlaydi). FAQAT CHIQAR YO'L: kontekstni yopib, 0 dan ochish.
+function rebirthCtx(C) {
+  try {
+    const old = window.__50actx
+    const st = old ? old.state : 'yo‘q'
+    try { old && old.close && old.close() } catch {}
+    window.__50actx = null; C.ctx = null
+    C.waSrc = null; C.waGain = null; C.waAn = null; C.an_in = null; C.an_out = null
+    unlockAudio(C)
+    const now = window.__50actx
+    clog('ovoz-qayta-tug', 'AudioContext 0 dan: eski=' + st + ' yangi=' + (now ? now.state : 'YARATILMADI'))
+    return !!(now && now.state === 'running')
+  } catch (e) { clog('ovoz-qayta-tug-xato', String((e && e.message) || e).slice(0, 100)); return false }
+}
 // v92: kaskad YO'Q — play() rad etilsa «Ovozni yoqish» tugmasi chiqadi (aniqlangan xulq);
 // ijro dalili kelganda tugma o'zi yashirinadi.
 function tryEl(el, mode) {
@@ -398,8 +435,11 @@ function tryEl(el, mode) {
   if (p && p.then) p.then(() => {
     const C = CALL
     if (C && C.el && C.audioMode === mode) { C.audioBlocked = false; const pill = qs('.l-un', C.el); if (pill) pill.classList.add('hide') }
-  }).catch(() => {
+  }).catch((er) => {
+    // v94: play() rad etilishi JURNALGA — ismi va sababi (avvalgida jim yutardi)
     const C = CALL
+    if (C) C.playRejN = (C.playRejN || 0) + 1
+    try { clog('ovoz-play-rad', mode + ' #' + ((C && C.playRejN) || 0) + ' ' + String((er && er.name) || '?') + ' ' + String((er && er.message) || '').slice(0, 60)) } catch {}
     if (C && C.el && C.audioMode === mode) { C.audioBlocked = true; const pill = qs('.l-un', C.el); if (pill) pill.classList.remove('hide') }
   })
   return true
@@ -782,6 +822,32 @@ async function restartIce(C) {
   } catch (e) { clog('ice-restart-xato', String((e && e.message) || e).slice(0, 120)) }
   finally { C.restaring = false }
 }
+// v94: AUDIO TRANSCEIVER 0 DAN — qarshi tomonning dekoderi o'lganda (a-reset so'rovi)
+// bizning audio m-line'ni TO'XTATIB yangisini qo'shamiz → qarshi tomonda YANGI
+// receiver/dekoder tug'iladi (renegotiation offer mavjud offer/answer yo'lidan yuradi).
+// areset=1: qarshi tomonning «eski offer» qorovulidan O'TISH uchun (ataylab yangi).
+async function audioTransceiverReset(C) {
+  if (!C.pc || C.aRstBusy) return
+  C.aRstBusy = true
+  try {
+    const tr = C.pc.getTransceivers().find((t) => (t.sender && t.sender.track && t.sender.track.kind === 'audio') || (t.receiver && t.receiver.track && t.receiver.track.kind === 'audio'))
+    const at = C.local && C.local.getAudioTracks()[0]
+    if (tr && typeof tr.stop === 'function') { try { tr.stop() } catch {} }
+    if (at && C.pc.signalingState === 'stable') {
+      C.pc.addTransceiver(at, { direction: 'sendrecv' })
+    } else {
+      clog('a-reset-xato', 'transceiver qayta qo‘shilmadi (tr=' + !!tr + ' track=' + !!at + ' sig=' + C.pc.signalingState + ')')
+      return
+    }
+    C.oseq = (C.oseq || 0) + 1
+    const o = await C.pc.createOffer()
+    await C.pc.setLocalDescription(o)
+    C.offerAt = Date.now()
+    sigTo(C.peer.id, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON(), oseq: C.oseq, areset: 1 }, 3, 900)
+    clog('a-reset', 'YANGI m-line offer yuborildi (oseq=' + C.oseq + ')')
+  } catch (e) { clog('a-reset-xato', String((e && e.message) || e).slice(0, 120)) }
+  finally { C.aRstBusy = false }
+}
 // TIKLASH NARVONI (rollarga bo'lingan): offerer o'zi ICE restart qiladi,
 // answerer esa offererdan SO'RAYDI ('needice') — ikki tomonlama offer YO'Q
 function recover(C, why) {
@@ -1120,6 +1186,15 @@ async function handleSignalEv(ev) {
       applyAudioOnly(C, false)
       return
     }
+    // ── v94: a-reset — QARSHI TOMON dekoderi o'lganini so'raydi: bizning audio
+    // transceiver'ni TO'XTATIB, YANGI m-line bilan qayta qo'shamiz (renegotiation) —
+    // qarshi tomonda YANGI receiver/dekoder tug'iladi (Chrome/154 WebView jimligi uchun
+    // yagona haqiqiy chora: wa/ra/v hammasi BIR qabul quvuridan oqadi) ──
+    if (d.k === 'a-reset') {
+      clog('a-reset', 'qarshi tomon so‘rovi — audio transceiver 0 dan qurilmoqda')
+      audioTransceiverReset(C)
+      return
+    }
     // ── v90: qa — qarshi tomon KIRUVCHI video sifati yomon deb xabar beradi: bizning
     // CHIQUVCHI bitratimiz uni bog'ib qo'yyapti — darhol pasaytiramiz (renegotiation YO'Q) ──
     if (d.k === 'qa') {
@@ -1145,7 +1220,8 @@ async function handleSignalEv(ev) {
         return
       }
       // ESKI offer (yangi restart'dan keyin kechikib keldi) — qabul qilinmaydi
-      if (oseq && C.lastOseq && oseq < C.lastOseq) { logSig('eski offer tashlandi', 'oseq=' + oseq + ' oxirgi=' + C.lastOseq); return }
+      // v94: a-reset offeri ATAYLAB yangi — oseq-tartibidan TASHQARI (areset belgisi)
+      if (oseq && !d.areset && C.lastOseq && oseq < C.lastOseq) { logSig('eski offer tashlandi', 'oseq=' + oseq + ' oxirgi=' + C.lastOseq); return }
       if (C.pc.signalingState !== 'stable') { logSig('offer drop', 'signaling=' + C.pc.signalingState); return }
       C.lastOseq = oseq
       await C.pc.setRemoteDescription(d.sdp)
@@ -1153,6 +1229,23 @@ async function handleSignalEv(ev) {
       const a = await C.pc.createAnswer()
       await C.pc.setLocalDescription(a)
       const ok = await sigTo(from, { k: 'answer', call_id: C.id, sdp: C.pc.localDescription.toJSON(), oseq }, 3, 900)
+      // v94: a-reset javobi — O'Z MIKROFONIMIZNI yangi transceiver'ga qayta ulaymiz.
+      // Sabab: qarshi tomon eski (umumiy) audio m-line'ni to'xtatdi — bizning mikrofon
+      // o'sha m-line'da yurardi; qayta ulanmasa qarshi tomon bizni eshitmay qoladi.
+      // MUHIM: AVVAL answer yuboriladi (peer 'stable'ga qaytadi), KEYIN yangi offer.
+      if (d.areset && C.local && ok) {
+        try {
+          const at2 = C.local.getAudioTracks()[0]
+          const ntr = C.pc.getTransceivers().find((t) => !t.stopped && t.receiver && t.receiver.track && t.receiver.track.kind === 'audio' && (!t.sender || !t.sender.track))
+          if (at2 && ntr) {
+            await ntr.sender.replaceTrack(at2)
+            try { ntr.direction = 'sendrecv' } catch {}
+            await C.pc.setLocalDescription(await C.pc.createOffer())
+            await sigTo(from, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON(), oseq: (C.oseq = (C.oseq || 0) + 1), areset: 1 }, 3, 900)
+            clog('a-reset', 'mikrofon yangi transceiverga qayta ulandi + offer yuborildi')
+          }
+        } catch (er) { clog('a-reset-xato', 'mikrofon ulash: ' + String((er && er.message) || er).slice(0, 100)) }
+      }
       if (!ok && !C.started) endCall('missed', true, 'Signal yetmadi — internetni tekshirib ko‘ring')
       return
     }
@@ -1197,8 +1290,8 @@ function evalStats(C, st) {
         inA += r.bytesReceived || 0; lostA = r.packetsLost || 0; recvA = r.packetsReceived || 0
         // v90: audioLevel — Chromium DEKODER CHIQISHIDagi ovoz (0-1). WebAudio remote-tap
         // ba'zi WebView'larda yolg'on nol beradi — bu o'lchov mustaqil va ishonchli.
-        if (typeof r.audioLevel === 'number') alvL = Math.max(alvL, Math.round(r.audioLevel * 100))
-        smpl += r.totalSamplesReceived || 0
+        if (typeof r.audioLevel === 'number') { alvL = Math.max(alvL, Math.round(r.audioLevel * 100)); C.hasAlv = 1 }
+        if (typeof r.totalSamplesReceived === 'number') { smpl += r.totalSamplesReceived || 0; C.hasSmpl = 1 }
         kon += r.concealedSamples || 0
       }
       if (r.kind === 'video') { inV += r.bytesReceived || 0; fr = r.framesDecoded || 0; fd = r.framesDropped || 0; lostV = r.packetsLost || 0; recvV = r.packetsReceived || 0 }
@@ -1242,7 +1335,7 @@ function evalStats(C, st) {
   try { if (C.ctx && C.ctx.state !== 'running') C.ctx.resume().catch(() => {}) } catch {}
   // v87: stat har 2-oynada (10s — avval 15s edi, 29s'lik qo'ng'iroqlarda 1 tagina chiqardi)
   // v92: eshit= — qo'ng'iroq davomida HECH BO'LMASA BIR marta eshitish dalili bo'lganmi
-  if (C.statN % 2 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode || '?'}${C.audioBlocked ? '(blok)' : ''} eshit=${C.everHeard ? 1 : 0} k=${inR}% ch=${outR}% mik=${at ? (at.enabled ? 'on' : 'O‘CHIRILGAN') : 'yo‘q'} rmut=${rat ? (rat.muted ? 'ha' : 'yo‘q') : '?'} sil=${C.silN || 0} fb=${C.fbN || 0} kk=${C.kickN || 0} vx=${C.qaLvl || 0} | alv=${alvR}% smp=+${dSmpl} kon=+${dKon} | el=${elState} | turn=${C.relay === undefined ? '?' : C.relay}`)
+  if (C.statN % 2 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode || '?'}${C.audioBlocked ? '(blok)' : ''} eshit=${C.everHeard ? 1 : 0} k=${inR}% ch=${outR}% mik=${at ? (at.enabled ? 'on' : 'O‘CHIRILGAN') : 'yo‘q'} rmut=${rat ? (rat.muted ? 'ha' : 'yo‘q') : '?'} sil=${C.silN || 0} fb=${C.fbN || 0} kk=${C.kickN || 0} vx=${C.qaLvl || 0} | alv=${alvR}% smp=+${dSmpl} kon=+${dKon} | el=${elState} | turn=${C.relay === undefined ? '?' : C.relay} | ctx=${C.ctx ? C.ctx.state : 'yo‘q'} aS=${C.hasAlv ? 1 : 0} sS=${C.hasSmpl ? 1 : 0} rej=${C.playRejN || 0}`)
   // ── v92: JIMLIK-QUTQARUVCHI — NUTQ DALILI BILAN (ANIQLANGAN) ──
   // v91 XATOSI (shikoyatning asosiy ildizi): qorovul dInA>0 bilan ishlar edi — lekin
   // Opus SUKUTI ham paket yuboradi (dInA>0, ~10x kam). Ya'ni qarshi tomon 15s GAPIRMASA
@@ -1261,32 +1354,53 @@ function evalStats(C, st) {
     C.silN = (C.silN || 0) + 1
     const z = C.silN
     if (z === 1) {
-      // 1-oyna: o'z yo'limiz ICHIDA tiklash (yo'lni o'zgartirmasdan)
+      // 1-oyna: o'z yo'limiz ICHIDA tiklash (yo'lni o'zgartirmasdan).
+      // v94: wa manbasi YANGI oqim-o'ramdan quriladi (Chrome/154 «tirik trekka jim
+      // oqadigan eski manba-tugun» kasalligiga birinchi javob).
       unlockAudio(C)
-      if (C.audioMode === 'wa') {
-        try { if (C.waSrc) { C.waSrc.disconnect(); C.waSrc = null } } catch {}
-        try { if (C.waAn) { C.waAn.disconnect(); C.waAn = null } } catch {}
-        try { C.an_in = null } catch {}
-        playRemote(C)
-      } else rebindRemoteAudio(C)
+      if (C.audioMode === 'wa') freshWASource(C)
+      else rebindRemoteAudio(C)
+      playRemote(C)
       clog('ovoz-jim', 'bosqich 1: o\'z yo\'li tiklandi (rejim=' + C.audioMode + ' alv=' + alvR + '% k=' + inR + '%)')
     } else if (z === 3) {
-      // 3-oyna: boshqa FIZIK yo'lga o'tish (karnay↔quloqchi) — faqat NUTQ dalilida
-      C.audioMode = C.audioMode === 'wa' ? 'ra' : 'wa'
+      // 3-oyna: BOSHQA FIZIK yo'lga o'tish — v94: UCHTA yo'l aylanadi (wa→ra→v→wa).
+      // 'v' = video-element ovozi — ba'zi qurilmalarda yagona ishlaydigan yo'l (v85 dalili).
+      const seq = ['wa', 'ra', 'v']
+      const i = seq.indexOf(C.audioMode)
+      C.audioMode = seq[(i + 1 + seq.length) % seq.length] || 'wa'
       playRemote(C)
       clog('ovoz-almashtirildi', C.audioMode + ' yo\'liga o\'tildi (nutq=' + Math.round(dInA / 1000) + 'KB/5s, eshitish dalili yo\'q)')
     } else if (z === 4) {
       clog('ovoz-jim', 'bosqich 4: elementlar 0 dan qurilmoqda')
       rebuildCallElements(C)
     } else if (z === 5) {
-      clog('ovoz-jim', 'bosqich 5: native ovoz-kick (OS marshrutini urish)')
+      // v94: AudioContext QAYTA TUG'ILISHI — "running" lekin ichi o'lik kontekstga yagona JS-davo
+      rebirthCtx(C)
+      if (C.audioMode === 'wa') freshWASource(C)
+      playRemote(C)
+      clog('ovoz-jim', 'bosqich 5: kontekst qayta tug\'ildi, rejim=' + C.audioMode)
+    } else if (z === 6) {
+      clog('ovoz-jim', 'bosqich 6: native ovoz-kick (OS marshrutini urish)')
       nativeKick(C)
-    } else if (z >= 6) {
-      // AYLANISH: ikki fizik yo'l almashinadi — abadiy jimlik mumkin emas
-      C.audioMode = C.audioMode === 'wa' ? 'ra' : 'wa'
+    } else if (z === 7) {
+      // v94: DEKODER-QAYTA-QURISH so'rovi — barcha JS yo'llari o'lgan bo'lsa (wa/ra/v +
+      // yangi manba + yangi kontekst ham jim) — qarshi tomonning audio m-line'ini yangilash
+      // SO'RALADI: yangi m-line = qarshi tomonda YANGI receiver/dekoder (renegotiation).
+      if (!C.aRstReq) {
+        C.aRstReq = 1
+        clog('ovoz-jim', 'bosqich 7: a-reset — qarshi tomondan yangi dekoder so\'raldi')
+        sigTo(C.peer.id, { k: 'a-reset', call_id: C.id }, 3, 900)
+      } else { nativeKick(C); clog('ovoz-jim', 'bosqich 7: native kick (a-reset allaqachon so\'rilgan)') }
+    } else if (z >= 8) {
+      // AYLANISH: uch fizik yo'l almashadi — abadiy jimlik mumkin emas
+      const seq = ['wa', 'ra', 'v']
+      const i = seq.indexOf(C.audioMode)
+      C.audioMode = seq[(i + 1 + seq.length) % seq.length] || 'wa'
       playRemote(C)
       if (z % 3 === 0) nativeKick(C)
-      if (z > 40) C.silN = 6 // hisoblagich cheksiz o'smasin
+      if (z % 5 === 0) rebuildCallElements(C)
+      if (z % 7 === 0 && C.audioMode === 'wa') freshWASource(C)
+      if (z > 40) C.silN = 8 // hisoblagich cheksiz o'smasin
       clog('ovoz-jim', 'aylanish: rejim=' + C.audioMode + ' (z=' + z + ')')
     }
   } else if (!dInA) C.silN = 0 // sukut/tarmoq jim — hech narsaga tegilmaydi (v91 ildizi yo'q)
@@ -1311,7 +1425,10 @@ function evalStats(C, st) {
   // oqimi 15s JIM (oyna-max RMS<1%): WebView capture-pipelini qotishi. AVVALGI XATO:
   // 30s (6-oyna) kutilardi — 29s'lik qo'ng'iroqda UMUMAN ulgurmagan! Endi 15s (3-oyna)
   // va 4 martagacha davolaydi. replaceTrack — renegotiation yo'q.
-  if (outR !== -1 && outR < 1 && dOutA > 0 && at && at.readyState === 'live' && at.enabled) {
+  // v94: faqat KUCHLI nutq dalilida (dOutA>12000 — Opus sukuti ~1-2KB/5s, gapirish 8-15KB).
+  // Avvalgi shart dOutA>0 edi — TINGLAYOTGAN (gapirmayotgan) tomonda YALG'ON heal bo'lar,
+  // har 15s mikrofon ochilishi churn = video muzlashlarga xissa qo'shgan (X jurnali: heal #1-#4).
+  if (outR !== -1 && outR < 1 && dOutA > 12000 && at && at.readyState === 'live' && at.enabled) {
     C.silN = (C.silN || 0) + 1
     if (C.silN >= 3 && (C.heals || 0) < 4) { C.silN = 0; C.heals = (C.heals || 0) + 1; clog('mikro-jim', 'mikrofon 15s jim oqmoqda (oyna-max<1%) — qayta ochilmoqda #' + C.heals); healOutgoing(C, 'audio') }
   } else C.silN = 0

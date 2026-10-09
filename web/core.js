@@ -1030,7 +1030,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v93'
+window.__50BUILD = 'v94'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
@@ -1080,6 +1080,7 @@ function g50Beacon(tag) {
     if (!S.token || g50BeaconN >= 8) return
     g50BeaconN++
     const m = tag + ' | build=' + window.__50BUILD + ' | apk=' + (window.Android50 ? 1 : 0)
+      + ' | dev=' + (window.Android50 && typeof window.Android50.devInfo === 'function' ? (function () { try { return String(window.Android50.devInfo()) } catch (e) { return '?' } })() : 'web')
       + ' | on=' + (navigator.onLine ? 1 : 0) + ' | hid=' + document.visibilityState
       + ' | ua=' + String(navigator.userAgent || '').slice(-70)
     fetch(API + '/clog', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + S.token }, body: JSON.stringify({ c: 'diag', m }), keepalive: true }).catch(() => {})

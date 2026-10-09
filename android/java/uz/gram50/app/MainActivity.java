@@ -72,6 +72,20 @@ public class MainActivity extends Activity {
 
   /** JS <-> Native ko'prik: qo'ng'iroqlar fon rejimida native oyna ko'rsatadi */
   class Bridge {
+    /** v3.2: qurilma/WebView tashxisi — jurnal "dev=" maydoni uchun (quloqsiz qurilma
+     * aniqlanishi: qaysi MODEL/Android/WebView versiyasi jimlik beradi) */
+    @JavascriptInterface
+    public String devInfo() {
+      try {
+        String wv = "?";
+        try {
+          android.content.pm.PackageInfo pi = android.webkit.WebView.getCurrentWebViewPackage();
+          if (pi != null) wv = pi.versionName;
+        } catch (Exception ignored) { }
+        return Build.MANUFACTURER + " " + Build.MODEL + " | Android " + Build.VERSION.SDK_INT + " | WV " + wv;
+      } catch (Exception e) { return "devinfo-xato"; }
+    }
+
     @JavascriptInterface
     public void callIncoming(String json) {
       try {
