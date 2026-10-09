@@ -1,0 +1,24 @@
+name: XAVFSIZLIK E2E (himoya qatlamlari muhri)
+on:
+  workflow_dispatch:
+  push:
+    branches:
+
+      - main
+concurrency:
+  group: testlar-zanjiri
+  cancel-in-progress: false
+jobs:
+  sec-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Xavfsizlik E2E — trap/inj/ext/otp-pump/json-cap + fw/fix qutqaruv (jonli saytga qarshi)
+        env:
+          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+          E2E_BUILD_V: v98
+        run: node scripts/e2e_sec.mjs

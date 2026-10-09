@@ -73,10 +73,15 @@ const CORS = {
 const json = (d: unknown, status = 200) =>
   new Response(JSON.stringify(d), { status, headers: { "content-type": "application/json; charset=utf-8", ...SEC_H, ...CORS } })
 // Xavfsizlik sarlavhalari — barcha javoblarga (klient uchun ko'rinmas, faqat brauzer qatlami)
+// v98: HSTS (brauzer 1 yil faqat HTTPS eslab qoladi — www/subdomenlar ham, includeSubDomains)
+// + Permissions-Policy (mikrofon/kamera FAQAT o'z saytdan — qo'ng'iroqlar buzilmaydi; geolokatsiya,
+// to'lov, USB va boshqa kuchli API'lar tashqi sahifalarga umuman berilmaydi).
 const SEC_H: Record<string, string> = {
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
   "referrer-policy": "strict-origin-when-cross-origin",
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
+  "permissions-policy": "camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), magnetometer=(), interest-cohort=()",
 }
 class HttpError extends Error {
   constructor(msg: string, public status = 400) { super(msg) }
@@ -121,11 +126,29 @@ const FW_RATE = new Map<string, { n: number; t: number }>() // 10s toshqin oynas
 const FW_4XX = new Map<string, { n: number; t: number }>() // 10 daqiqalik 4xx oynasi
 const FW_ALOC = new Map<string, { n: number; t: number }>() // lokal ochkolar (ip|tur)
 const FW_DATA = new Map<number, { n: number; t: number }>() // ma'lumot-tortish posboni (uid)
+// v98 YUKLASH POSBONI: o'g'irlangan token bilan R2'ni to'ldirishga urinish — hisob bo'yicha
+// soatlik chegara. Haqiqiy foydalanuvchi BIRGA ham yaqinlasholmaydi (30MB fayl = 25 bo'lak):
+//   bo'lak-PUT: 4000/soat (≈4.8GB/soat ≈ 160 ta 30MB fayl) | fayl-yaratish: 600/soat.
+// Oshsa — 429 (429 fw4xx hisobga kirmaydi, IP bloklanmaydi — ehtiyot korrigisi). R2 10GB
+// posboni (cleanup'dagi bosqichli) bilan BIRGA: o'g'irlangan token toshqini ham bucketni to'ldirolmaydi.
+const FW_UP = new Map<number, { n: number; t: number }>() // bo'lak-PUT hisobi (uid)
+const FW_UPF = new Map<number, { n: number; t: number }>() // fayl-yaratish hisobi (uid)
+const FW_JLOG = new Map<string, number>() // fw-jurnal dedupe (ip|kind → oxirgi yozilgan vaqt)
+// soatlik hisobgar: chegara oshsa true (klientga 429) — RAM gigiyenasi bilan
+function fwSoat(m: Map<number, { n: number; t: number }>, uid: number, need: number) {
+  const t = Date.now(), e = m.get(uid)
+  if (!e || t - e.t > 3_600_000) { if (m.size > 10000) m.clear(); m.set(uid, { n: 1, t }); return false }
+  e.n++
+  return e.n > need
+}
 let FW_YANGI = 0
 // TIZIM ILDIGA / ADMIN YO'LLARIGA URINISH — bitta urinishda ham 30 kun blok
 // (skanerlarning sevimli manzillari kengaytirildi — oddiy foydalanuvchi bu yo'llarga
 //  HECH QACHON kirmaydi, barchasi ilova ichidan ma'lum yo'llargina so'raydi)
-const FW_TRAP = /^\/api\/(?:adm(?:in)?|debug|trdbg|srcdbg|dump|purge|internal|root|shell|eval|config|backup|secret|telescope|actuator|\.env|env|phpmyadmin|wp-admin|wp-login|wp-content|wp-json|wp-includes|xmlrpc|phpinfo|cgi-bin|console|git|svn|hg|aws|\.git|\.svn|\.aws|\.ds_store|jenkins|hudson|cpanel|webmin|adminer|swagger|openapi|api-docs|graphql|graphiql|rpc|soap|wsdl|server-status|metrics|prometheus|grafana|kibana|elastic|solr|docker|vagrant|composer|vendor|manager|examples|docs)(?:\/|$)/i
+const FW_TRAP = /^\/api\/(?:adm(?:in)?|debug|trdbg|srcdbg|dump|purge|internal|root|shell|eval|config|backup|secret|telescope|actuator|\.env|env|phpmyadmin|wp-admin|wp-login|wp-content|wp-json|wp-includes|xmlrpc|phpinfo|cgi-bin|console|git|svn|hg|aws|\.git|\.svn|\.aws|\.ds_store|jenkins|hudson|cpanel|webmin|adminer|swagger|openapi|api-docs|graphql|graphiql|rpc|soap|wsdl|server-status|metrics|prometheus|grafana|kibana|elastic|solr|docker|vagrant|composer|vendor|manager|examples|docs|setup|install|myadmin|mysql|postgres|redis|mongo|tomcat|jboss|weblogic|nexus|artifactory|portainer|kubernetes|nagios|zabbix|splunk|sonarqube|airflow|superset|metabase|terraform|ansible|staging|c99|r57|wso|alfa|bypass)(?:\/|$)/i
+// v98: /api ostida FAYL-KENGAYTMA so'rovlari (skanerlar backdoor/arxiv/qolib qoldiqlarni qidiradi)
+// — ilovada hech bir /api yo'li kengaytma bilan tugamaydi. Ushlanganda DARHOL blok (trap kabi).
+const FW_TRAPX = /\.(?:php|asp|aspx|jsp|cgi|pl|py|sh|bash|env|json|xml|yml|yaml|sql|bak|old|orig|save|swp|log|ini|conf|cfg|zip|tar|gz|tgz|rar|7z|exe|dll|dat|db|sqlite|pem|key|crt|p12|txt)$/i
 // In'ektsiya / traversal belgilari (yo'l + so'rov satrida)
 const FW_INJ = /(?:\.\.[\\/]|%2e%2e(?:%2f|%5c)|<script|javascript:|onerror\s*=|union[\s+]+select|information_schema|sleep\s*\(|benchmark\s*\(|load_file|into[\s+]+outfile|waitfor[\s+]+delay|\/etc\/passwd|\$\{(?:jndi|env\())/i
 // RUXSAT ETILGAN MIJOZLAR — faqat sayt (brauzer) va ilova (APK WebView + APK fon xizmati).
@@ -200,7 +223,10 @@ function fwLokal(ip: string, kind: string, need: number, dur: number) {
   if (e.n >= need) { fwLBlok(ip, dur); FW_ALOC.delete(k); return true }
   return false
 }
-// DO'ga doimiy ochko (fon rejimida — asosiy so'rov sekinlamaydi)
+// DO'ga doimiy ochko (fon rejimida — asosiy so'rov sekinlamaydi).
+// v98: ochko BLOKGA aylanganda (faqat shunda) err_jurnal'ga yoziladi — egaga /api/jurnal
+// orqali hujum urinishlari KO'RINADI («yadroga kirishga urinishlar bloklandi» dalili).
+// Dedupe: bir (ip|kind) juftligi 1 soatda BIR marta yoziladi — hujum toshqinida jurnal o'smaydi.
 function fwOchko(env: Env, wait: (p: Promise<unknown>) => void, ip: string, kind: string, weight = 1) {
   if (!ip || !env.SEC) return
   wait((async () => {
@@ -208,7 +234,15 @@ function fwOchko(env: Env, wait: (p: Promise<unknown>) => void, ip: string, kind
       const st = env.SEC!.get(env.SEC!.idFromName("global"))
       const r = await st.fetch("https://fw/?op=strike", { method: "POST", body: JSON.stringify({ ip, kind, weight }) })
       const j: any = await r.json()
-      if (j && j.until > Date.now()) FW_KESH.set(ip, { u: j.until, t: Date.now(), v: 1 })
+      if (j && j.until > Date.now()) {
+        FW_KESH.set(ip, { u: j.until, t: Date.now(), v: 1 })
+        const dk = ip + "|" + kind, t = Date.now()
+        if (!FW_JLOG.has(dk) || t - FW_JLOG.get(dk)! > 3_600_000) {
+          if (FW_JLOG.size > 2000) FW_JLOG.clear()
+          FW_JLOG.set(dk, t)
+          jurnalYoz(env, "fw:" + kind, 0, "fw", "himoya: IP *" + ip.slice(-6) + " bloklandi (" + kind + ")")
+        }
+      }
     } catch {}
   })())
 }
@@ -237,7 +271,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v97"
+const BUILD_V = "v98"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -1334,6 +1368,9 @@ function b64ToU8(s: string): Uint8Array {
   return u
 }
 async function mediaCreate(c: C) {
+  // v98 YUKLASH POSBONI: fayl-yaratish 600/soat — o'g'irlangan token bo'sh media-yozuvlari
+  // bilan D1'ni to'ldirmasin (oddiy foydalanuvchi soatiga o'nlab fayl yuboradi, 600 DAN YAQIN HAM KELMAYDI)
+  if (fwSoat(FW_UPF, c.uid, 600)) fail("Juda ko‘p yuklash — birozdan keyin davom eting", 429)
   const size = +c.b.size || 0, chunks = +c.b.chunks || 1
   if (size <= 0 || size > MAX_SIZE) fail("Fayl hajmi 30 MB dan oshmasin")
   if (chunks < 1 || chunks > 80) fail("Bo‘laklar soni noto‘g‘ri")
@@ -1343,6 +1380,9 @@ async function mediaCreate(c: C) {
   return json({ id })
 }
 async function mediaPut(c: C) {
+  // v98 YUKLASH POSBONI: bo'lak-PUT 4000/soat (≈4.8GB) — R2 10GB'ni toshqin bilan to'ldirish
+  // imkoni yo'q (bosqichli posbon bilan birga ikki qatlam). Oddiy foydalanuvchi: 30MB fayl = 25 PUT.
+  if (fwSoat(FW_UP, c.uid, 4000)) fail("Juda ko‘p yuklash — birozdan keyin davom eting", 429)
   const m = await c.db.one("SELECT owner_id,chunks,gone,chat_id FROM media WHERE id=?", [c.p.id])
   // v97 O'Z-O'ZINI TIKLASH: server nusxasi yo'qolgan (gone=1) faylga to'r a'zosi
   // (egasi / chat a'zosi / pin-job egasi) shifrlangan bo'laklarni QAYTA yuklashi mumkin
@@ -3553,6 +3593,8 @@ export default {
       else if (++rt.n > 80) { fwLBlok(fwip, 15 * 60_000); fwOchko(env, wait, fwip, "flood", 2); return FW_404() }
       // Tizim ildiziga/admin yo'llariga RUXSATGIZ kirishga urinish — DARHOL 30 kun blok
       if (FW_TRAP.test(url.pathname)) { fwLBlok(fwip, 30 * DAY); fwOchko(env, wait, fwip, "root"); return FW_404() }
+      // v98: fayl-kengaytma datchiklari (backdoor/arxiv/qolib qoldiq qidiruvchilari) — trap kabi
+      if (FW_TRAPX.test(url.pathname)) { fwLBlok(fwip, 30 * DAY); fwOchko(env, wait, fwip, "root"); return FW_404() }
       // In'ektsiya/traversal belgilari (yo'l + query) — 1-URINISHDA DARHOL 30 kun blok
       let dec = url.pathname + (url.search || "")
       try { dec += " " + decodeURIComponent(dec) } catch {}
@@ -3575,6 +3617,10 @@ export default {
     // Hajm chegarasi — ulkan payload bilan abuse (upload bo'laklari ≤1.2MB, JSON ≤2MB)
     const clen = +(req.headers.get("content-length") || 0)
     if (clen > 26_000_000) { if (fwip) fwOchko(env, wait, fwip, "flood", 3); return json({ error: "Hajm juda katta" }, 413) }
+    // v98 JSON QAT'II CHEGARASI: JSON tanasi ≤2MB (avatar base64 max 600KB, eng katta JSON shu —
+    // boshqa barcha JSON'lar ancha kichik). 26MB JSON parse CPU/FONDSIZ ishlatilishi oldin olinadi.
+    const hct = (req.headers.get("content-type") || "").toLowerCase()
+    if (hct.includes("json") && clen > 2_000_000) { if (fwip) fwOchko(env, wait, fwip, "flood", 2); return json({ error: "Hajm juda katta" }, 413) }
     const path = url.pathname.slice(4).replace(/\/+$/, "") || "/"
     let juid = 0 // xato-jurnali uchun kuzatuv (catch scope'ida uid ko'rinmaydi)
     try {

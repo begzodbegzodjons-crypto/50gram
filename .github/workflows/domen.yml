@@ -216,6 +216,9 @@ jobs:
           done
           echo "== core.js build belgisi"
           curl -sS --max-time 25 https://50gram.uz/core.js | grep -o "__50BUILD = '[^']*'" || echo "BUILD BELGISI TOPILMADI"
+          echo "== www.50gram.uz API/versiya (wildcard route ishlashi)"
+          curl -sS --max-time 25 -A "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/154.0 Mobile Safari/537.36" -w "\nwww build http: %{http_code}\n" https://www.50gram.uz/api/build || true
+          curl -sS --max-time 25 https://www.50gram.uz/core.js | grep -o "__50BUILD = '[^']*'" || echo "WWW BUILD BELGISI TOPILMADI"
           echo "== robots.txt"
           curl -sS --max-time 25 https://50gram.uz/robots.txt | head -5 || echo "ROBOTS YOQ"
           echo "== sitemap.xml"
