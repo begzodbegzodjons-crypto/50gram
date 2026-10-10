@@ -828,7 +828,7 @@ function ccApply(x) {
   authCC = x
   $('cc-flag').textContent = x.f; $('cc-code').textContent = '+' + x.d
   const inp = $('phone')
-  inp.placeholder = x.p; inp.maxLength = (x.nx || x.n) + x.g.length
+  inp.placeholder = x.p // v103: maxLength ENDI STATIK 24 (index.html) — "+"-li to'liq raqam yopishtirilganda brauzer KESMASIN; milliy uzunlikni JS kesib turadi (slice)
   let d = inp.value.replace(/\D/g, '')
   if (d.startsWith(x.d) && d.length > x.n) d = d.slice(x.d.length)
   d = d.slice(0, x.nx || x.n)
@@ -1240,7 +1240,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v102'
+window.__50BUILD = 'v103'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
