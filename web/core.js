@@ -749,8 +749,8 @@ let authPhone = '', resendT = 0
 // davlatlar), g: format guruhlari, p: namuna, k: qidiruv kalitlari (ionsiz lotin+kirill).
 const CC_LIST = [
   { c: 'O‘zbekiston', f: '🇺🇿', d: '998', n: 9, g: [2, 3, 2, 2], p: '90 123 45 67', k: 'ozbekiston uzbekistan uzbek uz' },
-  { c: 'Rossiya', f: '🇷🇺', d: '7', n: 10, g: [3, 3, 2, 2], p: '901 234 56 78', k: 'rossiya russia rus ru' },
-  { c: 'Qozog‘iston', f: '🇰🇿', d: '7', n: 10, g: [3, 3, 2, 2], p: '701 234 56 78', k: 'qozogiston qozoqiston kazakhstan kazak kz' },
+  { c: 'Rossiya', f: '🇷🇺', d: '7', n: 10, g: [3, 3, 2, 2], p: '901 234 56 78', k: 'rossiya russia rus ru', pp: /^9/ },
+  { c: 'Qozog‘iston', f: '🇰🇿', d: '7', n: 10, g: [3, 3, 2, 2], p: '701 234 56 78', k: 'qozogiston qozoqiston kazakhstan kazak kz', pp: /^7/ },
   { c: 'Qirg‘iziston', f: '🇰🇬', d: '996', n: 9, g: [3, 3, 3], p: '501 234 567', k: 'qirgiziston kirgiziston kyrgyzstan kirgiz kg' },
   { c: 'Tojikiston', f: '🇹🇯', d: '992', n: 9, g: [3, 3, 3], p: '555 123 456', k: 'tojikiston tajikistan tojik tj' },
   { c: 'Turkmaniston', f: '🇹🇲', d: '993', n: 8, g: [2, 3, 3], p: '65 123 456', k: 'turkmaniston turkmenistan turkmen tm' },
@@ -839,6 +839,18 @@ $('phone').addEventListener('input', (e) => {
   bandForce = false // raqam o'zgarsa — «mavjud» holati yangi raqamga tegishli emas
   const bn = $('band-note'); if (bn) bn.classList.add('hide')
   let d = e.target.value.replace(/\D/g, '')
+  // v101: "+" bilan to‘liq raqam yopishtirilsa — davlatni AVTO-aniqlash (Telegram uslubi):
+  // kod 3→2→1 xona eng uzun moslik bo'yicha topiladi, RU/KZ milliy prefiks (9xx→RU, 7xx→KZ) bilan ajratiladi
+  if (e.target.value.trim().startsWith('+') && d.length > 9) {
+    for (let k = 3; k >= 1; k--) {
+      const cands = CC_LIST.filter((x) => x.d === d.slice(0, k))
+      if (!cands.length) continue
+      const nat = d.slice(k)
+      const hit = cands.find((x) => x.pp && x.pp.test(nat)) || cands[0]
+      if (nat.length === (hit.nx || hit.n) || nat.length === hit.n) { ccApply(hit); return }
+      break
+    }
+  }
   // v100: to‘liq raqam yopishtirilgan bo‘lsa (+998…/+7…/+996…) — davlat kodini uzib tashla
   if (d.startsWith(authCC.d) && d.length > authCC.n) d = d.slice(authCC.d.length)
   // RU/KZ an’anasi: 8 bilan boshlangan to‘liq raqam (8 901 234 56 78)
@@ -1211,7 +1223,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v100'
+window.__50BUILD = 'v101'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
