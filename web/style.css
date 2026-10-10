@@ -56,6 +56,16 @@ body.dark .phone-in{background:rgba(10,16,31,.4)}
 .phone-in:focus-within{border-color:var(--asos);box-shadow:var(--fokus,0 0 0 4px rgba(46,123,255,.14))}
 .phone-in span{font-weight:700;margin-right:10px;color:var(--asos)}
 .phone-in input{flex:1;border:0;background:none;outline:0;padding:15px 0;font-size:18px;letter-spacing:.5px;min-width:0;font-weight:600}
+/* v100: davlat kodi tanlagich — xalqaro raqamlar (UZ default, RU/KZ/KG va barcha davlatlar).
+   Kirish ekrani (#auth) avvalgi AURORA ko'rinishida qoladi — bu faqat tanlagich tugmasi + ro'yxat uslubi. */
+.phone-in .cc-btn{display:flex;align-items:center;gap:5px;border:0;background:none;padding:15px 8px 15px 0;margin:0;font:inherit;font-weight:700;color:var(--asos);font-size:17px;cursor:pointer;flex-shrink:0;letter-spacing:0;-webkit-tap-highlight-color:transparent}
+.phone-in .cc-btn span{margin:0;color:inherit;font-weight:inherit}
+.phone-in .cc-ar{font-size:10px;opacity:.55;transform:translateY(1px)}
+.cc-row{display:flex;align-items:center;gap:12px;padding:12px;border-radius:12px;cursor:pointer}
+.cc-row:active{background:rgba(127,127,127,.14)}
+.cc-row .cc-f{font-size:22px;flex-shrink:0;line-height:1}
+.cc-row b{font-weight:600;font-size:15px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cc-row .cc-d{color:var(--xira);font-weight:600;font-size:14px;flex-shrink:0;font-variant-numeric:tabular-nums}
 .code-in{width:100%;text-align:center;font-size:30px;font-weight:700;letter-spacing:12px;padding:14px;border-radius:18px;border:1.5px solid var(--chiziq);background:rgba(255,255,255,.85);outline:0;margin-bottom:14px;transition:border-color .18s,box-shadow .18s}
 body.dark .code-in{background:rgba(10,16,31,.4)}
 .code-in:focus{border-color:var(--asos);box-shadow:var(--fokus,0 0 0 4px rgba(46,123,255,.14))}

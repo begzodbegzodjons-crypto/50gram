@@ -742,6 +742,94 @@ function copy(t) {
 
 // ---------------- AUTH ----------------
 let authPhone = '', resendT = 0
+// v100: XALQARO RO‘YXATDAN O‘TISH — davlat kodi tanlanadi. UZ default: eski +998
+// xatti-harakati BITTA-BITTA saqlangan (9 xona, XX XXX XX XX, server normPhone’si
+// O‘ZGARMAGAN — 10-15 xonali to‘liq raqamni allaqachon qabul qiladi; eski ilovalar
+// 998XXXXXXXXX yuboraveradi). d: davlat kodi, n: milliy uzunlik (nx: max, o‘zgaruvchan
+// davlatlar), g: format guruhlari, p: namuna, k: qidiruv kalitlari (ionsiz lotin+kirill).
+const CC_LIST = [
+  { c: 'O‘zbekiston', f: '🇺🇿', d: '998', n: 9, g: [2, 3, 2, 2], p: '90 123 45 67', k: 'ozbekiston uzbekistan uzbek uz' },
+  { c: 'Rossiya', f: '🇷🇺', d: '7', n: 10, g: [3, 3, 2, 2], p: '901 234 56 78', k: 'rossiya russia rus ru' },
+  { c: 'Qozog‘iston', f: '🇰🇿', d: '7', n: 10, g: [3, 3, 2, 2], p: '701 234 56 78', k: 'qozogiston qozoqiston kazakhstan kazak kz' },
+  { c: 'Qirg‘iziston', f: '🇰🇬', d: '996', n: 9, g: [3, 3, 3], p: '501 234 567', k: 'qirgiziston kirgiziston kyrgyzstan kirgiz kg' },
+  { c: 'Tojikiston', f: '🇹🇯', d: '992', n: 9, g: [3, 3, 3], p: '555 123 456', k: 'tojikiston tajikistan tojik tj' },
+  { c: 'Turkmaniston', f: '🇹🇲', d: '993', n: 8, g: [2, 3, 3], p: '65 123 456', k: 'turkmaniston turkmenistan turkmen tm' },
+  { c: 'Ozarbayjon', f: '🇦🇿', d: '994', n: 9, g: [2, 3, 2, 2], p: '70 123 45 67', k: 'ozarbayjon azerbaycan azerbaijan az' },
+  { c: 'Ukraina', f: '🇺🇦', d: '380', n: 9, g: [2, 3, 2, 2], p: '67 123 45 67', k: 'ukraina ukraine ukr ua' },
+  { c: 'Belarus', f: '🇧🇾', d: '375', n: 9, g: [2, 3, 2, 2], p: '29 123 45 67', k: 'belarus belorussia bel by' },
+  { c: 'Gruziya', f: '🇬🇪', d: '995', n: 9, g: [3, 3, 3], p: '555 123 456', k: 'gruziya georgia gruz ge' },
+  { c: 'Armaniston', f: '🇦🇲', d: '374', n: 8, g: [2, 3, 3], p: '77 123 456', k: 'armaniston armenia arm am' },
+  { c: 'Moldova', f: '🇲🇩', d: '373', n: 8, g: [2, 3, 3], p: '60 123 456', k: 'moldova md' },
+  { c: 'Turkiya', f: '🇹🇷', d: '90', n: 10, g: [3, 3, 2, 2], p: '532 123 45 67', k: 'turkiya turkiye turkey turk tr' },
+  { c: 'Germaniya', f: '🇩🇪', d: '49', n: 10, nx: 11, g: [3, 4, 4], p: '151 2345 6789', k: 'germaniya germany de' },
+  { c: 'Fransiya', f: '🇫🇷', d: '33', n: 9, g: [1, 2, 2, 2, 2], p: '6 12 34 56 78', k: 'fransiya france fr' },
+  { c: 'Buyuk Britaniya', f: '🇬🇧', d: '44', n: 10, g: [4, 6], p: '7400 123456', k: 'angliya britaniya uk britain england gb' },
+  { c: 'Italiya', f: '🇮🇹', d: '39', n: 10, g: [3, 3, 4], p: '340 123 4567', k: 'italiya italy it' },
+  { c: 'Ispaniya', f: '🇪🇸', d: '34', n: 9, g: [3, 3, 3], p: '612 345 678', k: 'ispaniya spain es' },
+  { c: 'Niderlandiya', f: '🇳🇱', d: '31', n: 9, g: [1, 4, 4], p: '6 1234 5678', k: 'niderlandiya gollandiya netherlands holland nl' },
+  { c: 'Polsha', f: '🇵🇱', d: '48', n: 9, g: [3, 3, 3], p: '501 234 567', k: 'polsha poland pl' },
+  { c: 'Rumyniya', f: '🇷🇴', d: '40', n: 9, g: [3, 3, 3], p: '712 345 678', k: 'rumyniya romania ro' },
+  { c: 'Chexiya', f: '🇨🇿', d: '420', n: 9, g: [3, 3, 3], p: '601 234 567', k: 'chexiya czech cz' },
+  { c: 'Bolgariya', f: '🇧🇬', d: '359', n: 9, g: [3, 3, 3], p: '881 234 567', k: 'bolgariya bulgaria bg' },
+  { c: 'Vengriya', f: '🇭🇺', d: '36', n: 9, g: [2, 3, 4], p: '20 123 4567', k: 'vengriya hungary hu' },
+  { c: 'Shvetsiya', f: '🇸🇪', d: '46', n: 9, g: [2, 3, 2, 2], p: '70 123 45 67', k: 'shvetsiya sweden se' },
+  { c: 'Norvegiya', f: '🇳🇴', d: '47', n: 8, g: [3, 2, 3], p: '401 23 456', k: 'norvegiya norway no' },
+  { c: 'Daniya', f: '🇩🇰', d: '45', n: 8, g: [4, 4], p: '2012 3456', k: 'daniya denmark dk' },
+  { c: 'Finlandiya', f: '🇫🇮', d: '358', n: 9, g: [3, 3, 3], p: '401 234 567', k: 'finlandiya finland fi' },
+  { c: 'Litva', f: '🇱🇹', d: '370', n: 8, g: [3, 5], p: '612 34567', k: 'litva lithuania lt' },
+  { c: 'Latviya', f: '🇱🇻', d: '371', n: 8, g: [2, 3, 3], p: '21 234 567', k: 'latviya latvia lv' },
+  { c: 'Estoniya', f: '🇪🇪', d: '372', n: 8, g: [4, 4], p: '5123 4567', k: 'estoniya estonia ee' },
+  { c: 'Shveytsariya', f: '🇨🇭', d: '41', n: 9, g: [2, 3, 2, 2], p: '78 123 45 67', k: 'shveytsariya switzerland ch' },
+  { c: 'Avstriya', f: '🇦🇹', d: '43', n: 10, nx: 11, g: [4, 3, 3], p: '664 123 4567', k: 'avstriya austria at' },
+  { c: 'Serbiya', f: '🇷🇸', d: '381', n: 8, g: [2, 3, 3], p: '64 123 456', k: 'serbiya serbia rs' },
+  { c: 'Xorvatiya', f: '🇭🇷', d: '385', n: 8, g: [2, 3, 3], p: '91 234 567', k: 'xorvatiya croatia hr' },
+  { c: 'Gretsiya', f: '🇬🇷', d: '30', n: 10, g: [3, 3, 4], p: '691 234 5678', k: 'gretsiya greece gr' },
+  { c: 'Portugaliya', f: '🇵🇹', d: '351', n: 9, g: [3, 3, 3], p: '912 345 678', k: 'portugaliya portugal pt' },
+  { c: 'Isroil', f: '🇮🇱', d: '972', n: 9, g: [2, 3, 4], p: '50 123 4567', k: 'isroil israel il' },
+  { c: 'BAA', f: '🇦🇪', d: '971', n: 9, g: [2, 3, 4], p: '50 123 4567', k: 'baa dubay emirates uae' },
+  { c: 'Saudiya Arabistoni', f: '🇸🇦', d: '966', n: 9, g: [3, 3, 3], p: '501 234 567', k: 'saudiya arabiston saudi ksa' },
+  { c: 'Eron', f: '🇮🇷', d: '98', n: 10, g: [3, 3, 4], p: '912 123 4567', k: 'eron iran ir' },
+  { c: 'Iroq', f: '🇮🇶', d: '964', n: 10, g: [3, 3, 4], p: '712 345 6789', k: 'iroq iraq iq' },
+  { c: 'Afg‘oniston', f: '🇦🇫', d: '93', n: 9, g: [3, 3, 3], p: '701 234 567', k: 'afgoniston afghanistan af' },
+  { c: 'Xitoy', f: '🇨🇳', d: '86', n: 11, g: [3, 4, 4], p: '138 1234 5678', k: 'xitoy china cn' },
+  { c: 'Koreya', f: '🇰🇷', d: '82', n: 10, g: [3, 4, 3], p: '10 1234 5678', k: 'koreya korea kr seul' },
+  { c: 'Yaponiya', f: '🇯🇵', d: '81', n: 10, g: [3, 4, 3], p: '90 1234 5678', k: 'yaponiya japan jp' },
+  { c: 'Hindiston', f: '🇮🇳', d: '91', n: 10, g: [5, 5], p: '98765 43210', k: 'hindiston india in' },
+  { c: 'Pokiston', f: '🇵🇰', d: '92', n: 10, g: [3, 3, 4], p: '301 234 5678', k: 'pokiston pakistan pk' },
+  { c: 'Vetnam', f: '🇻🇳', d: '84', n: 9, g: [3, 3, 3], p: '912 345 678', k: 'vetnam vietnam vn' },
+  { c: 'Tailand', f: '🇹🇭', d: '66', n: 9, g: [2, 3, 4], p: '81 234 5678', k: 'tailand thailand th' },
+  { c: 'Indoneziya', f: '🇮🇩', d: '62', n: 9, nx: 12, g: [3, 4, 4], p: '812 3456 789', k: 'indoneziya indonesia id' },
+  { c: 'Malayziya', f: '🇲🇾', d: '60', n: 9, g: [2, 3, 4], p: '12 345 6789', k: 'malayziya malaysia my' },
+  { c: 'Filippin', f: '🇵🇭', d: '63', n: 10, g: [3, 3, 4], p: '917 123 4567', k: 'filippin philippines ph' },
+  { c: 'AQSh', f: '🇺🇸', d: '1', n: 10, g: [3, 3, 4], p: '917 123 4567', k: 'aqsh amerika qoshma shtatlar usa united states us' },
+  { c: 'Kanada', f: '🇨🇦', d: '1', n: 10, g: [3, 3, 4], p: '416 123 4567', k: 'kanada canada ca' },
+  { c: 'Braziliya', f: '🇧🇷', d: '55', n: 11, g: [2, 5, 4], p: '11 91234 5678', k: 'braziliya brazil br' },
+]
+let authCC = CC_LIST[0]
+const fmtGrp = (d, g) => { const o = []; let i = 0; for (const k of g) { if (i >= d.length) break; o.push(d.slice(i, i + k)); i += k } if (i < d.length) o.push(d.slice(i)); return o.join(' ') }
+function ccApply(x) {
+  authCC = x
+  $('cc-flag').textContent = x.f; $('cc-code').textContent = '+' + x.d
+  const inp = $('phone')
+  inp.placeholder = x.p; inp.maxLength = (x.nx || x.n) + x.g.length
+  let d = inp.value.replace(/\D/g, '')
+  if (d.startsWith(x.d) && d.length > x.n) d = d.slice(x.d.length)
+  d = d.slice(0, x.nx || x.n)
+  inp.value = fmtGrp(d, x.g)
+}
+$('cc-btn').onclick = () => {
+  const sh = sheet(h3('Davlat / kod') + `<input class="inp" id="cc-q" placeholder="Davlat nomi yoki kod…" autocomplete="off"><div class="list" id="cc-l" style="max-height:52vh;overflow:auto"></div>`)
+  const draw = (q) => {
+    const s = String(q || '').toLowerCase().replace(/['‘’ʻʼ`]/g, '').trim()
+    const rows = CC_LIST.filter((x) => !s || x.c.toLowerCase().replace(/['‘’ʻʼ`]/g, '').includes(s) || (x.k || '').includes(s) || x.d.startsWith(s))
+    qs('#cc-l', sh).innerHTML = rows.length
+      ? rows.map((x) => `<div class="cc-row" data-cci="${CC_LIST.indexOf(x)}"><span class="cc-f">${x.f}</span><b>${esc(x.c)}</b><span class="cc-d">+${x.d}</span></div>`).join('')
+      : '<div class="mut" style="padding:16px;text-align:center">Topilmadi</div>'
+    qsa('.cc-row', sh).forEach((r) => (r.onclick = () => { ccApply(CC_LIST[+r.dataset.cci]); closeSheet(sh); setTimeout(() => $('phone').focus(), 60) }))
+  }
+  qs('#cc-q', sh).addEventListener('input', (e) => draw(e.target.value))
+  draw('')
+}
 function showAuth() {
   $('auth').classList.remove('hide'); $('main').classList.add('hide'); $('dialog').classList.add('hide')
   step('a-phone'); setTimeout(() => $('phone').focus(), 50)
@@ -751,9 +839,12 @@ $('phone').addEventListener('input', (e) => {
   bandForce = false // raqam o'zgarsa — «mavjud» holati yangi raqamga tegishli emas
   const bn = $('band-note'); if (bn) bn.classList.add('hide')
   let d = e.target.value.replace(/\D/g, '')
-  if (d.startsWith('998') && d.length > 9) d = d.slice(3)
-  d = d.slice(0, 9)
-  e.target.value = [d.slice(0, 2), d.slice(2, 5), d.slice(5, 7), d.slice(7, 9)].filter(Boolean).join(' ')
+  // v100: to‘liq raqam yopishtirilgan bo‘lsa (+998…/+7…/+996…) — davlat kodini uzib tashla
+  if (d.startsWith(authCC.d) && d.length > authCC.n) d = d.slice(authCC.d.length)
+  // RU/KZ an’anasi: 8 bilan boshlangan to‘liq raqam (8 901 234 56 78)
+  if (authCC.d === '7' && d.length === 11 && d[0] === '8') d = d.slice(1)
+  d = d.slice(0, authCC.nx || authCC.n)
+  e.target.value = fmtGrp(d, authCC.g)
 })
 $('phone').addEventListener('keydown', (e) => e.key === 'Enter' && $('b-otp').click())
 $('code').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6); if (e.target.value.length === 6) $('b-verify').click() })
@@ -766,11 +857,11 @@ $('b-band-yes').onclick = () => { bandForce = true; $('band-note').classList.add
 $('b-band-no').onclick = () => { bandForce = false; $('band-note').classList.add('hide') }
 $('b-otp').onclick = async () => {
   const d = $('phone').value.replace(/\D/g, '')
-  if (d.length !== 9) return toast('Raqamni to‘liq kiriting: 90 123 45 67')
+  if (d.length < authCC.n || d.length > (authCC.nx || authCC.n)) return toast('Raqamni to‘liq kiriting: ' + authCC.p)
   $('band-note').classList.add('hide')
   const b = $('b-otp'); b.disabled = true; b.textContent = 'Yuborilmoqda...'
   try {
-    const r = await post('/auth/otp', { phone: '998' + d, ...(bandForce ? { force: 1 } : {}) })
+    const r = await post('/auth/otp', { phone: authCC.d + d, ...(bandForce ? { force: 1 } : {}) })
     bandForce = false
     authPhone = r.phone
     if (r.dev_code) {
@@ -1120,7 +1211,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v99'
+window.__50BUILD = 'v100'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
