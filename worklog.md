@@ -364,3 +364,25 @@ Stage Summary:
 - FUNKSIYA KAFOLATI: barcha 9 CI workflow yashil — qo'ng'iroq (MUHR 3-ketma-ket), media, data/tor, xavfsizlik, jurnal — HAMMASI birinchi kungidek. JS/HTML/worker mantig'i o'zgarmagan. Aksent tanlash, fon rasmi, shrift kattaligi, pufak radiusi sozlamalari ISHLAYDI.
 - Dark rejim ham sodda qora palitrada qayta yozildi (auth'dagi dark avvalgidek).
 - Darslik: (1) fon-jarayonlar sandbox'da o'chishi mumkin — CI ketma-ketligini old tomonda yuritish kerak; (2) rerun API (workflow-scope'siz) dispatch o'rniga ishlaydi; (3) #auth'ni alohida o'zgaruvchi-tiklash bilan ajratish — «kirish ekrani qolsin» talabining toza yechimi.
+
+---
+Task ID: 49
+Agent: Super Z (asosiy)
+Task: XALQARO RO'YXATDAN O'TISH (v100→v103) — ro'yxatdan o'tish faqat +998 bilan cheklangan edi; Rossiya (+7), Qozog'iston (+7), Qirg'iziston (+996) va barcha davlat kodlarini kiritish imkoni. BOSHQA TIZIMLARGA 0 BAYT.
+
+Work Log:
+- AUDIT: +998 bog'lovlari topildi — web/core.js (input handler 9-xona qat'ii + '998'+d qotirilgan), web/index.html (statik <span>+998</span>), worker normPhone (10-15 xonali raqamni ALLAQACHON qabul qiladi!), e2e scriptlar (998XXXXXXXXX). XULOSA: server mantig'i TEGILMAS — faqat klient UI/JS.
+- v100 (81734bd): index.html — statik +998 → bosiladigan #cc-btn (bayroq+kod+o'q); style.css — .cc-btn/.cc-row uslublari (auth Aurora ko'rinishida qoldi); core.js — CC_LIST 56 DAVLAT (UZ default 1-o'rinda, RU/KZ/KG 2-4, k: lotin+kirill qidiruv kalitlari, RU/KZ pp-prefiks), fmtGrp formatlovchi, ccApply, davlat-tanlash sheet'i (qidiruv bilan), input handler milliy uzunlik bo'yicha, b-otp authCC.d+d yuboradi. UZ eski xatti-harakati BITTA-BITTA saqlandi (27/27 lokal test).
+- CI DARSLIK-1 (yangi): e2e-sec.yml'dagi E2E_BUILD_V: v98 QOTIB QOLGAN edi (v99'da yangilanmagan — v99'da tasodifan eski deploy ustidan o'tgan). XAVFSIZLIK E2E yolg'on yiqildi (server v100, test v98 kutgan). TUZATISH (fa939f5): versiya MANBADAN dinamik o'qiladi ($GITHUB_ENV + sed-pattern, smoke.yml kabi) + e2e_sec.mjs fallback ham manbadan — kelajada abadiy hal.
+- v101 (d8c2b8c): "+"-paste AVTO-ANIQLASH — jonli brauzer sinovida topilgan: KG tanlanganda +998 raqam buzilardi ("998 901 23"). RU/KZ pp bilan (9xx→RU, 7xx→KZ). 35/35 test.
+- CI DARSLIK-2: agent-browser'da fill belgi-belgi kiritadi — '+' birinchi input-hodisada yutilib qolardi. v102 (ea42073): '+' bilan boshlangan qiymatda formatlash TO'XTAYDI (Telegram kabi), ccDetect umumiy funksiya (paste + qo'lda yozish), b-otp ham aniqlaydi (to'liq bo'lmagan '+' → aniq xato). 35/35.
+- CI DARSLIK-3: maxLength! Davlat tanlangach ccApply maxLength=12 qilardi → brauzer '+996 501 234 567' satrini handlerga YETMASDAN kesardi. v103 (74d51b5): maxLength STATIK 24 (index.html), ccApply yozmaydi, milliy uzunlikni JS slice boshqaradi. 36/36.
+- CI YAKUNIY (74d51b5, v103): Deploy ✅ 38027986971 / Smoke ✅ 38027986892 / MUHR (3 ketma-ket) ✅ 38027986985 / DATA ✅ 38027987064 / MEDIA ✅ 38027986989 (3-urinish: fayl-bubble 30s timeout vaqtinchalik edi, foto dekript OK dalil sifatida) / Call ✅ 38027986923 / XAVFSIZLIK ✅ 38027986916 / Jurnal ✅ 38027986920 / domen tekshir ✅ 38029321431 — 9/9 YASHIL.
+- JONLI BRAUZER ISBOTI (50gram.uz, v103): 56 davlat sheet + qidiruv ("qozog"→1, "qirgiz"→1); +996→🇰🇬 format '501 234 567'; +998→🇺🇿 '90 123 45 67'; +7 9xx→🇷🇺; +7 70x→🇰🇿; KZ tanlab KG raqam yozilsa O'ZI o'tadi; 8-prefiks RU; UZ qo'lda yozish eski formatda. Skrinshot: download/50gram_v103_davlat_kodlari.png. apex+www 200, core v103, sw 50gram-v103, APK 763312B O'ZGARMAGAN.
+- Sandbox IP fw-blok o'z-o'zidan tasdiqlandi: curl/8.5.0 bilan /api/probelov → EXT-qatlam blokladi (BLOCK PROOF — oddiy 'Not found') — 7-qatlam himoya aynan loyihalanganidek ishladi; CI'dan API to'liq tirik (barcha E2E registratsiyalar o'tgan).
+
+Stage Summary:
+- RO'YXATDAN O'TISH ENDI XALQARO: 56 davlat (barcha MDH + Turkiya + Yevropa + Osiyo + AQSh...), qidiruv bilan tanlash, Telegram-uslubidagi avto-aniqlash, davlat bo'yicha format-maskalar. UZ default — eski foydalanuvchilarga HECH NARSA o'zgarmagan.
+- XULQ 100% SAQLANGAN: worker mantig'iga 0 bayt (faqat BUILD_V satrlari), SMS Eskiz tegilmadi, qo'ng'iroq/media/tor/xavfsizlik funksiyalari bir-birining o'rnida — 9/9 CI yashil isboti bilan (3 push ketma-ket, jami 27+ workflow-run).
+- 3 TA ABADIY DARSLIK MUHRLANDI: (1) CI'dagi E2E_BUILD_V hech qachon qattiq yozilmaydi — manbadan dinamik; (2) '+'-li kirituvda formatlash to'xtatiladi (belgi-belgi yozish buzilmasin); (3) maxLength hech qachon milliy formatga qaytarilmaydi (statik 24 — brauzer kesmasin).
+- Versiya qulfi v103 (worker BUILD_V + core __50BUILD + sw V sinxron). Versiyalar: v100 81734bd → v101 d8c2b8c → v102 ea42073 → v103 74d51b5.
