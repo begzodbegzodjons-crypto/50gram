@@ -17,8 +17,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      # v100 DARSLIK: E2E_BUILD_V qattiq yozilgan edi (v98'da qolib ketgan) — har versiya
+      # oshganda XAVFSIZLIK E2E yolg'on yiqilar edi. Endi versiya MANBADAN dinamik o'qiladi
+      # (smoke.yml'dagi kabi) — kelajada hech qachon yangilanishi shart emas.
+      - name: Versiyani manbadan o'qish (qulf dinamik — qattiq yozish taqiqlanadi)
+        run: echo "E2E_BUILD_V=v$(sed -nE 's/^const BUILD_V = \"v([0-9]+)\".*/\1/p' worker/src/index.ts | head -1)" >> "$GITHUB_ENV"
       - name: Xavfsizlik E2E — trap/inj/ext/otp-pump/json-cap + fw/fix qutqaruv (jonli saytga qarshi)
         env:
           E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
-          E2E_BUILD_V: v98
+          E2E_BUILD_V: ${{ env.E2E_BUILD_V }}
         run: node scripts/e2e_sec.mjs

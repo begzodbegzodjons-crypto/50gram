@@ -16,6 +16,7 @@
  * DIQQAT: bu test o'z runner-IP'sini ATAYLAB bloklaydi (haqiqiy hujum simulyatsiyasi) va
  * oxirida fw/fix bilan OZOD qiladi — shu sababli boshqa E2E'lardan KEYIN ketma-ket yuguradi.
  */
+import { readFileSync } from 'node:fs'
 const BASE = (process.env.E2E_BASE || 'https://50gram.begzodbegzodjons.workers.dev').replace(/\/$/, '')
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 // smoke (003/004), call (005/006), media (007/008), MUHR (009/010), data (011/012) — bu testniki:
@@ -49,7 +50,7 @@ let tokAdmin = null, tokU1 = null, tokU2 = null
 try {
   // 0) DEPLOY-SINXRON: push-trigger'da deploy tugamasdan test boshlanmasin — /api/build
   //    kutilgan versiyani qaytarguncha kutish (max 3 min). Bu test v98 xususiyatlarini sinaydi.
-  const WANTV = process.env.E2E_BUILD_V || 'v98'
+  const WANTV = process.env.E2E_BUILD_V || 'v' + (readFileSync(new URL('../worker/src/index.ts', import.meta.url), 'utf8').match(/BUILD_V = "v([^"]+)"/) || [])[1]
   let bv = null
   for (let i = 0; i < 36; i++) {
     const b = await j('/api/build').catch(() => null)
