@@ -145,6 +145,10 @@ function fwSoat(m: Map<number, { n: number; t: number }>, uid: number, need: num
   return e.n > need
 }
 let FW_YANGI = 0
+// v106 HIMOYA-HOLATI (egapanel tugmasi): true = himoya qatlami VAQTINCHA O'CHIQ
+// (egasi o'zgartirish kiritayotganda — hujum-himoya hech narsani bloklamaydi, iz ham qolmaydi).
+// Manba: SEC DO cfg jadvali — har refresh'da (≤45s) fwQollash orqali yangilanadi. Boshlang'ich: YONIQ.
+let FW_OFF = false
 // TIZIM ILDIGA / ADMIN YO'LLARIGA URINISH — bitta urinishda ham 30 kun blok
 // (skanerlarning sevimli manzillari kengaytirildi — oddiy foydalanuvchi bu yo'llarga
 //  HECH QACHON kirmaydi, barchasi ilova ichidan ma'lum yo'llargina so'raydi)
@@ -164,8 +168,10 @@ const FW_UA_OK = /mozilla|50gramapp|dalvik/i
 const fwIp = (req: Request) => (req.headers.get("cf-connecting-ip") || "").trim()
 const FW_404 = () => new Response("Not found", { status: 404, headers: { ...SEC_H } })
 // Lokal (izolyat) blok — VAQTINCHA 2 daqiqa: DO tasdiqlasa uzayadi, yechilsa o'zi tozalanadi
-const fwLBlok = (ip: string, dur: number) => { const t = Date.now(); FW_KESH.set(ip, { u: t + Math.min(dur, 120_000), t, v: 0 }) }
+// v106: himoya O'CHIQ bo'lsa — lokal blok ham qo'yilmaydi (to'liq pass-through)
+const fwLBlok = (ip: string, dur: number) => { if (FW_OFF) return; const t = Date.now(); FW_KESH.set(ip, { u: t + Math.min(dur, 120_000), t, v: 0 }) }
 function fwBlokli(ip: string) {
+  if (FW_OFF) return false // v106: himoya o'chiq — blok-tekshiruvi o'tkazilmaydi
   const e = FW_KESH.get(ip)
   if (e && e.u > Date.now()) return true
   if (e) FW_KESH.delete(ip)
@@ -179,6 +185,8 @@ let FW_FYANGI = 0 // majburiy (bloklanganlar yo'li) refresh oxirgi vaqti
 // DO blok ro'yxatini keshga qo'llash: ro'yxatda yo'qlar o'chadi (v=1 — darhol,
 // v=0 — 90s dan eskirganlari), ro'yxatdagilar to'liq muddat bilan yoziladi (v=1).
 function fwQollash(j: any) {
+  // v106: himoya-holati ham shu yo'lakda tarqaladi (DO yagona manba → barcha izolyatlar ≤45s)
+  FW_OFF = !!j.fwoff
   const nw = new Set<string>()
   for (const [ip2] of (j.blocks || []) as Array<[string, number]>) nw.add(String(ip2))
   const t2 = Date.now()
@@ -217,6 +225,7 @@ function fwKeshYana(env: Env, wait: (p: Promise<unknown>) => void) {
 // Lokal ochko — shu izolyatda MILLIYATLAR ichida to'siq (DO javobini kutmaydi).
 // need <= 1 bo'lsa — BIRINCHI urinishdayoq DARHOL blok (hujumchi hech narsa ololmaydi).
 function fwLokal(ip: string, kind: string, need: number, dur: number) {
+  if (FW_OFF) return false // v106: himoya o'chiq — lokal ochkolar ham hisoblanmaydi
   if (need <= 1) { fwLBlok(ip, dur); FW_ALOC.delete(ip + "|" + kind); return true }
   const k = ip + "|" + kind
   const t = Date.now()
@@ -276,7 +285,7 @@ async function secYoz(env: Env, ip: string, kind: string, weight: number, info: 
 // (toshqin hujumida D1 yozuvlari portlab ketmasin; blok hodisasi — HAR DOIM yoziladi)
 const FW_SLOG = new Map<string, number>()
 function fwOchko(env: Env, wait: (p: Promise<unknown>) => void, ip: string, kind: string, weight = 1, info?: SecInfo) {
-  if (!ip || !env.SEC) return
+  if (!ip || !env.SEC || FW_OFF) return // v106: himoya o'chiq — DO'ga hech narsa yozilmaydi
   wait((async () => {
     try {
       const st = env.SEC!.get(env.SEC!.idFromName("global"))
@@ -322,7 +331,9 @@ const normPhone = (p: unknown) => {
 }
 const USERNAME_RE = /^[a-zA-Z][a-zA-Z0-9_]{4,31}$/
 const USER_COLS = "id,phone,first_name,last_name,username,bio,avatar_ver,privacy_phone,privacy_last_seen,last_seen,prefs"
-const CHAT_COLS = "id,type,title,description,username,avatar_ver,owner_id,is_public,invite_hash,join_approval,permissions,settings,member_count,last_msg_at,created_at,pinned_id"
+const CHAT_COLS = "id,type,title,description,username,avatar_ver,owner_id,is_public,invite_hash,join_approval,permissions,settings,member_count,last_msg_at,created_at,pinned_id,blocked"
+// chatOut() maydonlarni ANIQ tanlaydi — shuning uchun blocked ustuni klient javoblarida KO'RINMAYDI
+// (faqat server ichida sendMessage/joinChat/panel tekshiruvlari ishlatadi)
 // Sozlamalar sinxronizatsiyasi (v71): klient yuboradigan HAMMA kalitlar — aks holda
 // push-filtr (pushChatMsg'dagi prefs.push===0) o'lik kod bo'lib qoladi va tungi
 // ovozsizlik/Reels/animatsiya sozlamalari qurilmalar orasida ko'chmaydi.
@@ -336,7 +347,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v105"
+const BUILD_V = "v106"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -431,6 +442,13 @@ async function ensureSchema(db: Db) {
     // jiddiy blok (root/ext/inj/data/auth-blok) DARHOL signal; 10 daqiqada 8+ ochko ham signal.
     "CREATE TABLE IF NOT EXISTS sec_alarm (id BIGINT PRIMARY KEY, ts BIGINT NOT NULL, kind VARCHAR(24) NOT NULL DEFAULT '', ip VARCHAR(64) NOT NULL DEFAULT '', cc VARCHAR(8) NOT NULL DEFAULT '', n INT NOT NULL DEFAULT 0, note VARCHAR(200) NOT NULL DEFAULT '')",
     "CREATE INDEX IF NOT EXISTS idx_secalm_ts ON sec_alarm (ts)",
+    // v106: KANAL/GURUH BLOKI — egapanel bloklaydi (bloklangan kanal/guruhga yozish va kirish yopiladi,
+    // default 0 — ilova xulqi o'zgarmagan; flag faqat paneldan qo'yiladi)
+    "ALTER TABLE chats ADD COLUMN blocked INT NOT NULL DEFAULT 0",
+    // v106: BOSHQARUV JURNALI — panel amallari tarixi (blok/ochirish/chetlatish/himoya holati) —
+    // egada har bir boshqaruv amali dalili bilan. Retensiyasi 90 kun (cleanup).
+    "CREATE TABLE IF NOT EXISTS adm_log (id BIGINT AUTO_INCREMENT PRIMARY KEY, ts BIGINT NOT NULL, act VARCHAR(32) NOT NULL DEFAULT '', tgt VARCHAR(64) NOT NULL DEFAULT '', note VARCHAR(300) NOT NULL DEFAULT '')",
+    "CREATE INDEX IF NOT EXISTS idx_admlog_ts ON adm_log (ts)",
   ]
   for (const s of stmts) { try { await db.run(s) } catch {} }
   try {
@@ -1016,6 +1034,8 @@ async function joinChat(c: C) {
   const id = +c.p.id
   const ch = await needChat(c, id)
   if (ch.type === "direct") fail("Bu shaxsiy chat")
+  // v106: egapanel bloklagan kanal/guruhga kirish yopiq (flag faqat paneldan qo'yiladi)
+  if (+ch.blocked === 1) fail("Bu chat bloklangan", 403)
   const m = await member(c, id)
   if (m?.status === "banned") fail("Siz bu chatdan chetlatilgansiz", 403)
   if (m?.status === "active") return json({ joined: true })
@@ -1220,6 +1240,9 @@ async function getMessages(c: C) {
 async function sendMessage(c: C) {
   const id = +c.p.id
   const ch = await needChat(c, id)
+  // v106: egapanel bloklagan kanal/guruhga yozib bo'lmaydi (flag faqat paneldan qo'yiladi,
+  // default 0 — oddiy foydalanuvchi uchun bu qator hech qachon ishga tushmaydi)
+  if (+ch.blocked === 1) fail("Bu kanal/guruh bloklangan", 403)
   const m = await member(c, id)
   if (!m || m.status !== "active") fail(m?.status === "banned" ? "Siz chetlatilgansiz" : "Avval qo‘shiling", 403)
   const kind = String(c.b.kind || "text")
@@ -3502,6 +3525,9 @@ async function panelBlock(c: C) {
   if (!id || id === ADM_ID) fail("Noto‘g‘ri foydalanuvchi", 400)
   if (!(await c.db.one("SELECT id FROM users WHERE id=?", [id]))) fail("Foydalanuvchi topilmadi", 404)
   await c.db.run("UPDATE users SET blocked=? WHERE id=?", [on, id])
+  const uu = await c.db.one("SELECT first_name, last_name, phone FROM users WHERE id=?", [id]).catch(() => null)
+  await admLog(c, on ? "foy_blok" : "foy_blok_och", "user:" + id,
+    (on ? "BLOKLANDI" : "Blok olib tashlandi") + ": " + ((uu ? (uu.first_name || "") + " " + (uu.last_name || "") : "") || "").trim().slice(0, 40) + " " + (uu?.phone || ""))
   return json({ ok: true, id, blocked: on })
 }
 
@@ -3570,6 +3596,7 @@ async function panelBroadcast(c: C) {
       sent += mrows.length
     }
   }
+  await admLog(c, "hammaga_xabar", "barcha", "HAMMAGA XABAR yuborildi (" + sent + " foydalanuvchiga, " + newChats + " yangi suhbat): " + body.slice(0, 120))
   return json({ ok: true, sent, new_chats: newChats, total, now: t })
 }
 
@@ -3594,12 +3621,14 @@ async function panelSecurity(c: C) {
     c.db.one("SELECT ts, kind, ip, cc, note FROM sec_alarm ORDER BY id DESC LIMIT 1").catch(() => null),
   ])
   // Hozir blokda turgan IP'lar soni — SEC DO (doimiy bloklar ombori) — faqat egaga ko'rinadi
-  let blocks = 0, blocksTop: Array<{ ip: string; until: number; ms: number }> = []
+  // v106: shu javobda himoya-holati (fwoff) ham qaytadi — DO yagona ishonchli manba
+  let blocks = 0, fwoff = 0, blocksTop: Array<{ ip: string; until: number; ms: number }> = []
   try {
     const r = await c.env.SEC!.get(c.env.SEC!.idFromName("global")).fetch("https://fw/?op=refresh")
     const j: any = await r.json()
     const bl: Array<[string, number]> = j.blocks || []
     blocks = bl.length
+    fwoff = j.fwoff ? 1 : 0
     blocksTop = bl
       .sort((a, b) => b[1] - a[1])
       .slice(0, 12)
@@ -3607,7 +3636,7 @@ async function panelSecurity(c: C) {
   } catch {}
   return json({
     e24: Number(e24?.n || 0), e7: Number(e7?.n || 0), eall: Number(eall?.n || 0), uip: Number(uip?.n || 0),
-    blocks, blocksTop,
+    blocks, blocksTop, fwoff,
     kinds: (byKind as any[]).map((r) => ({ k: r.kind, n: Number(r.n), name: SEC_KIND_UZ[String(r.kind)] || String(r.kind) })),
     ccs: (byCc as any[]).map((r) => ({ cc: String(r.cc || "??"), n: Number(r.n) })),
     paths: (byPath as any[]).map((r) => ({ p: String(r.path || "?"), n: Number(r.n) })),
@@ -3688,7 +3717,288 @@ async function panelDm(c: C) {
     )
   }
   await c.db.run("UPDATE chats SET last_msg_at=? WHERE id=?", [t, chid])
+  await admLog(c, "alohida_xabar", "user:" + id, "ALOHIDA XABAR yuborildi: " + body.slice(0, 150))
   return json({ ok: true, id, chat_id: chid, now: t })
+}
+
+// =====================================================================
+// v106: KANAL/GURUH MODERATSIYASI + HIMOYA TUGMASI (faqat egapanel)
+// ---------------------------------------------------------------------
+//  • KANALLAR BO'LIMI: barcha kanal/guruher ro'yxati (a'zolar soni, egasi,
+//    xabarlar hisobi), har birining MA'LUMOT OYNASI (xabarlar + a'zolar).
+//  • YOMON SO'ZLAR: so'kinish belgilari to'plamı (PROF_REG) — panel xabarlarni
+//    QIZIL bilan belgilaydi; egasi bittadan yoki BARCHASINI bir zumda o'chiradi.
+//    Avtomatik o'chirish YO'Q — false-positive himoyasi (egasi ko'rib tasdiqlaydi).
+//  • BLOKLASH: chats.blocked=1 → kanalga yozish/kirish 403 (sendMessage/joinChat).
+//    Blokdan chiqarish — yozuv butunlay olib tashlanadi (blocked=0).
+//  • CHETLATISH/KICK: obunachini kanaldan chiqarish yoki ban (qayta kirish yopiq).
+//  • TOZALASH: kanaldagi barcha xabarlar o'chiriladi (chat_cleared — klient o'zi tozalaydi).
+//  • O'CHIRISH: kanal "tagi bilan" — xabarlar/a'zolar/media/izohlar + chat yozuvi.
+//  • HIMOYA TUGMASI: o'zgartirish kiritayotganda himoya qatlamini O'CHIRISH, keyin
+//    YOQISH — SEC DO cfg'da saqlanadi, barcha izolyatlarga ≤45s da yetadi.
+//  • BOSHQARUV JURNALI: har panel amali adm_log'ga yoziladi (90 kun saqlanadi).
+// =====================================================================
+// YOMON SO'Z FILTRI (so'kinish ildizlari — uz/ru, latin+cyrillic): panel belgilash uchun.
+// SQL REGEXP bilan bir xil satr ishlatiladi (cleanbad) — bitta manba.
+const PROF_REG = "siktir|sikk|sikay|sikir|sikib|sikish|siksin|qanjiq|xuy|huy|pizd|eblan|blyad|blya|cyka|мудак|дебил|пизд|хуй|еба|бля|сука|наху|gandon|dalbayob|dalba"
+const PROF_RE = new RegExp(PROF_REG, "i")
+// Panel amali jurnali — har boshqaruv amali dalil bilan (try/catch: jurnal xato qilsa ham amal bajariladi)
+async function admLog(c: C, act: string, tgt: string, note: string) {
+  try { await c.db.run("INSERT INTO adm_log(ts,act,tgt,note) VALUES(?,?,?,?)", [now(), String(act).slice(0, 30), String(tgt).slice(0, 60), String(note).slice(0, 290)]) } catch {}
+}
+
+// ---- KANALLAR/GURUHLAR RO'YXATI (a'zolar soni bo'yicha) ----
+async function panelChats(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const page = Math.max(1, Math.min(500, Math.floor(+(c.url.searchParams.get("page") || 1) || 1)))
+  const qq = str(c.url.searchParams.get("q"), 64)
+  const ft = str(c.url.searchParams.get("ft"), 10)
+  const conds = ["c.type<>'direct'"]
+  const params: unknown[] = []
+  if (ft === "channel" || ft === "group") { conds.push("c.type=?"); params.push(ft) }
+  if (ft === "blocked") conds.push("c.blocked=1")
+  if (qq) {
+    const like = "%" + qq.replace(/[%_]/g, "") + "%"
+    conds.push("(c.title LIKE ? OR c.username LIKE ?)")
+    params.push(like, like)
+  }
+  const w = "WHERE " + conds.join(" AND ")
+  const LIM = 50
+  const [rows, cnt, stat] = await Promise.all([
+    c.db.q(
+      `SELECT c.id, c.type, c.title, c.username, c.avatar_ver, c.member_count, c.last_msg_at, c.created_at, c.blocked,
+        u.first_name, u.last_name, u.phone
+       FROM chats c LEFT JOIN users u ON u.id=c.owner_id ${w}
+       ORDER BY c.member_count DESC LIMIT ${LIM} OFFSET ${(page - 1) * LIM}`,
+      params,
+    ),
+    c.db.one(`SELECT COUNT(*) AS n FROM chats c ${w}`, params),
+    c.db.one(`SELECT SUM(CASE WHEN type='channel' THEN 1 ELSE 0 END) AS nc, SUM(CASE WHEN type='group' THEN 1 ELSE 0 END) AS ng, SUM(CASE WHEN blocked=1 THEN 1 ELSE 0 END) AS nb FROM chats WHERE type<>'direct'`).catch(() => null),
+  ])
+  // xabarlar hisobi — bitta GROUP BY so'rovi (har qatorga subquery — TiDB yuklamasi bo'lmasin)
+  const ids = rows.map((r) => +r.id)
+  const msgs = new Map<number, number>()
+  if (ids.length) {
+    const mr = await c.db.q(`SELECT chat_id, COUNT(*) AS n FROM messages WHERE chat_id IN (${ph(ids)}) AND deleted=0 GROUP BY chat_id`, ids).catch(() => [] as any[])
+    for (const r of mr) msgs.set(+r.chat_id, Number(r.n))
+  }
+  return json({
+    chats: rows.map((r) => ({
+      id: +r.id, type: String(r.type), title: r.title || "", username: r.username || "", av: +r.avatar_ver || 0,
+      owner: ((r.first_name || "") + " " + (r.last_name || "")).trim(), ophone: String(r.phone || ""),
+      members: Number(r.member_count) || 0, msgs: msgs.get(+r.id) || 0,
+      cr: +r.created_at || 0, lm: +r.last_msg_at || 0, bl: +r.blocked === 1,
+    })),
+    total: Number(cnt?.n || 0), page, pages: Math.max(1, Math.ceil(Number(cnt?.n || 0) / LIM)),
+    nc: Number(stat?.nc || 0), ng: Number(stat?.ng || 0), nb: Number(stat?.nb || 0), now: now(),
+  })
+}
+
+// ---- BITTA KANAL/GURUH TO'LIQ MA'LUMOT OYNASI (xabarlar + a'zolar bilan) ----
+async function panelChat(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const id = Math.floor(+(c.url.searchParams.get("id") || 0) || 0)
+  if (!id) fail("Chat topilmadi", 400)
+  const ch = await c.db.one(
+    "SELECT id, type, title, description, username, avatar_ver, owner_id, member_count, last_msg_at, created_at, blocked FROM chats WHERE id=?", [id],
+  ).catch(() => null)
+  if (!ch || ch.type === "direct") fail("Chat topilmadi", 404)
+  const [owner, mcnt, mrows, mrows2] = await Promise.all([
+    c.db.one("SELECT id, first_name, last_name, phone, blocked FROM users WHERE id=?", [ch.owner_id]).catch(() => null),
+    c.db.one("SELECT COUNT(*) AS n FROM messages WHERE chat_id=? AND deleted=0", [id]).catch(() => null),
+    c.db.q(
+      `SELECT m.user_id, m.role, m.status, u.first_name, u.last_name, u.phone, u.blocked AS ublk
+       FROM chat_members m LEFT JOIN users u ON u.id=m.user_id
+       WHERE m.chat_id=? AND m.status='active'
+       ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, m.joined_at LIMIT 60`, [id],
+    ).catch(() => [] as any[]),
+    c.db.q("SELECT id, sender_id, kind, LEFT(body,180) AS body, created_at FROM messages WHERE chat_id=? AND deleted=0 ORDER BY id DESC LIMIT 40", [id]).catch(() => [] as any[]),
+  ])
+  const sids = [...new Set((mrows2 as any[]).map((r) => +r.sender_id))]
+  const sm = new Map<number, string>()
+  if (sids.length) {
+    const sr = await c.db.q(`SELECT id, first_name, last_name, username FROM users WHERE id IN (${ph(sids)})`, sids).catch(() => [] as any[])
+    for (const s of sr) {
+      const nm = ((s.first_name || "") + " " + (s.last_name || "")).trim()
+      sm.set(+s.id, nm + (s.username ? " (@" + s.username + ")" : ""))
+    }
+  }
+  return json({
+    id: +ch.id, type: String(ch.type), title: ch.title || "", username: ch.username || "", desc: ch.description || "",
+    owner: owner
+      ? { id: +owner.id, name: ((owner.first_name || "") + " " + (owner.last_name || "")).trim(), phone: String(owner.phone || ""), cc: ccOf(owner.phone), bl: +owner.blocked === 1 }
+      : { id: 0, name: "—", phone: "", cc: "XX", bl: false },
+    members: Number(ch.member_count) || 0, msgs: Number(mcnt?.n || 0),
+    cr: +ch.created_at || 0, lm: +ch.last_msg_at || 0, bl: +ch.blocked === 1,
+    // bad: yomon so'z belgisi (egasi ko'rib, o'zi o'chiradi — avtomatik o'chirish yo'q)
+    messages: (mrows2 as any[]).map((r) => ({ id: +r.id, ts: +r.created_at, kind: String(r.kind), sender: sm.get(+r.sender_id) || "ID " + r.sender_id, body: String(r.body || "").slice(0, 180), bad: PROF_RE.test(String(r.body || "")) })),
+    mlist: (mrows as any[]).map((r) => ({ id: +r.user_id, name: ((r.first_name || "") + " " + (r.last_name || "")).trim(), phone: String(r.phone || ""), cc: ccOf(r.phone), role: String(r.role), ublk: +(r.ublk || 0) === 1 })),
+    now: now(),
+  })
+}
+
+// ---- KANAL BLOKLASH / BLOK YOZUVINI OLIB TASHLASH ----
+async function panelChatBlock(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const id = Math.floor(+(c.b?.id) || 0)
+  const on = c.b?.on ? 1 : 0
+  const ch = await c.db.one("SELECT id, type, title, blocked FROM chats WHERE id=?", [id]).catch(() => null)
+  if (!ch || ch.type === "direct") fail("Chat topilmadi", 404)
+  if (+ch.blocked === on) return json({ ok: true, id, blocked: on, unchanged: true })
+  await c.db.run("UPDATE chats SET blocked=? WHERE id=?", [on, id])
+  await admLog(c, on ? "chat_blok" : "chat_blok_och", "chat:" + id, (on ? "BLOKLANDI" : "Blok olib tashlandi") + ": " + String(ch.title || "").slice(0, 60))
+  return json({ ok: true, id, blocked: on })
+}
+
+// ---- KANALNI "TAGI BILAN" O'CHIRISH (xabarlar+a'zolar+media+izohlar+chat) ----
+async function panelChatDelete(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const id = Math.floor(+(c.b?.id) || 0)
+  const ch = await c.db.one("SELECT id, type, title FROM chats WHERE id=?", [id]).catch(() => null)
+  if (!ch || ch.type === "direct") fail("Chat topilmadi", 404)
+  const ids = (await c.db.q("SELECT user_id FROM chat_members WHERE chat_id=? LIMIT 41", [id])).map((r) => r.user_id)
+  await SW.dropMedia(c.db, "chat_id=?", [id])
+  // izoh-reaksiya-so'rov qoldiqlarini ham tozala (deleteChat bilan bir xil + qo'shimcha to'liqlik)
+  await c.db.run("DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE chat_id=?)", [id]).catch(() => {})
+  await c.db.run("DELETE FROM poll_votes WHERE message_id IN (SELECT id FROM messages WHERE chat_id=?)", [id]).catch(() => {})
+  await c.db.run("DELETE FROM msg_comments WHERE chat_id=?", [id]).catch(() => {})
+  await c.db.run("DELETE FROM messages WHERE chat_id=?", [id])
+  await c.db.run("DELETE FROM chat_members WHERE chat_id=?", [id])
+  await c.db.run("DELETE FROM join_requests WHERE chat_id=?", [id])
+  await c.db.run("DELETE FROM chats WHERE id=?", [id])
+  c.wait(notify(c.env, ids, { type: "chat_deleted", chat_id: id }))
+  await admLog(c, "chat_ochirish", "chat:" + id, "TAGI BILAN O'CHIRILDI: " + String(ch.title || "").slice(0, 60) + " (" + ids.length + " a'zoga xabar berildi)")
+  return json({ ok: true, id, members: ids.length })
+}
+
+// ---- OBUNACHINI KANALDAN CHIQARISH / CHETLATISH (ban — qayta kirish yopiq) ----
+async function panelChatKick(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const id = Math.floor(+(c.b?.id) || 0)
+  const uid = Math.floor(+(c.b?.uid) || 0)
+  const ban = c.b?.ban ? 1 : 0
+  const ch = await c.db.one("SELECT id, type, title, owner_id FROM chats WHERE id=?", [id]).catch(() => null)
+  if (!ch || ch.type === "direct") fail("Chat topilmadi", 404)
+  if (!uid) fail("Foydalanuvchi topilmadi", 400)
+  if (uid === ch.owner_id) fail("Kanal egasini chiqarib bo'lmaydi — kanalni o'chirish tugmasidan foydalaning", 400)
+  const mem = await c.db.one("SELECT role, status FROM chat_members WHERE chat_id=? AND user_id=?", [id, uid]).catch(() => null)
+  if (!mem || mem.status !== "active") fail("Bu foydalanuvchi kanal a'zosi emas", 404)
+  if (ban) {
+    await c.db.run("REPLACE INTO chat_members(chat_id,user_id,role,status,joined_at) VALUES(?,?,'member','banned',?)", [id, uid, now()])
+    await c.db.run("DELETE FROM join_requests WHERE chat_id=? AND user_id=?", [id, uid]).catch(() => {})
+  } else {
+    await c.db.run("DELETE FROM chat_members WHERE chat_id=? AND user_id=?", [id, uid])
+  }
+  await recount(c, id)
+  c.wait(notify(c.env, [uid], { type: "chat_update", chat_id: id }))
+  await admLog(c, ban ? "chat_ban" : "chat_kick", "chat:" + id + "/u:" + uid, (ban ? "CHETLATILDI" : "KANALDAN CHIQARILDI") + ": " + String(ch.title || "").slice(0, 40))
+  return json({ ok: true, id, uid, ban })
+}
+
+// ---- KANAL XABARLARINI TOZALASH (hamma yozuvlar o'chiriladi, chat qoladi) ----
+async function panelChatClear(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const id = Math.floor(+(c.b?.id) || 0)
+  const ch = await c.db.one("SELECT id, type, title FROM chats WHERE id=?", [id]).catch(() => null)
+  if (!ch || ch.type === "direct") fail("Chat topilmadi", 404)
+  const t = now()
+  await c.db.run("UPDATE messages SET deleted=1, body=NULL, meta=NULL, updated_at=? WHERE chat_id=? AND deleted=0", [t, id])
+  await c.db.run("UPDATE media SET dropped=1 WHERE chat_id=? AND dropped=0", [id]).catch(() => {})
+  await c.db.run("UPDATE chats SET pinned_id=0 WHERE id=?", [id]).catch(() => {})
+  await c.db.run("UPDATE chat_members SET pinned=0 WHERE chat_id=?", [id]).catch(() => {})
+  notifyChat(c, id, { type: "chat_cleared", chat_id: id, now: t })
+  await admLog(c, "chat_tozalash", "chat:" + id, "BARCHA XABARLAR O'CHIRILDI: " + String(ch.title || "").slice(0, 60))
+  return json({ ok: true, id, now: t })
+}
+
+// ---- YOMON SO'ZLI XABARLARNI BIR ZUMDA O'CHIRISH (egasi tasdiqlagandan keyin) ----
+// Bitta so'rovda ≤100 ta (subrequest-byudjet); javobda o'chirilgani qaytadi — qolganlari
+// uchun egasi yana bir marta bosadi (katta kanal toshqinidan posbon).
+async function panelChatCleanBad(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const id = Math.floor(+(c.b?.id) || 0)
+  const ch = await c.db.one("SELECT id, type, title FROM chats WHERE id=?", [id]).catch(() => null)
+  if (!ch || ch.type === "direct") fail("Chat topilmadi", 404)
+  const rows = await c.db.q("SELECT id, meta FROM messages WHERE chat_id=? AND deleted=0 AND body IS NOT NULL AND body REGEXP ? LIMIT 100", [id, PROF_REG]).catch(() => [] as any[])
+  if (!rows.length) return json({ ok: true, removed: 0 })
+  const mids = rows.map((r) => +r.id)
+  const t = now()
+  // media (rasm/video/fayl) — serverdagi nusxalari ham o'chiriladi (≤20 — byudjet posboni)
+  let mediaDropped = 0
+  for (const r of rows) {
+    if (mediaDropped >= 20) break
+    const mid = parse(r.meta, {}).media_id
+    if (mid) { await SW.dropMedia(c.db, "id=?", [String(mid)]).catch(() => {}); mediaDropped++ }
+  }
+  await c.db.run(`UPDATE messages SET deleted=1, body=NULL, meta=NULL, updated_at=? WHERE id IN (${ph(mids)})`, [t, ...mids])
+  await c.db.run(`DELETE FROM reactions WHERE message_id IN (${ph(mids)})`, mids).catch(() => {})
+  await c.db.run(`DELETE FROM poll_votes WHERE message_id IN (${ph(mids)})`, mids).catch(() => {})
+  await c.db.run("UPDATE chats SET pinned_id=0 WHERE id=? AND pinned_id IN (" + ph(mids) + ")", [id, ...mids]).catch(() => {})
+  notifyChat(c, id, { type: "chat_update", chat_id: id })
+  await admLog(c, "chat_yomon_och", "chat:" + id, "YOMON SO'ZLI " + mids.length + " TA XABAR O'CHIRILDI: " + String(ch.title || "").slice(0, 50))
+  return json({ ok: true, removed: mids.length })
+}
+
+// ---- BITTA XABARNI O'CHIRISH (yomon so'zli / buzuvchi yozuv) ----
+async function panelMsgDelete(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const mid = Math.floor(+(c.b?.id) || 0)
+  if (!mid) fail("Xabar topilmadi", 400)
+  const m = await c.db.one("SELECT id, chat_id, sender_id, meta, deleted FROM messages WHERE id=?", [mid]).catch(() => null)
+  if (!m || m.deleted) fail("Xabar topilmadi", 404)
+  const ch = await c.db.one("SELECT id, type, title FROM chats WHERE id=?", [+m.chat_id]).catch(() => null)
+  if (!ch || ch.type === "direct") fail("Faqat kanal/guruh xabarlari paneldan o'chiriladi", 404)
+  const mediaId = parse(m.meta, {}).media_id
+  if (mediaId) await SW.dropMedia(c.db, "id=?", [String(mediaId)]).catch(() => {})
+  await c.db.run("UPDATE messages SET deleted=1, body=NULL, meta=NULL, updated_at=? WHERE id=?", [now(), mid])
+  await c.db.run("UPDATE chats SET pinned_id=0 WHERE id=? AND pinned_id=?", [+m.chat_id, mid]).catch(() => {})
+  await c.db.run("DELETE FROM reactions WHERE message_id=?", [mid]).catch(() => {})
+  await c.db.run("DELETE FROM poll_votes WHERE message_id=?", [mid]).catch(() => {})
+  // klient o'zi olib tashlaydi (message_update: deleted=1)
+  const mm = await c.db.one("SELECT * FROM messages WHERE id=?", [mid])
+  const out = (await enrich(c, [mm]))[0]
+  notifyChat(c, +m.chat_id, { type: "message_update", chat_id: +m.chat_id, message: out })
+  await admLog(c, "msg_ochirish", "msg:" + mid + "/chat:" + m.chat_id, "XABAR O'CHIRILDI: " + String(ch.title || "").slice(0, 50))
+  return json({ ok: true, id: mid, chat_id: +m.chat_id })
+}
+
+// ---- HIMOYA QATLAMINI O'CHIRISH / YOQISH (egasi o'zgartirish kiritayotganda) ----
+// on=1 → himoya YONIQ (oddiy holat); on=0 → himoya O'CHIQ (hujum-himoya vaqtincha ishlamaydi).
+// Holat SEC DO cfg'da saqlanadi — barcha izolyatlarga ≤45s da yetadi (fwQollash).
+async function panelFwToggle(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const on = c.b?.on ? 1 : 0
+  try {
+    const st = c.env.SEC!.get(c.env.SEC!.idFromName("global"))
+    await st.fetch("https://fw/?op=cfg&v=" + (on ? "0" : "1"))
+  } catch {
+    fail("Himoya holatini o'zgartirib bo'lmadi", 500)
+  }
+  FW_OFF = !on // shu izolyatda darhol (qolganlari ≤45s)
+  await admLog(c, on ? "himoya_yoqildi" : "himoya_ochirildi", "himoya", on
+    ? "Himoya qatlami YOQILDI — 7 qatlam himoya ishlaydi"
+    : "Himoya qatlami O'CHIRILDI (o'zgartirish kiritish paytida) — ish bo'lgach YOQISH SHART")
+  return json({ ok: true, on, now: now() })
+}
+
+// ---- BOSHQARUV JURNALI (paneldagi har amal — dalil bilan) ----
+async function panelLog(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const rows = await c.db.q("SELECT ts, act, tgt, note FROM adm_log ORDER BY id DESC LIMIT 60").catch(() => [] as any[])
+  return json({
+    rows: (rows as any[]).map((r) => ({ ts: +r.ts, act: String(r.act), tgt: String(r.tgt), note: String(r.note) })),
+    now: now(),
+  })
 }
 
 // PANEL SAHIFASI — worker xotirasidan beriladi (web/ papkada FAYL YO'Q — saytda iz yo'q).
@@ -3714,6 +4024,7 @@ button.warn{background:#8b2332}
 button:disabled{opacity:.45;cursor:default}
 input,textarea{background:#171a1f;border:1px solid #2a2e36;color:#e6e8ec;padding:10px 12px;border-radius:9px;font-size:14px;width:100%}
 input:focus,textarea:focus{outline:1px solid #2b6cff}
+select{background:#171a1f;border:1px solid #2a2e36;color:#e6e8ec;padding:10px 12px;border-radius:9px;font-size:14px;width:auto;cursor:pointer}
 .tabs{display:flex;gap:8px;margin:0 0 16px;flex-wrap:wrap}
 .tabs button{background:#171a1f;color:#c9cdd4}
 .tabs button.on{background:#2b6cff;color:#fff}
@@ -3771,6 +4082,17 @@ tr:hover td{background:#171a1f}
 .mrow2 button{flex:1}
 .xcl{position:absolute;top:10px;right:12px;background:none;border:0;color:#8b919c;font-size:20px;padding:4px;cursor:pointer}
 .mc{position:relative}
+/* v106: KANALLAR bo'limi uslublari (xabar/a'zo qatorlari) */
+.mr{display:flex;align-items:center;gap:8px;background:#131519;border:1px solid #1d2026;border-radius:10px;padding:8px 10px;margin:6px 0}
+.mr .mri{flex:1;min-width:0}
+.mr .mrt{color:#8b919c;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mr .mrb{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mr.mrbad{border-color:#a1303f;background:#2a1114}
+.mr button{flex:none}
+.mc.wide{max-width:660px}
+.tyt{display:inline-block;padding:1px 8px;border-radius:6px;font-size:11px;margin-right:6px;vertical-align:1px}
+.tyt.chn{background:#1f3a5f;color:#7fb0ff}
+.tyt.grp{background:#2b3a1f;color:#9ed07a}
 @media(max-width:640px){.crow .nm{width:112px}.u{flex-wrap:wrap}table{font-size:12px}.hiddencol{display:none}}
 </style>
 </head>
@@ -3787,6 +4109,7 @@ tr:hover td{background:#171a1f}
   <div class="tabs">
     <button data-t="st" class="on">Statistika</button>
     <button data-t="us">Foydalanuvchilar</button>
+    <button data-t="ch">Kanallar</button>
     <button data-t="br">Xabar yuborish</button>
     <button data-t="sc">Xavfsizlik</button>
   </div>
@@ -3801,6 +4124,12 @@ tr:hover td{background:#171a1f}
     <div id="ul"></div>
     <div class="pg"><button class="sec" id="pv">← Oldingi</button><span id="pgn">1 / 1</span><button class="sec" id="nx">Keyingi →</button></div>
   </section>
+  <section id="ch" class="hidden">
+    <div class="bar2"><input id="cq" placeholder="Kanal yoki guruh nomi, @username"><button id="cqb">Qidirish</button><select id="cft"><option value="">Hammasi</option><option value="channel">Kanallar</option><option value="group">Guruhlar</option><option value="blocked">Bloklanganlar</option></select></div>
+    <div class="note" id="cn"></div>
+    <div id="cl"></div>
+    <div class="pg"><button class="sec" id="cpv">← Oldingi</button><span id="cpgn">1 / 1</span><button class="sec" id="cnx">Keyingi →</button></div>
+  </section>
   <section id="br" class="hidden">
     <p class="note">Xabar <b>«50gram admin»</b> nomidan barcha faol foydalanuvchining xabar bo‘limiga yuboriladi (oddiy xabar ko‘rinishida, ilova ochilganda yoki 30 soniyadan keyin ko‘rinadi).</p>
     <textarea id="tx" maxlength="4096" placeholder="Xabar matni..."></textarea>
@@ -3808,6 +4137,7 @@ tr:hover td{background:#171a1f}
     <div class="res" id="bres"></div>
   </section>
   <section id="sc" class="hidden">
+    <div id="fwctl" class="alarm old"></div>
     <div id="alrm"></div>
     <div class="cards" id="scards"></div>
     <h3>Hujum turlari (7 kun)</h3>
@@ -3822,6 +4152,8 @@ tr:hover td{background:#171a1f}
     <div style="overflow-x:auto"><table><thead><tr><th>IP</th><th>Blok tugashi</th></tr></thead><tbody id="sblk"></tbody></table></div>
     <h3>Signalizatsiya jurnali</h3>
     <div id="salarms"></div>
+    <h3>Boshqaruv jurnali (panel amallari)</h3>
+    <div style="overflow-x:auto"><table><thead><tr><th>Vaqt</th><th>Amal</th><th class="hiddencol">Obyekt</th><th>Izoh</th></tr></thead><tbody id="alog"></tbody></table></div>
   </section>
 </div>
 <div id="mdl" class="mdl hidden"><div class="mc" id="mc"></div></div>
@@ -3976,8 +4308,166 @@ function showUser(id){
     }
   })
 }
-function closeMdl(){$('mdl').classList.add('hidden')}
+function closeMdl(){$('mdl').classList.add('hidden');$('mc').classList.remove('wide')}
 $('mdl').onclick=function(e){if(e.target===this)closeMdl()}
+// v106: KANALLAR/GURUHLAR BO'LIMI — ro'yxat + qidiruv + filtr (hamma/guruh/kanal/bloklangan)
+var cpage=1,cpages=1
+function loadChats(p){
+  if(p)cpage=p
+  var url='chats?page='+cpage
+  var q=$('cq').value.trim()
+  if(q)url+='&q='+encodeURIComponent(q)
+  var ft=$('cft').value
+  if(ft)url+='&ft='+ft
+  api(url).then(function(r){
+    if(authFail(r))return
+    var j=r.j;if(!j||!j.chats)return
+    cpages=j.pages
+    $('cn').textContent='Jami: '+j.total+' ta chat — kanal: '+j.nc+' · guruh: '+j.ng+' · bloklangan: '+j.nb
+    var h=''
+    for(var i=0;i<j.chats.length;i++){var x=j.chats[i]
+      h+='<div class="u">'
+        +'<img src="/api/avatar/c/'+x.id+'?v='+x.av+'" alt="">'
+        +'<div class="in"><div class="nm"><span class="tyt '+(x.type==='channel'?'chn':'grp')+'">'+(x.type==='channel'?'KANAL':'GURUH')+'</span>'+esc(x.title||'(nom yozilmagan)')+(x.bl?'<span class="tag">BLOKLANGAN</span>':'')+'</div>'
+        +'<div class="sub">A‘zolar: '+x.members+' · Egasi: '+esc(x.owner||'—')+(x.username?' · @'+esc(x.username):'')+'</div>'
+        +'<div class="st">ID '+x.id+' · Yaratilgan: '+dt(x.cr)+' · Xabarlar: '+x.msgs+' · Oxirgi: '+rel(x.lm)+'</div></div>'
+        +'<div><button class="sec" data-ci="'+x.id+'">Ma\'lumot</button> '+(x.bl?'<button class="sec" data-cb="'+x.id+'" data-on="0">Blokdan chiqarish</button>':'<button class="warn" data-cb="'+x.id+'" data-on="1">Bloklash</button>')+' <button class="warn" data-cd="'+x.id+'">O‘chirish</button></div>'
+        +'</div>'
+    }
+    $('cl').innerHTML=h||'<p class="note">Topilmadi</p>'
+    $('cpgn').textContent=cpage+' / '+cpages
+    $('cpv').disabled=cpage<=1
+    $('cnx').disabled=cpage>=cpages
+    var ims=$('cl').querySelectorAll('img')
+    for(var i=0;i<ims.length;i++)ims[i].onerror=function(){this.style.visibility='hidden'}
+    var cbs=$('cl').querySelectorAll('[data-cb]')
+    for(var i=0;i<cbs.length;i++)cbs[i].onclick=function(){
+      var id=+(this.getAttribute('data-cb')),on=+(this.getAttribute('data-on'))
+      if(!confirm(on?'Bu kanal/guruh BLOKLANADI — hech kim yozolmaydi va kira olmaydi. Davom etamizmi?':'Blok yozuvi olib tashlanadi — kanal/guruh yana ishlaydi. Davom etamizmi?'))return
+      var btn=this;btn.disabled=true
+      api('chat/block','POST',{id:id,on:on}).then(function(r){
+        if(authFail(r))return
+        btn.disabled=false
+        if(r.j&&r.j.ok)loadChats()
+        else alert((r.j&&r.j.error)||'Xatolik')
+      })
+    }
+    var cds=$('cl').querySelectorAll('[data-cd]')
+    for(var i=0;i<cds.length;i++)cds[i].onclick=function(){
+      var id=+(this.getAttribute('data-cd'))
+      if(!confirm('Kanal/guruh TAGI BILAN O\'CHIRILADI — barcha xabarlar, a‘zolar, fayllar QAYTARILMAYDIGAN holda o\'chadi. Davom etamizmi?'))return
+      if(!confirm('IKKINCHI TASDIQLASH: o\'chirish QAYTARILMAYDI. Baribir o\'chirilsinmi?'))return
+      var btn=this;btn.disabled=true
+      api('chat/delete','POST',{id:id}).then(function(r){
+        if(authFail(r))return
+        btn.disabled=false
+        if(r.j&&r.j.ok)loadChats()
+        else alert((r.j&&r.j.error)||'Xatolik')
+      })
+    }
+    var cis=$('cl').querySelectorAll('[data-ci]')
+    for(var i=0;i<cis.length;i++)cis[i].onclick=function(){showChat(+(this.getAttribute('data-ci')))}
+  })
+}
+// v106: KANAL/GURUH MA'LUMOT OYNASI — xabarlar (yomon so'z belgisi bilan) + a'zolar + amallar
+function showChat(id){
+  $('mdl').classList.remove('hidden')
+  $('mc').classList.add('wide')
+  $('mc').innerHTML='<p class="note">Yuklanmoqda...</p>'
+  api('chat?id='+id).then(function(r){
+    if(authFail(r))return
+    var x=r.j
+    if(!x||x.id===undefined){$('mc').innerHTML='<button class="xcl" onclick="document.getElementById(\'mdl\').classList.add(\'hidden\')">×</button><p class="note">'+esc((r.j&&r.j.error)||'Topilmadi')+'</p>';return}
+    var h='<button class="xcl" id="mx">×</button>'
+      +'<h4><span class="tyt '+(x.type==='channel'?'chn':'grp')+'">'+(x.type==='channel'?'KANAL':'GURUH')+'</span>'+esc(x.title||'(nom yozilmagan)')+(x.bl?'<span class="tag">BLOKLANGAN</span>':'')+'</h4>'
+      +'<div class="sub">ID '+x.id+(x.username?' · @'+esc(x.username):'')+'</div>'
+      +kvr('Egasi',esc(x.owner.name||'—')+' · '+esc(x.owner.phone||'—'))
+      +kvr('Tavsif',x.desc?esc(x.desc):'—')
+      +kvr('A‘zolar',String(x.members))
+      +kvr('Xabarlar',String(x.msgs))
+      +kvr('Yaratilgan',dt(x.cr))
+      +kvr('Oxirgi xabar',rel(x.lm))
+    h+='<div class="mrow2">'+(x.bl?'<button class="sec" id="cbk">Blokdan chiqarish</button>':'<button class="warn" id="cbk">Bloklash</button>')+'<button class="warn" id="ccl">Xabarlarni tozalash</button><button class="warn" id="cdel">Kanalni O‘CHIRISH</button></div>'
+    var bad=0
+    h+='<h3>Xabarlar (oxirgi '+x.messages.length+')</h3>'
+    for(var i=0;i<x.messages.length;i++){var m=x.messages[i]
+      if(m.bad)bad++
+      h+='<div class="mr'+(m.bad?' mrbad':'')+'"><div class="mri"><div class="mrt">'+dt(m.ts)+' · '+esc(m.sender)+(m.bad?' · <b style="color:#ff7b72">YOMON SO‘Z</b>':'')+'</div><div class="mrb">'+esc(m.kind==='text'?'':'['+m.kind+'] ')+esc(m.body||'')+'</div></div><button class="sec" data-mdel="'+m.id+'">O‘chirish</button></div>'
+    }
+    if(!x.messages.length)h+='<p class="note">Xabar yo‘q</p>'
+    if(bad)h+='<div class="bar2" style="margin-top:10px"><button class="warn" id="cbad">YOMON SO‘ZLI '+bad+' TA XABARNI O‘CHIRISH</button></div>'
+    h+='<h3>A‘zolar ('+x.mlist.length+')</h3>'
+    for(var i=0;i<x.mlist.length;i++){var u=x.mlist[i]
+      h+='<div class="mr"><div class="mri"><div class="mrt">'+esc(u.name||'(ism yozilmagan)')+' · '+esc(u.phone)+' · '+ccName(u.cc)+' · '+esc(u.role)+(u.ublk?' · <b style="color:#ff7b72">HISOB BLOKLANGAN</b>':'')+'</div></div>'+(u.id===x.owner.id?'<span class="act">EGASI</span>':'<button class="sec" data-mk="'+u.id+'">Chiqarish</button> <button class="sec" data-mb="'+u.id+'">Chetlatish</button>')+'</div>'
+    }
+    $('mc').innerHTML=h
+    $('mx').onclick=closeMdl
+    document.getElementById('cbk').onclick=function(){
+      var on=!x.bl
+      if(!confirm(on?'Bu kanal/guruh BLOKLANADI. Davom etamizmi?':'Blok yozuvi olib tashlanadi. Davom etamizmi?'))return
+      api('chat/block','POST',{id:x.id,on:on}).then(function(r){
+        if(authFail(r))return
+        if(r.j&&r.j.ok)showChat(x.id)
+        else alert((r.j&&r.j.error)||'Xatolik')
+      })
+    }
+    document.getElementById('ccl').onclick=function(){
+      if(!confirm('BARCHA xabarlar o‘chiriladi (chat o‘zining o‘rnida qoladi). Davom etamizmi?'))return
+      api('chat/clear','POST',{id:x.id}).then(function(r){
+        if(authFail(r))return
+        if(r.j&&r.j.ok)showChat(x.id)
+        else alert((r.j&&r.j.error)||'Xatolik')
+      })
+    }
+    document.getElementById('cdel').onclick=function(){
+      if(!confirm('Kanal/guruh TAGI BILAN O\'CHIRILADI — QAYTARILMAYDI. Davom etamizmi?'))return
+      if(!confirm('IKKINCHI TASDIQLASH: baribir o\'chirilsinmi?'))return
+      api('chat/delete','POST',{id:x.id}).then(function(r){
+        if(authFail(r))return
+        if(r.j&&r.j.ok){closeMdl();loadChats()}
+        else alert((r.j&&r.j.error)||'Xatolik')
+      })
+    }
+    var md=document.getElementById('cbad')
+    if(md)md.onclick=function(){
+      if(!confirm('YOMON SO‘ZLI '+bad+' ta xabar o‘chiriladi. Davom etamizmi?'))return
+      api('chat/cleanbad','POST',{id:x.id}).then(function(r){
+        if(authFail(r))return
+        if(r.j&&r.j.ok){alert('✓ '+r.j.removed+' ta xabar o‘chirildi.'+(r.j.removed>=100?' Yana qolgan bo‘lsa — tugmani yana bir marta bosing.':''));showChat(x.id)}
+        else alert((r.j&&r.j.error)||'Xatolik')
+      })
+    }
+    var mds=$('mc').querySelectorAll('[data-mdel]')
+    for(var i=0;i<mds.length;i++)mds[i].onclick=function(){
+      var mid=+(this.getAttribute('data-mdel'))
+      if(!confirm('Bu xabar o\'chiriladi (hamma a‘zolardan ham yo\'qoladi). Davom etamizmi?'))return
+      api('msg/delete','POST',{id:mid}).then(function(r){
+        if(authFail(r))return
+        if(r.j&&r.j.ok)showChat(x.id)
+        else alert((r.j&&r.j.error)||'Xatolik')
+      })
+    }
+    var mks=$('mc').querySelectorAll('[data-mk]'),mbs=$('mc').querySelectorAll('[data-mb]')
+    for(var i=0;i<mks.length;i++)mks[i].onclick=function(){
+      var uid=+(this.getAttribute('data-mk'))
+      if(!confirm('Bu a‘zo kanaldan/guruhdan CHIQARILADI. Davom etamizmi?'))return
+      api('chat/kick','POST',{id:x.id,uid:uid,ban:0}).then(function(r){
+        if(authFail(r))return
+        if(r.j&&r.j.ok)showChat(x.id)
+        else alert((r.j&&r.j.error)||'Xatolik')
+      })
+    }
+    for(var i=0;i<mbs.length;i++)mbs[i].onclick=function(){
+      var uid=+(this.getAttribute('data-mb'))
+      if(!confirm('Bu a‘zo CHETLATILADI — qayta kira olmaydi. Davom etamizmi?'))return
+      api('chat/kick','POST',{id:x.id,uid:uid,ban:1}).then(function(r){
+        if(authFail(r))return
+        if(r.j&&r.j.ok)showChat(x.id)
+        else alert((r.j&&r.j.error)||'Xatolik')
+      })
+    }
+  })
+}
 // v105: XAVFSIZLIK BO'LIMI — hujumlar statistikasi + signalizatsiya
 var KN={root:'Yadro/admin yo‘llariga kirish',ext:'Begona mijoz (skaner/bot)',inj:'In‘ektsiya/SQL',data:'Ma’lumot tortish',auth:'Parol brute-force',flood:'So‘rov toshqini',tok:'Yaroqsiz token',otp:'OTP pumping',clog:'Jurnal toshqini',scan:'4xx skaner'}
 function knName(k){return KN[k]||k}
@@ -3985,6 +4475,25 @@ function loadSecurity(){
   api('security').then(function(r){
     if(authFail(r))return
     var s=r.j;if(!s||s.eall===undefined)return
+    // v106: HIMOYA QATLAMI TUGMASI (o'zgartirish kiritayotganda o'chirish / keyin yoqish)
+    var fwoff=!!s.fwoff
+    var fw=$('fwctl')
+    fw.className=fwoff?'alarm':'alarm old'
+    fw.innerHTML='<b>'+(fwoff?'⚠ HIMOYA QATLAMI O‘CHIQ — DASTUR HIMOYASIZ':'Himoya qatlami: YONIQ — dastur himoyalangan')+'</b>'
+      +'<small>'+(fwoff
+        ?'Hujum-himoya VAQTINCHA ishlamaydi (hech kim bloklanmaydi, iz ham qolmaydi). O‘zgartirish kiritib bo‘lingach albatta YOQING — tizmni qayta yoqish tugmasi bilan.'
+        :'7 qatlam himoya faol: yadro/begona-mijoz/in‘ektsiya/ma’lumot-tortish/brute-force/toshqin/skaner. O‘zgartirish kiritayotganda shu yerdan VAQTINCHA o‘chirish mumkin.')+'</small>'
+      +'<div class="bar2" style="margin-top:10px"><button id="fwbtn" class="'+(fwoff?'':'warn')+'">'+(fwoff?'Himoyani YOQISH (tavsiya etiladi)':'Himoyani o‘chirish (faqat o‘zgartirish paytida)')+'</button></div>'
+    document.getElementById('fwbtn').onclick=function(){
+      var on=!fwoff
+      if(!confirm(on?'Himoya qatlami YOQILADI — hujumlar yana darhol bloklanadi. Davom etamizmi?':'Himoya qatlami O‘CHIRILADI — hujumlar VAQTINCHA bloklanmaydi (faqat dasturga o‘zgartirish kiritish paytida ishlatilsin). Davom etamizmi?'))return
+      var btn=this;btn.disabled=true
+      api('fwtoggle','POST',{on:on}).then(function(r){
+        if(authFail(r))return
+        if(r.j&&r.j.ok)loadSecurity()
+        else{btn.disabled=false;alert((r.j&&r.j.error)||'Xatolik')}
+      })
+    }
     var aa=$('alrm'),an=s.alarmTs?(Date.now()-s.alarmTs):0
     if(s.alarmLast&&an<1800000){
       aa.innerHTML='<div class="alarm"><b>⚠ SIGNALIZATSIYA: HUJUM ANIQLANDI — himoya ishlab BLOKLAGAN</b><small>'+knName(s.alarmLast.kind)+' · IP '+esc(s.alarmLast.ip)+' · '+ccName(s.alarmLast.cc)+' · '+dt(s.alarmTs)+'</small><small>'+esc(s.alarmLast.note||'')+'</small></div>'
@@ -4030,6 +4539,16 @@ function loadSecurity(){
     }
     $('salarms').innerHTML=al||'<p class="note">Signal yo‘q — hujum aniqlanmagan</p>'
   })
+  // v106: BOSHQARUV JURNALI — paneldagi har amal (blok/ochirish/chetlatish/himoya)
+  api('log').then(function(r){
+    if(authFail(r))return
+    var j=r.j;if(!j||!j.rows)return
+    var h=''
+    for(var i=0;i<j.rows.length;i++){var e=j.rows[i]
+      h+='<tr><td>'+dt(e.ts)+'</td><td><span class="act">'+esc(e.act)+'</span></td><td class="hiddencol ip">'+esc(e.tgt)+'</td><td>'+esc(e.note)+'</td></tr>'
+    }
+    $('alog').innerHTML=h||'<tr><td colspan="4" class="note">Hozircha amallar yo‘q</td></tr>'
+  })
 }
 function doLogin(){
   var pw=$('pw').value
@@ -4055,15 +4574,22 @@ function switchTab(t){
   for(var i=0;i<bs.length;i++)bs[i].className=(bs[i].getAttribute('data-t')===t)?'on':''
   $('st').classList.toggle('hidden',t!=='st')
   $('us').classList.toggle('hidden',t!=='us')
+  $('ch').classList.toggle('hidden',t!=='ch')
   $('br').classList.toggle('hidden',t!=='br')
   $('sc').classList.toggle('hidden',t!=='sc')
   if(t==='st')loadStats()
+  if(t==='ch')loadChats()
   if(t==='sc')loadSecurity()
 }
 $('qb').onclick=function(){loadUsers(1)}
 $('q').onkeydown=function(e){if(e.key==='Enter')loadUsers(1)}
 $('pv').onclick=function(){if(page>1)loadUsers(page-1)}
 $('nx').onclick=function(){if(page<pages)loadUsers(page+1)}
+$('cqb').onclick=function(){loadChats(1)}
+$('cq').onkeydown=function(e){if(e.key==='Enter')loadChats(1)}
+$('cft').onchange=function(){loadChats(1)}
+$('cpv').onclick=function(){if(cpage>1)loadChats(cpage-1)}
+$('cnx').onclick=function(){if(cpage<cpages)loadChats(cpage+1)}
 $('tx').oninput=function(){$('cnt').textContent=this.value.length+' / 4096'}
 $('sb').onclick=function(){
   var v=$('tx').value.trim()
@@ -4077,7 +4603,7 @@ $('sb').onclick=function(){
     else{$('bres').className='res err';$('bres').textContent=(r.j&&r.j.error)||'Xatolik'}
   })
 }
-$('rf').onclick=function(){loadStats();if(cur==='us')loadUsers();if(cur==='sc')loadSecurity()}
+$('rf').onclick=function(){loadStats();if(cur==='us')loadUsers();if(cur==='ch')loadChats();if(cur==='sc')loadSecurity()}
 $('out').onclick=logout
 $('lb').onclick=doLogin
 $('pw').onkeydown=function(e){if(e.key==='Enter')doLogin()}
@@ -4113,6 +4639,17 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/panel/security", panelSecurity, true],
   ["GET", "/panel/user", panelUser, true],
   ["POST", "/panel/dm", panelDm, true],
+  // v106: KANAL/GURUH MODERATSIYASI + HIMOYA TUGMASI + BOSHQARUV JURNALI
+  ["GET", "/panel/chats", panelChats, true],
+  ["GET", "/panel/chat", panelChat, true],
+  ["POST", "/panel/chat/block", panelChatBlock, true],
+  ["POST", "/panel/chat/delete", panelChatDelete, true],
+  ["POST", "/panel/chat/kick", panelChatKick, true],
+  ["POST", "/panel/chat/clear", panelChatClear, true],
+  ["POST", "/panel/chat/cleanbad", panelChatCleanBad, true],
+  ["POST", "/panel/msg/delete", panelMsgDelete, true],
+  ["POST", "/panel/fwtoggle", panelFwToggle, true],
+  ["GET", "/panel/log", panelLog, true],
   ["GET", "/me", getMe],
   ["PATCH", "/me", patchMe],
   ["POST", "/ping", async (c) => { const t = now(); await c.db.run("UPDATE users SET last_seen=?, token_exp=? WHERE id=?", [t, t + 180 * 86400 * 1000, c.uid]); return json({ ok: true, now: t }) }],
@@ -4307,6 +4844,8 @@ async function cleanup(env: Env) {
   // (egada hujum dalillari uzoq muddat bor; jadvallar abadiy o'smaydi)
   await db.run("DELETE FROM sec_events WHERE ts<?", [t - 30 * DAY]).catch(() => {})
   await db.run("DELETE FROM sec_alarm WHERE ts<?", [t - 90 * DAY]).catch(() => {})
+  // v106: boshqaruv jurnali 90 kun saqlanadi (jadval abadiy o'smaydi)
+  await db.run("DELETE FROM adm_log WHERE ts<?", [t - 90 * DAY]).catch(() => {})
   await db.run("UPDATE lives SET ended_at=? WHERE ended_at=0 AND started_at<?", [t, t - 12 * 3600000])
   // TiDB/R2 XOTIRA POSBONI (Task 39 + v79): server — faqat ko'prik. Asosiy xotira — foydalanuvchilar
   // qurilmalari (planReplicas kamida 15 nusxa yig'adi, P2P o'rgimchak to'ri yetkazadi).
@@ -4342,6 +4881,7 @@ async function cleanup(env: Env) {
 //    halol foydalanuvchi birga yig'ilganda 4xx kam bo'ladi — kollaborativ zarar yo'q).
 // 3) Birinchi blok 30→5 daqiqa (takrorlanuvchilar fwOchko daraja-3 bilan uzayadi).
 function fw4xx(env: Env, wait: (p: Promise<unknown>) => void, ip: string, info?: SecInfo) {
+  if (FW_OFF) return false // v106: himoya o'chiq — 4xx-skaner posboni ham o'chiq
   const e = FW_4XX.get(ip), t = Date.now()
   if (!e || t - e.t > 600_000) { if (FW_4XX.size > 5000) FW_4XX.clear(); FW_4XX.set(ip, { n: 1, t }); return false }
   if (++e.n <= 300) return false
@@ -4421,7 +4961,9 @@ export default {
     // so'rovda o'tib ketardi (xavfsizlik teshigi) va bloklar izolyatlar orasida notekis ishlar edi.
     if (env.SEC && FW_YANGI === 0) { try { await fwYangola(env) } catch {} }
     fwKeshYana(env, wait)
-    if (fwip) {
+    if (fwip && !FW_OFF) {
+      // v106: himoya O'CHIQ bo'lsa bu butun blok O'TKAZIB YUBORILADI (egasi o'zgartirish
+      // kiritayotganda curl/skript-sinovlar ham bloklanmaydi, iz ham qolmaydi).
       if (fwBlokli(fwip)) {
         // Blok lokal keshdan chiqdi — DO hali ham tasdiqlayaptimi? (≤50ms, faqat
         // bloklanganlar to'laydi; halol foydalanuvchi bu yo'lga umuman kirmaydi).
@@ -4507,7 +5049,8 @@ export default {
         // bitta hisob 10 daqiqada 3000+ so'rov = skript (inson UI'da bunga yaqinlasha olmaydi —
         // ping 45s, qo'ng'iroq polling 20s, lenta paginatsiyasi... hammasi birgalikda << 300).
         // Chegaradan oshsa — IP 12 soat blok (skript NOL ma'lumot oladi, "Not found" ko'radi).
-        if (fwip) {
+        // v106: himoya O'CHIQ bo'lsa — ma'lumot-tortish posboni ham o'chiq.
+        if (fwip && !FW_OFF) {
           const de = FW_DATA.get(uid), dt = Date.now()
           if (!de || dt - de.t > 600_000) { if (FW_DATA.size > 10000) FW_DATA.clear(); FW_DATA.set(uid, { n: 1, t: dt }) }
           else if (++de.n > 3000) { FW_DATA.delete(uid); fwLBlok(fwip, 12 * 3_600_000); fwOchko(env, wait, fwip, "data", 1, secInfo(req, url)); return FW_404() }

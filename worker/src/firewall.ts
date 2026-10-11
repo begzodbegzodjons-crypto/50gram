@@ -59,7 +59,19 @@ export class SecFirewall {
     if (this.ready) return
     this.state.storage.sql.exec("CREATE TABLE IF NOT EXISTS blk(ip TEXT PRIMARY KEY, until INTEGER NOT NULL, reason TEXT NOT NULL)")
     this.state.storage.sql.exec("CREATE TABLE IF NOT EXISTS att(ip TEXT NOT NULL, k TEXT NOT NULL, n INTEGER NOT NULL, t INTEGER NOT NULL, PRIMARY KEY(ip,k))")
+    // v106: HIMOYA-HOLAT (egapanel tugmasi) — 'fwoff' yozuvi bor bo'lsa himoya qatlami
+    // VAQTINCHA o'chirilgan (egasi o'zgartirish kiritayotganda). DO SQLite'da saqlanadi —
+    // izolyat qayta ishga tushsa ham holat saqlanadi. Boshqa cfg-kalitlar ham shu jadvalda.
+    this.state.storage.sql.exec("CREATE TABLE IF NOT EXISTS cfg(k TEXT PRIMARY KEY, v TEXT NOT NULL)")
     this.ready = true
+  }
+
+  // v106: himoya o'chiqmi? (cfg jadvalidan — DO yagona ishonchli manba)
+  isOff(): boolean {
+    try {
+      const r = this.state.storage.sql.exec("SELECT v FROM cfg WHERE k='fwoff' LIMIT 1").toArray()
+      return r.length > 0 && String(r[0].v) === "1"
+    } catch { return false }
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -75,6 +87,17 @@ export class SecFirewall {
         this.state.storage.sql.exec("DELETE FROM att WHERE ip=?", ip)
         return Response.json({ ok: true, ip })
       }
+      // v106 HIMOYA TUGMASI — faqat worker ichidan (egapanel /panel/fwtoggle): v=1 → himoya
+      // O'CHIQ (o'zgartirish kiritish paytida), v=0 → himoya YONIQ. Barcha izolyatlar ≤45s
+      // ichida refresh orqali yangi holatni oladi (fwQollash).
+      if (url.searchParams.get("op") === "cfg") {
+        this.init()
+        if (url.searchParams.get("v") === "1")
+          this.state.storage.sql.exec("INSERT INTO cfg(k,v) VALUES('fwoff','1') ON CONFLICT(k) DO UPDATE SET v='1'")
+        else
+          this.state.storage.sql.exec("DELETE FROM cfg WHERE k='fwoff'")
+        return Response.json({ ok: true, fwoff: this.isOff() ? 1 : 0 })
+      }
       if (req.method !== "POST") return new Response("Not found", { status: 404 })
       const b = (await req.json().catch(() => ({}))) as Strike
       if (!b || !b.ip || !TH[b.kind]) return new Response("Not found", { status: 404 })
@@ -85,18 +108,21 @@ export class SecFirewall {
   }
 
   // Faol bloklar ro'yxati (isolate keshini yangilash uchun) + eskirgan yozuvlarni tozalash
-  async refresh(): Promise<{ blocks: Array<[string, number]> }> {
+  // v106: javobga himoya-holati (fwoff) ham qo'shildi — izolyatlar shu orqali o'zgarishni oladi
+  async refresh(): Promise<{ blocks: Array<[string, number]>; fwoff: number }> {
     this.init()
     const t = Date.now()
     try { this.state.storage.sql.exec("DELETE FROM blk WHERE until <= ?", t) } catch {}
     try { this.state.storage.sql.exec("DELETE FROM att WHERE t < ?", t - 2 * HOUR) } catch {}
     const rows = this.state.storage.sql.exec("SELECT ip, until FROM blk WHERE until > ? LIMIT 5000", t).toArray()
-    return { blocks: rows.map((r: any) => [String(r.ip), Number(r.until)]) }
+    return { blocks: rows.map((r: any) => [String(r.ip), Number(r.until)]), fwoff: this.isOff() ? 1 : 0 }
   }
 
   // Ochko qo'shish — chegara oshsa IP bloklanadi (juft obyektli SQLite, konsistent)
+  // v106: himoya O'CHIQ bo'lsa — ochkolar UMUMAN yozilmaydi (to'liq pass-through, iz qolmaydi)
   async strike(b: Strike): Promise<StrikeRes> {
     this.init()
+    if (this.isOff()) return { until: 0, blocked: false }
     const t = Date.now()
     const { ip, kind } = b
     const [need, dur] = TH[kind]

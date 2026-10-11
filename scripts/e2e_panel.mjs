@@ -1,4 +1,4 @@
-/* 50 GRAM — MAXFIY ADMIN PANEL E2E (v104 → v105 kengaytirilgan): 50gram.uz/?adminpanel paneldagi API qatlami
+/* 50 GRAM — MAXFIY ADMIN PANEL E2E (v104 → v105 → v106 kengaytirilgan): 50gram.uz/?adminpanel paneldagi API qatlami
  * Jonli sinov (CI runner IP'sidan — sandbox IP firewall-bloklangani uchun lokal sinov mumkin emas):
  *   1) STATIK: /?adminpanel → panel HTML (id="pw" + noindex); / → ODDIY ilova (panel IZI YO'Q)
  *   2) PAROL: xato parol → 401; to'g'ri parol (ADMIN_PASS) → adm-token
@@ -14,6 +14,12 @@
  *      JONLI YUBORISH FAQAT O'Z TEST HISOBIGA (real foydalanuvchilarga TEGMAYDI)
  *  11) v105 XAVFSIZLIK: /panel/security — statistika + taqsimotlar + 2-qadamdagi xato-parol
  *      urinishi jurnalga tushgani (IP+davlat+tur) — SIGNALIZATSIYA JURNALI jonli dalil
+ *  12) v106 KANALLAR: ro'yxat + hisoblar (nc/ng/nb), TEST KANALI yaratiladi (o'zi o'chiriladi):
+ *      ma'lumot oynasi (xabarlar+mlist), BLOK → yozish 403 ISBOTI → blokdan chiqarish → yozish 200,
+ *      YOMON SO'ZLI xabar → bad:1 belgisi → cleanbad o'chiradi, oddiy xabar → msg/delete,
+ *      egasini chiqarish → 400 (posbon), TAGI BILAN O'CHIRISH → chat 404 (o'zi-tozalanadi)
+ *  13) v106 HIMOYA TUGMASI: fwtoggle off → security.fwoff=1 → fwtoggle ON (qayta YOQILADI —
+ *      himoya faol holatda qoladi), boshqaruv jurnali /panel/log yozuvlari
  *  BROADCAST jonli yuborish SINALMAYDI (haqiqiy foydalanuvchilarga xabar ketmasin).
  * Ishga tushirish: E2E_BASE=https://... node scripts/e2e_panel.mjs
  */
@@ -139,7 +145,89 @@ try {
   ok(!!authEv, 'v105 PANELGA HUJUM QAYD ETILGAN (2-qadamdagi xato-parol urinishi jurnalda)', authEv ? 'ip=' + authEv.ip + ' cc=' + authEv.cc + ' act=' + authEv.act : 'topilmadi')
   console.log('  ℹ v105 xavfsizlik: ' + (sec.d.eall || 0) + ' jami urinish, ' + (sec.d.e24 || 0) + ' (24soat), ' + (sec.d.uip || 0) + ' noyob IP, ' + (sec.d.blocks || 0) + ' blokda')
 
-  // 12) YOPILISH: test foydalanuvchisini logout (iz qolmasin)
+  // 12) v106 KANALLAR/GURUHLAR MODERATSIYASI — TEST KANALI BILAN TO'LIQ SIKL (o'zi o'chiriladi)
+  const chAnon = await j('/api/panel/chats')
+  ok(chAnon.st === 401, 'v106 tokensiz /panel/chats → 401', 'st=' + chAnon.st)
+  const chL = await j('/api/panel/chats?page=1', { h: AT })
+  ok(chL.st === 200 && Array.isArray(chL.d.chats) && typeof chL.d.nc === 'number' && typeof chL.d.ng === 'number' && typeof chL.d.nb === 'number', 'v106 kanallar ro\u2018yxati + hisoblar (nc/ng/nb)', 'kanal=' + chL.d.nc + ' guruh=' + chL.d.ng + ' blok=' + chL.d.nb)
+  const chT = await j('/api/panel/chats?page=1&ft=blocked', { h: AT })
+  ok(chT.st === 200 && Array.isArray(chT.d.chats), 'v106 bloklanganlar filtri ishlaydi')
+  // TEST KANALI — test foydalanuvchi egasida (oxirida TAGI BILAN o'chiriladi — iz qolmaydi)
+  const mkCh = await j('/api/chats', { method: 'POST', h: { authorization: 'Bearer ' + tokT }, body: { type: 'channel', title: 'Panel-v106-test-kanal', is_public: 1 } })
+  ok(mkCh.st === 200 && mkCh.d.id, 'v106 test kanali yaratildi (test hisobida)', 'id=' + mkCh.d.id)
+  const CID = mkCh.d.id
+  if (CID) {
+    const cd = await j('/api/panel/chat?id=' + CID, { h: AT })
+    ok(cd.st === 200 && cd.d.type === 'channel' && Array.isArray(cd.d.messages) && Array.isArray(cd.d.mlist), 'v106 kanal ma\u2018lumot oynasi (xabarlar+a\u2018zolar)', 'st=' + cd.st)
+    ok(cd.d.owner && cd.d.owner.phone === T.full, 'v106 kanal egasi ko\u2018rinadi (telefon bilan)')
+    // yomon so'zli xabar + oddiy xabar (test hisobidan)
+    const sm1 = await j('/api/chats/' + CID + '/messages', { method: 'POST', h: { authorization: 'Bearer ' + tokT }, body: { kind: 'text', body: 'bu siktir gap test' } })
+    ok(sm1.st === 200, 'v106 test kanaliga yomon so\u2018zli xabar yozildi', 'st=' + sm1.st)
+    const sm2 = await j('/api/chats/' + CID + '/messages', { method: 'POST', h: { authorization: 'Bearer ' + tokT }, body: { kind: 'text', body: 'v106 oddiy test xabari, salom!' } })
+    ok(sm2.st === 200, 'v106 test kanaliga oddiy xabar yozildi', 'st=' + sm2.st)
+    const cd2 = await j('/api/panel/chat?id=' + CID, { h: AT })
+    const badMsg = (cd2.d.messages || []).find((x) => x.bad === true)
+    const goodMsg = (cd2.d.messages || []).find((x) => x.bad === false && (x.body || '').includes('oddiy test xabari'))
+    ok(!!badMsg, 'v106 YOMON SO\u2018Z belgisi ishlaydi (bad:true)', badMsg ? 'id=' + badMsg.id : 'topilmadi')
+    ok(!!goodMsg, 'v106 oddiy xabar belgisiz (bad:false)')
+    // egasini chiqarish — POSBON (400)
+    const ko = await j('/api/panel/chat/kick', { method: 'POST', h: AT, body: { id: CID, uid: uidT, ban: 0 } })
+    ok(ko.st === 400, 'v106 kanal EGASINI chiqarish → 400 (posbon)', 'st=' + ko.st)
+    // BLOK → yozish 403 (jonli ISBOT) → blokdan chiqarish → yozish yana ochiladi
+    const cb = await j('/api/panel/chat/block', { method: 'POST', h: AT, body: { id: CID, on: 1 } })
+    ok(cb.st === 200 && cb.d.ok, 'v106 paneldan kanal bloklash')
+    const chBlk = await j('/api/panel/chats?page=1&ft=blocked&q=Panel-v106-test', { h: AT })
+    ok(chBlk.st === 200 && (chBlk.d.chats || []).some((x) => x.id === CID && x.bl === true), 'v106 bloklanganlar ro\u2018yxatida ko\u2018rinadi')
+    const smB = await j('/api/chats/' + CID + '/messages', { method: 'POST', h: { authorization: 'Bearer ' + tokT }, body: { kind: 'text', body: 'bloklangan kanalga yozish' } })
+    ok(smB.st === 403 && /bloklangan/i.test(smB.d.error || ''), 'v106 BLOKLANGAN kanalga yozish → 403 (JONLI ISBOT)', 'st=' + smB.st)
+    const juB = await j('/api/chats/' + CID + '/join', { method: 'POST', h: { authorization: 'Bearer ' + tokT }, body: {} })
+    ok(juB.st === 403, 'v106 bloklangan kanalga qayta kirish → 403', 'st=' + juB.st)
+    const cu = await j('/api/panel/chat/block', { method: 'POST', h: AT, body: { id: CID, on: 0 } })
+    ok(cu.st === 200 && cu.d.ok, 'v106 blok yozuvi olib tashlandi (blokdan chiqarish)')
+    const smU = await j('/api/chats/' + CID + '/messages', { method: 'POST', h: { authorization: 'Bearer ' + tokT }, body: { kind: 'text', body: 'blokdan keyin yana yozish ochiq' } })
+    ok(smU.st === 200, 'v106 blokdan keyin yozish tiklandi → 200', 'st=' + smU.st)
+    // YOMON SO'ZLARNI BIR ZUMDA O'CHIRISH
+    const cln = await j('/api/panel/chat/cleanbad', { method: 'POST', h: AT, body: { id: CID } })
+    ok(cln.st === 200 && cln.d.removed >= 1, 'v106 cleanbad yomon xabarlarni o\u2018chiradi', 'removed=' + cln.d.removed)
+    const cd3 = await j('/api/panel/chat?id=' + CID, { h: AT })
+    ok(!(cd3.d.messages || []).some((x) => x.bad === true), 'v106 cleanbad\u2019dan keyin yomon xabar ro\u2018yxatda YO\u2018Q')
+    // BITTA XABARNI O'CHIRISH (oddiy xabar)
+    if (goodMsg) {
+      const md = await j('/api/panel/msg/delete', { method: 'POST', h: AT, body: { id: goodMsg.id } })
+      ok(md.st === 200 && md.d.ok, 'v106 bitta xabarni o\u2018chirish (panel/msg/delete)', 'st=' + md.st)
+      const md2 = await j('/api/panel/msg/delete', { method: 'POST', h: AT, body: { id: goodMsg.id } })
+      ok(md2.st === 404, 'v106 o\u2018chirilgan xabar qayta o\u2018chirilmaydi → 404')
+    }
+    // DIRECT chat panel'dan o'chirmaydi (posbon) — dm suhbati orqali tekshiruv
+    const dd = await j('/api/panel/chat/delete', { method: 'POST', h: AT, body: { id: dmOk.d.chat_id } })
+    ok(dd.st === 404, 'v106 shaxsiy (direct) chat paneldan o\u2018chirmaydi → 404 (posbon)')
+    // TAGI BILAN O'CHIRISH — test kanali butunlay ketadi (iz qolmaydi)
+    const cdel = await j('/api/panel/chat/delete', { method: 'POST', h: AT, body: { id: CID } })
+    ok(cdel.st === 200 && cdel.d.ok, 'v106 kanal TAGI BILAN o\u2018chirildi', 'st=' + cdel.st)
+    const g404 = await j('/api/chats/' + CID, { h: { authorization: 'Bearer ' + tokT } })
+    ok(g404.st === 404, 'v106 o\u2018chirilgan kanal /api/chats/:id → 404 (to\u2018liq ketdi)', 'st=' + g404.st)
+  }
+
+  // 13) v106 HIMOYA TUGMASI — O'CHIRISH → holat=O'CHIQ → QAYTA YOQISH (faol holatda qoladi)
+  const fwAnon = await j('/api/panel/fwtoggle', { method: 'POST', body: { on: 0 } })
+  ok(fwAnon.st === 401, 'v106 tokensiz /panel/fwtoggle → 401', 'st=' + fwAnon.st)
+  const fw0 = await j('/api/panel/fwtoggle', { method: 'POST', h: AT, body: { on: 0 } })
+  ok(fw0.st === 200 && fw0.d.ok && fw0.d.on === 0, 'v106 himoya O\u2018CHIRILDI (test rejimi)', 'st=' + fw0.st)
+  await sleep(800)
+  const sec2 = await j('/api/panel/security', { h: AT })
+  ok(sec2.st === 200 && sec2.d.fwoff === 1, 'v106 security.fwoff=1 — himoya holati O\u2018CHIQ ko\u2018rinadi', 'fwoff=' + sec2.d.fwoff)
+  const fw1 = await j('/api/panel/fwtoggle', { method: 'POST', h: AT, body: { on: 1 } })
+  ok(fw1.st === 200 && fw1.d.ok && fw1.d.on === 1, 'v106 himoya QAYTA YOQILDI (doim faol holat)', 'st=' + fw1.st)
+  await sleep(800)
+  const sec3 = await j('/api/panel/security', { h: AT })
+  ok(sec3.st === 200 && sec3.d.fwoff === 0, 'v106 security.fwoff=0 — himoya YONIQ (yakuniy holat)', 'fwoff=' + sec3.d.fwoff)
+  // BOSHQARUV JURNALI — bugungi amallar ko\u2018rinadi
+  const lg = await j('/api/panel/log', { h: AT })
+  ok(lg.st === 200 && Array.isArray(lg.d.rows), 'v106 boshqaruv jurnali ko\u2018rinadi', 'rows=' + (lg.d.rows || []).length)
+  ok((lg.d.rows || []).some((x) => x.act === 'himoya_yoqildi') && (lg.d.rows || []).some((x) => x.act === 'himoya_ochirildi'), 'v106 jurnalda himoya amallari yozilgan')
+  ok((lg.d.rows || []).some((x) => x.act === 'chat_blok' || x.act === 'chat_ochirish' || x.act === 'chat_yomon_och'), 'v106 jurnalda kanal amallari yozilgan')
+
+  // 14) YOPILISH: test foydalanuvchisini logout (iz qolmasin)
   try { await j('/api/auth/logout', { method: 'POST', h: { authorization: 'Bearer ' + tokT }, body: {} }) } catch {}
 } catch (e) {
   fails++
