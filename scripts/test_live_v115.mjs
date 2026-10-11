@@ -36,10 +36,10 @@ async function sorov(url, opt = {}) {
 
 async function main() {
   // 1) KIRISH (DEV rejim: kod javobda qaytadi)
-  let r = await sorov(BASE + '/auth/sms/send', { method: 'POST', headers: H, body: JSON.stringify({ phone: PHONE }) })
+  let r = await sorov(BASE + '/auth/otp', { method: 'POST', headers: H, body: JSON.stringify({ phone: PHONE }) })
   const send = await r.json().catch(() => ({}))
   ok('sms/send (dev_code)', r.ok && send.dev_code, r.status + ' ' + JSON.stringify(send).slice(0, 120))
-  r = await sorov(BASE + '/auth/sms/verify', { method: 'POST', headers: H, body: JSON.stringify({ phone: PHONE, code: send.dev_code }) })
+  r = await sorov(BASE + '/auth/verify', { method: 'POST', headers: H, body: JSON.stringify({ phone: PHONE, code: send.dev_code }) })
   const ver = await r.json().catch(() => ({}))
   ok('sms/verify (token)', r.ok && ver.token, r.status + ' ' + JSON.stringify(ver).slice(0, 120))
   const AUTH = { ...H, authorization: 'Bearer ' + ver.token }
