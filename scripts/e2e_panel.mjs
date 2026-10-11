@@ -144,7 +144,9 @@ try {
     const b2 = await j('/api/panel/broadcast', { method: 'POST', h: AT, body: { body: 'v108 rasm e\u2018lon izohi', uid: uidT, img: bimg } })
     ok(b2.st === 200 && b2.d.ok && b2.d.sent === 1, 'v108 RASM E\u2018LON JONLI YUBORILDI (photo + izoh)', JSON.stringify(b2.d).slice(0, 120))
     const msgsT = await j('/api/chats/' + admCh.id + '/messages?latest=80', { h: { authorization: 'Bearer ' + tokT } })
-    const ph1 = (msgsT.d.messages || []).find((m) => m.kind === 'photo' && m.meta && m.meta.media_id && String(m.body || '') === 'v108 rasm e\u2018lon izohi')
+    // OHANGIZ: eski run'lar ham shu test-hisobga e'lon yuborgan — ENG YANGI photo xabarni olamiz
+    // (eski xabarning media id'si eski kalit bilan — yangi kalit deSHIFR qilmaydi)
+    const ph1 = (msgsT.d.messages || []).filter((m) => m.kind === 'photo' && m.meta && m.meta.media_id && String(m.body || '') === 'v108 rasm e\u2018lon izohi').pop()
     ok(!!ph1, 'v108 photo xabar meta bilan yetdi (media_id/key/iv/sha)', ph1 ? 'media=' + ph1.meta.media_id : 'topilmadi')
     if (ph1) {
       const mm = await j('/api/media/' + ph1.meta.media_id, { h: { authorization: 'Bearer ' + tokT } })
