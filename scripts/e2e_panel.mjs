@@ -76,6 +76,16 @@ try {
   ok(good.st === 200 && !!good.d.token, 'to\'g\'ri parol → adm-token')
   const AT = { authorization: 'Bearer ' + (good.d.token || '') }
 
+  // v109-DIAGNOSTIKA: himoya holati + so'nggi xavfsizlik hodisalari + boshqaruv jurnali
+  // (SECURITY E2E'ning INJ/EXT yiqilishiga tashxis — har holda chop etiladi)
+  try {
+    const dsec = await j('/api/panel/security', { h: AT })
+    console.log('  DIAG fwoff=' + dsec.d.fwoff + ' blocks=' + dsec.d.blocks + ' e24=' + dsec.d.e24 + ' e7=' + dsec.d.e7)
+    console.log('  DIAG recent=' + JSON.stringify((dsec.d.recent || []).slice(0, 10)))
+    const dlog = await j('/api/panel/log', { h: AT })
+    console.log('  DIAG log=' + JSON.stringify((dlog.d.rows || []).slice(0, 14)))
+  } catch (e) { console.log('  DIAG xato: ' + String(e)) }
+
   // 3) STATISTIKA
   const st1 = await j('/api/panel/stats', { h: AT })
   ok(st1.st === 200 && typeof st1.d.total === 'number' && Array.isArray(st1.d.countries), 'statistika maydonlari (total/countries)', JSON.stringify(st1.d).slice(0, 120))
