@@ -77,6 +77,10 @@ DEV_MODE = "1"
 DEV_PHONES = "+998907776655,+998900000003,+998900000004,+998900000005,+998900000006"
 # Sinov raqamlari (SMS yuborilmaydi): "+998900000001:111111,+998900000002:222222"
 TEST_PHONES = ""
+# v104 MAXFIY ADMIN PANEL paroli — 50gram.uz/?adminpanel manzilidan kiriladi.
+# Bu manzil va panel haqida ilovada HECH QANDAY ma'lumot yo'q (faqat sayt egasi biladi).
+# Parolni o'zgartirish uchun shu qiymatni almashtirib, git push qilish kifoya.
+ADMIN_PASS = "Balandtoglar1"
 # FOYDALANUVCHI MANBALARI (Reels bo'limi — manba nomi klientga KO'RINMAYDI, mahfiy):
 # MY_YT: YouTube kanal ID (UC...) yoki @handle, vergul bilan ajratilgan. Shorts tabi olinadi.
 # MY_IG: Instagram profil nomi (ochiq/public akkaunt bo'lishi shart), vergul bilan.

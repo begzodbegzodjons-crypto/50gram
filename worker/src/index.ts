@@ -27,6 +27,9 @@ export interface Env {
   // SMS MASTER-SWITCH: "app" = kod ilova ichida qizil yozuvda (Eskiz TINCH yotadi);
   // "eskiz" = haqiqiy SMS (secretlar + balans kerak). Batafsil: sms.ts va wrangler.toml
   SMS_MODE?: string
+  // v104 MAXFIY ADMIN PANEL paroli (50gram.uz/?adminpanel). Yo'q bo'lsa kod ichidagi
+  // zaxira qiymat ishlaydi (wrangler.toml'dagi ADMIN_PASS bilan bir xil) — panel hech qachon yopilmaydi
+  ADMIN_PASS?: string
   TURN_KEY_ID?: string
   TURN_KEY_TOKEN?: string
   // Web Push (VAPID): public = base64url(65-baytli P-256 nuqta), private = base64url(JSON {d,x,y})
@@ -271,7 +274,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v103"
+const BUILD_V = "v104"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -354,6 +357,8 @@ async function ensureSchema(db: Db) {
     "ALTER TABLE stories ADD COLUMN meta MEDIUMTEXT NULL",
     // Trend pozitiv-qayta o'rganish statistikasi (trendWeights/trendEv/trendInsights ishlatadi)
     "CREATE TABLE IF NOT EXISTS trend_stats (cat VARCHAR(20) PRIMARY KEY, imp BIGINT NOT NULL DEFAULT 0, clk BIGINT NOT NULL DEFAULT 0, wt BIGINT NOT NULL DEFAULT 0, upd BIGINT NOT NULL DEFAULT 0)",
+    // v104 ADMIN PANEL: blok bayrog'i — egapanel bloklaydi, sessiya-darvoza/kirish nuqtalari tekshiradi
+    "ALTER TABLE users ADD COLUMN blocked INT NOT NULL DEFAULT 0",
   ]
   for (const s of stmts) { try { await db.run(s) } catch {} }
   try {
@@ -519,7 +524,10 @@ async function authOtp(c: C) {
   // Haqiqiy SMS (Eskiz) ulanganda bu qo'riqchi shart emas — kod faqat haqiqiy egasiga boradi.
   const dev = String(c.req.headers.get("x-dev") || "").slice(0, 40)
   if (!smsOn && !test) {
-    const ex = await c.db.one("SELECT id, logout_at, token_exp, last_seen, dev FROM users WHERE phone=?", [phone])
+    const ex = await c.db.one("SELECT id, logout_at, token_exp, last_seen, dev, blocked FROM users WHERE phone=?", [phone])
+    // v104 ADMIN PANEL BLOK: bloklangan raqamga kod BERILMAYDI (verify ham baribir yopiq —
+    // bu yerda erta to'xtatish foydalanuvchiga aniq sababni ko'rsatadi)
+    if (ex && +ex.blocked === 1) fail("Hisobingiz bloklangan", 403)
     const faol = ex && !ex.logout_at && +(ex.token_exp || 0) > t && +(ex.last_seen || 0) > t - 15 * 60_000
     const ozQurilma = !!faol && !!dev && ex.dev === dev
     if (faol && !ozQurilma && !devPhones.includes(phone) && !c.b.force)
@@ -570,12 +578,15 @@ async function authVerify(c: C) {
   await ensureSchema(c.db)
   const tnow = now(), texp = tnow + 180 * 86400 * 1000
   const sess = randomStr(16)
-  let u = await c.db.one(`SELECT ${USER_COLS} FROM users WHERE phone=?`, [phone])
+  let u = await c.db.one(`SELECT ${USER_COLS}, blocked FROM users WHERE phone=?`, [phone])
   if (!u) {
     const id = newId()
     await c.db.run("INSERT INTO users(id,phone,created_at,last_seen,token_exp,sess,dev) VALUES(?,?,?,?,?,?,?)", [id, phone, tnow, tnow, texp, sess, dev || null])
     u = await c.db.one(`SELECT ${USER_COLS} FROM users WHERE id=?`, [id])
   } else {
+    // v104 ADMIN PANEL BLOK: bloklangan hisob yangi sessiya OLOLMAYDI (eski tokenlari ham
+    // sessiya-darvozada 401 oladi — blok = ilova umuman ochilmaydi)
+    if (+u.blocked === 1) fail("Hisobingiz bloklangan", 403)
     // Kirish → hisob yana FAOL bo'ldi + YANGI YAGONA SESSIYA: eskirgan barcha tokenlar
     // o'lik bo'lib qoladi (sess mos kelmadi → 401) — bir raqam, bitta faol qurilma.
     // v73: qurilma guvohnomasi ham yangilanadi (bo'sh bo'lsa — eski saqlanadi, eski mijozlar buzilmasin).
@@ -3263,6 +3274,462 @@ async function adminJurnal(c: C) {
   return json({ items: rows, now: now() })
 }
 
+// =====================================================================
+// MAXFIY ADMIN PANEL (v104) — FAQAT SAYT EGASI uchun (50gram.uz/?adminpanel)
+// ---------------------------------------------------------------------
+// MANZIL: 50gram.uz/?adminpanel → parol → panel (statistika, foydalanuvchilar,
+//   davlatlar, bloklash, hammaga xabar). Ilova ichida (web/) panel haqida BITTA
+//   BAYT YO'Q: havola yo'q, fayl yo'q — sahifa shu fayldan (worker xotirasidan)
+//   beriladi, noindex+nofollow (qidiruvchilarga yopiq, tab sarlavhasi neytral).
+// XAVFSIZLIK:
+//  • Parol: env.ADMIN_PASS (wrangler.toml) — bo'lmasa zaxira qiymat ishlaydi.
+//    Xato parol urinishlari OTP brute-force posboni bilan BIR XIL hisoblanadi
+//    (12 xato/1 soat → DO'da 24 soat IP-blok — hujumchiga oddiy "Not found").
+//  • Sessiya: JWT_SECRET bilan imzolangan adm-token (12 soat) — tashqaridan
+//    soxta qilib bo'lmaydi; har panel-so'rovida tekshiriladi (admAuth).
+//  • Yo'l: /api/panel/* — FW_TRAP ro'yxatiga KIRMAYDI (u faqat /adm*, /admin,
+//    /debug... ni oladi) va skanerlar lug'atida yo'q; orqada baribir parol+token.
+// BLOK: users.blocked=1 → sessiya-darvoza (har autentifikatsiyalangan so'rov),
+//   /ws va kirish (authOtp/authVerify) darhol 401 — foydalanuvchi ilovaga kira olmaydi.
+// BROADCAST: "50gram admin" tizim yuboruvchisi (ADM_ID) har foydalanuvchi bilan
+//   direct chat ochib ODATIY xabar yuboradi — klient kodiga 0 BAYT tegilmagan:
+//   xabar foydalanuvchining xabar bo'limida o'zi paydo bo'ladi (onlaynlar ≤30s,
+//   qolganlar ilova ochilganda). Paneldagi "barchasi" — bloklanganlar va adminni
+//   o'zi bloklaganlar chisqishtiriladi.
+// SUBREQUEST-BYUDJET: bepul planda so'roviga 50 subrequest — broadcast HAMMASI
+//   ko'p-qatorli INSERT/UPDATE (batch 400) bilan yoziladi (2000 ta ≈ 34 so'rov).
+// =====================================================================
+const ADM_ID = 990000000001
+const ADM_PHONE = "+999900000001" // +999 davlat kodi HAQIQIYATDA mavjud emas — hech qachon to'qnashmaydi
+
+// Telefon prefiksi → davlat (ISO) — web/core.js CC_LIST (56 davlat) bilan bir manba
+const CC_DIAL: Array<[string, string]> = [
+  ["998", "UZ"], ["996", "KG"], ["992", "TJ"], ["995", "GE"], ["994", "AZ"], ["993", "TM"],
+  ["380", "UA"], ["375", "BY"], ["374", "AM"], ["373", "MD"], ["372", "EE"], ["371", "LV"],
+  ["370", "LT"], ["385", "HR"], ["381", "RS"], ["359", "BG"], ["358", "FI"], ["351", "PT"],
+  ["972", "IL"], ["971", "AE"], ["966", "SA"], ["964", "IQ"], ["98", "IR"], ["93", "AF"],
+  ["90", "TR"], ["86", "CN"], ["82", "KR"], ["81", "JP"], ["91", "IN"], ["92", "PK"],
+  ["84", "VN"], ["66", "TH"], ["62", "ID"], ["60", "MY"], ["63", "PH"], ["55", "BR"],
+  ["49", "DE"], ["48", "PL"], ["46", "SE"], ["47", "NO"], ["45", "DK"], ["44", "GB"],
+  ["43", "AT"], ["41", "CH"], ["39", "IT"], ["36", "HU"], ["34", "ES"], ["33", "FR"],
+  ["31", "NL"], ["30", "GR"], ["40", "RO"], ["420", "CZ"], ["7", "KZ"], ["1", "US"],
+]
+function ccOf(phone: unknown): string {
+  const d = String(phone || "").replace(/\D/g, "")
+  for (let k = 3; k >= 1; k--) {
+    for (const [pre, iso] of CC_DIAL) {
+      if (pre !== d.slice(0, k)) continue
+      // +7 ikki davlatga ulashadi: 9xx→Rossiya, qolganlari Qozog'iston (v101 kirish-qoidasi bilan bir xil)
+      if (iso === "KZ") return d[1] === "9" ? "RU" : "KZ"
+      return iso
+    }
+  }
+  return "XX"
+}
+
+// Har panel-so'rovida: Bearer adm-token (JWT_SECRET imzosi, adm:1 klaim) tekshiriladi
+async function admAuth(c: C) {
+  const token = (c.req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "")
+  const p = token ? await verifyJwt(token, c.env.JWT_SECRET) : null
+  if (!p || p.adm !== 1) fail("Ruxsat yo‘q", 401)
+}
+
+async function panelLogin(c: C) {
+  const pass = str(c.b.pass, 64)
+  const want = str(c.env.ADMIN_PASS || "Balandtoglar1", 64)
+  if ((await sha256("g50adm:" + pass)) !== (await sha256("g50adm:" + want))) {
+    const ip = fwIp(c.req)
+    if (ip) {
+      // OTP-brute posboni: 12 xato parol/1 soat → 24 soat doimiy IP-blok (javob — oddiy "Not found")
+      if (fwLokal(ip, "auth", 12, 24 * 3_600_000)) { fwOchko(c.env, c.wait, ip, "auth"); return FW_404() }
+      fwOchko(c.env, c.wait, ip, "auth")
+    }
+    fail("Parol noto‘g‘ri", 401)
+  }
+  return json({ token: await signJwt({ adm: 1 }, c.env.JWT_SECRET, 12 * 3600), now: now() })
+}
+
+async function panelStats(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const t = now()
+  const [u, m, ch, cl, phones] = await Promise.all([
+    c.db.one(
+      `SELECT COUNT(*) AS total,
+        SUM(CASE WHEN blocked=1 THEN 1 ELSE 0 END) AS blk,
+        SUM(CASE WHEN created_at>? THEN 1 ELSE 0 END) AS d1,
+        SUM(CASE WHEN created_at>? THEN 1 ELSE 0 END) AS d7,
+        SUM(CASE WHEN last_seen>? THEN 1 ELSE 0 END) AS on5,
+        SUM(CASE WHEN last_seen>? THEN 1 ELSE 0 END) AS a24,
+        SUM(CASE WHEN last_seen>? THEN 1 ELSE 0 END) AS a7
+       FROM users WHERE id<>${ADM_ID}`,
+      [t - DAY, t - 7 * DAY, t - 5 * 60_000, t - DAY, t - 7 * DAY],
+    ),
+    c.db.one("SELECT COUNT(*) AS n FROM messages WHERE deleted=0").catch(() => null),
+    c.db.one("SELECT COUNT(*) AS n FROM chats").catch(() => null),
+    c.db.one("SELECT COUNT(*) AS n FROM calls").catch(() => null),
+    c.db.q("SELECT phone FROM users WHERE id<>" + ADM_ID + " AND blocked=0").catch(() => [] as any[]),
+  ])
+  const cc: Record<string, number> = {}
+  for (const r of phones) { const k = ccOf(r.phone); cc[k] = (cc[k] || 0) + 1 }
+  return json({
+    total: Number(u?.total || 0), blocked: Number(u?.blk || 0),
+    today: Number(u?.d1 || 0), week: Number(u?.d7 || 0),
+    online: Number(u?.on5 || 0), active24: Number(u?.a24 || 0), active7: Number(u?.a7 || 0),
+    messages: Number(m?.n || 0), chats: Number(ch?.n || 0), calls: Number(cl?.n || 0),
+    countries: Object.keys(cc).map((k) => ({ cc: k, n: cc[k] })).sort((a, b) => b.n - a.n),
+    now: t,
+  })
+}
+
+async function panelUsers(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const page = Math.max(1, Math.min(500, Math.floor(+(c.url.searchParams.get("page") || 1) || 1)))
+  const qq = str(c.url.searchParams.get("q"), 32)
+  const conds = ["id<>" + ADM_ID]
+  const params: unknown[] = []
+  if (c.url.searchParams.get("blocked") === "1") conds.push("blocked=1")
+  if (qq) {
+    const like = "%" + qq.replace(/[%_]/g, "") + "%"
+    conds.push("(phone LIKE ? OR first_name LIKE ? OR last_name LIKE ? OR username LIKE ?)")
+    params.push(like, like, like, like)
+  }
+  const w = "WHERE " + conds.join(" AND ")
+  const LIM = 50
+  const [rows, cnt] = await Promise.all([
+    c.db.q(`SELECT id,phone,first_name,last_name,username,avatar_ver,created_at,last_seen,blocked FROM users ${w} ORDER BY id DESC LIMIT ${LIM} OFFSET ${(page - 1) * LIM}`, params),
+    c.db.one(`SELECT COUNT(*) AS n FROM users ${w}`, params),
+  ])
+  return json({
+    users: rows.map((r) => ({
+      id: +r.id, phone: r.phone, name: ((r.first_name || "") + " " + (r.last_name || "")).trim(),
+      username: r.username || "", av: +r.avatar_ver || 0, cr: +r.created_at || 0, ls: +r.last_seen || 0,
+      bl: +r.blocked === 1, cc: ccOf(r.phone),
+    })),
+    total: Number(cnt?.n || 0), page, pages: Math.max(1, Math.ceil(Number(cnt?.n || 0) / LIM)), now: now(),
+  })
+}
+
+async function panelBlock(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const id = Math.floor(+(c.b?.id) || 0)
+  const on = c.b?.on ? 1 : 0
+  if (!id || id === ADM_ID) fail("Noto‘g‘ri foydalanuvchi", 400)
+  if (!(await c.db.one("SELECT id FROM users WHERE id=?", [id]))) fail("Foydalanuvchi topilmadi", 404)
+  await c.db.run("UPDATE users SET blocked=? WHERE id=?", [on, id])
+  return json({ ok: true, id, blocked: on })
+}
+
+// Tizim yuboruvchisi ("50gram admin") — bir marta yaratiladi, panelda KO'RINMAYDI,
+// hech qachon onlayn emas (last_seen=0), qidiruvda oddiy tinch profil.
+async function admSysUser(db: Db) {
+  if (await db.one("SELECT id FROM users WHERE id=?", [ADM_ID])) return
+  await db.run("INSERT INTO users(id,phone,first_name,last_name,created_at,last_seen) VALUES(?,?,?,?,?,0)", [ADM_ID, ADM_PHONE, "50gram", "admin", now()])
+}
+
+async function panelBroadcast(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const body = str(c.b.body, 4096)
+  if (!body) fail("Xabar matni bo‘sh", 400)
+  await admSysUser(c.db)
+  const t = now()
+  // "barchasi" = bloklanganlar YO'Q + adminni o'zi bloklaganlar YO'Q (foydalanuvchi xohishi hurmat)
+  const where = `WHERE id<>${ADM_ID} AND blocked=0 AND id NOT IN (SELECT user_id FROM blocks WHERE blocked_id=${ADM_ID})`
+  const total = Number((await c.db.one("SELECT COUNT(*) AS n FROM users " + where))?.n || 0)
+  // 2000/so'rov — subrequest-byudjetga sig'im (qolganlari keyingi yuborishda yetadi)
+  const rows = await c.db.q("SELECT id FROM users " + where + " ORDER BY id LIMIT 2000")
+  const targets = rows.map((r) => +r.id)
+  const CS = 400
+  let newChats = 0, sent = 0
+  for (let i = 0; i < targets.length; i += CS) {
+    const part = targets.slice(i, i + CS)
+    const keys = part.map((uid) => (uid < ADM_ID ? uid + ":" + ADM_ID : ADM_ID + ":" + uid))
+    const ex = await c.db.q(`SELECT id, direct_key FROM chats WHERE direct_key IN (${ph(keys)})`, keys)
+    const have = new Map<string, number>(ex.map((r) => [String(r.direct_key), +r.id]))
+    const chatIds: number[] = [], insChats: unknown[] = [], insMem: unknown[] = []
+    for (let j = 0; j < part.length; j++) {
+      const chid = have.get(keys[j])
+      if (chid) { chatIds.push(chid); continue }
+      const nid = newId()
+      chatIds.push(nid)
+      insChats.push([nid, "direct", ADM_ID, 0, randomStr(10), keys[j], 2, t, t])
+      insMem.push([nid, ADM_ID, "member", t], [nid, part[j], "member", t])
+    }
+    if (insChats.length) {
+      await c.db.run(
+        `INSERT INTO chats(id,type,owner_id,is_public,invite_hash,direct_key,member_count,last_msg_at,created_at) VALUES ${insChats.map(() => "(?,?,?,?,?,?,?,?,?)").join(",")}`,
+        insChats.flat(),
+      )
+      await c.db.run(
+        `INSERT INTO chat_members(chat_id,user_id,role,joined_at) VALUES ${insMem.map(() => "(?,?,?,?)").join(",")}`,
+        insMem.flat(),
+      )
+      newChats += insChats.length
+    }
+    // xabar id'lari: t*1000+seq — ketma-ket noyob; PK to'qnashuvi (juda kam ehtimol) — har biri alohida
+    const mrows: unknown[] = []
+    for (let j = 0; j < chatIds.length; j++)
+      mrows.push([t * 1000 + i + j, chatIds[j], ADM_ID, "text", body, null, t, t, t + 100 * 365 * DAY])
+    if (mrows.length) {
+      try {
+        await c.db.run(
+          `INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES ${mrows.map(() => "(?,?,?,?,?,?,?,?,?)").join(",")}`,
+          mrows.flat(),
+        )
+      } catch {
+        for (const r of mrows as unknown[][])
+          await c.db.run("INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)", [newId(), r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]]).catch(() => {})
+      }
+      await c.db.run(`UPDATE chats SET last_msg_at=? WHERE id IN (${ph(chatIds)})`, [t, ...chatIds])
+      sent += mrows.length
+    }
+  }
+  return json({ ok: true, sent, new_chats: newChats, total, now: t })
+}
+
+// PANEL SAHIFASI — worker xotirasidan beriladi (web/ papkada FAYL YO'Q — saytda iz yo'q).
+// String.raw: ichida ${ va backtick TAQIQLANGAN (panel JS'da faqat '+' birlashmasi).
+const ADMIN_HTML = String.raw`<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>50</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0e1013;color:#e6e8ec;font:15px/1.5 -apple-system,Segoe UI,Roboto,Arial,sans-serif;min-height:100vh}
+.hidden{display:none!important}
+.wrap{max-width:980px;margin:0 auto;padding:18px}
+.h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0 16px}
+.h b{font-size:17px}
+button{background:#2b6cff;border:0;color:#fff;padding:9px 16px;border-radius:9px;font-size:14px;cursor:pointer}
+button:hover{filter:brightness(1.12)}
+button.sec{background:#23262d;color:#e6e8ec}
+button.warn{background:#8b2332}
+button:disabled{opacity:.45;cursor:default}
+input,textarea{background:#171a1f;border:1px solid #2a2e36;color:#e6e8ec;padding:10px 12px;border-radius:9px;font-size:14px;width:100%}
+input:focus,textarea:focus{outline:1px solid #2b6cff}
+.tabs{display:flex;gap:8px;margin:0 0 16px;flex-wrap:wrap}
+.tabs button{background:#171a1f;color:#c9cdd4}
+.tabs button.on{background:#2b6cff;color:#fff}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:10px}
+.card{background:#171a1f;border:1px solid #23262d;border-radius:12px;padding:14px}
+.card small{display:block;color:#8b919c;font-size:12px;margin-bottom:4px}
+.card b{font-size:22px}
+.card.acc b{color:#7fb0ff}
+.card.red b{color:#ff7b72}
+.card.grn b{color:#4ec97a}
+h3{font-size:13px;color:#8b919c;text-transform:uppercase;letter-spacing:.06em;margin:22px 0 10px}
+.crow{display:flex;align-items:center;gap:10px;margin:6px 0}
+.crow .nm{width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.crow .bar{height:10px;background:#2b6cff;border-radius:5px;min-width:2px}
+.crow .n{color:#8b919c;font-size:13px}
+.bar2{display:flex;gap:8px;margin:0 0 12px;align-items:center}
+.u{display:flex;align-items:center;gap:12px;background:#171a1f;border:1px solid #23262d;border-radius:12px;padding:10px 12px;margin:8px 0}
+.u img{width:40px;height:40px;border-radius:50%;object-fit:cover;background:#23262d;flex:none}
+.u .in{flex:1;min-width:0}
+.u .nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.u .sub{color:#8b919c;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.u .st{font-size:12px;color:#8b919c}
+.tag{display:inline-block;padding:1px 8px;border-radius:6px;font-size:12px;background:#8b2332;color:#fff;margin-left:6px;vertical-align:1px}
+.pg{display:flex;align-items:center;justify-content:center;gap:12px;margin:14px 0;color:#8b919c;font-size:14px}
+textarea{min-height:140px;resize:vertical}
+.note{color:#8b919c;font-size:13px;margin:0 0 12px}
+.res{margin:10px 0 0;color:#4ec97a;font-size:14px;min-height:20px}
+.err{color:#ff7b72!important}
+.lg{max-width:340px;margin:12vh auto 0;padding:0 18px}
+.lg h1{font-size:22px;margin:0 0 6px}
+.lg p{color:#8b919c;font-size:14px;margin:0 0 18px}
+@media(max-width:640px){.crow .nm{width:112px}.u{flex-wrap:wrap}}
+</style>
+</head>
+<body>
+<div id="lg" class="lg hidden">
+  <h1>50</h1>
+  <p>Kirish uchun parolni kiriting</p>
+  <input id="pw" type="password" placeholder="Parol">
+  <div class="bar2" style="margin-top:12px"><button id="lb" style="width:100%">Kirish</button></div>
+  <div class="res err" id="le"></div>
+</div>
+<div id="app" class="wrap hidden">
+  <div class="h"><b>50 · Panel</b><span><button class="sec" id="rf">Yangilash</button> <button class="sec" id="out">Chiqish</button></span></div>
+  <div class="tabs">
+    <button data-t="st" class="on">Statistika</button>
+    <button data-t="us">Foydalanuvchilar</button>
+    <button data-t="br">Xabar yuborish</button>
+  </div>
+  <section id="st">
+    <div class="cards" id="cards"></div>
+    <h3>Davlatlar</h3>
+    <div id="ccs"></div>
+  </section>
+  <section id="us" class="hidden">
+    <div class="bar2"><input id="q" placeholder="Ism, telefon yoki @username"><button id="qb">Qidirish</button></div>
+    <div class="note" id="un"></div>
+    <div id="ul"></div>
+    <div class="pg"><button class="sec" id="pv">← Oldingi</button><span id="pgn">1 / 1</span><button class="sec" id="nx">Keyingi →</button></div>
+  </section>
+  <section id="br" class="hidden">
+    <p class="note">Xabar <b>«50gram admin»</b> nomidan barcha faol foydalanuvchining xabar bo‘limiga yuboriladi (oddiy xabar ko‘rinishida, ilova ochilganda yoki 30 soniyadan keyin ko‘rinadi).</p>
+    <textarea id="tx" maxlength="4096" placeholder="Xabar matni..."></textarea>
+    <div class="bar2" style="margin-top:10px"><span class="note" id="cnt">0 / 4096</span><button id="sb">Hammaga yuborish</button></div>
+    <div class="res" id="bres"></div>
+  </section>
+</div>
+<script>
+var T=localStorage.getItem('g50adm')||''
+var cur='st',page=1,pages=1
+function $(i){return document.getElementById(i)}
+var M={'"':"&quot;","'":"&#39;","&":"&amp;","<":"&lt;",">":"&gt;"}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return M[c]})}
+var CC={UZ:['O‘zbekiston','🇺🇿'],RU:['Rossiya','🇷🇺'],KZ:['Qozog‘iston','🇰🇿'],KG:['Qirg‘iziston','🇰🇬'],TJ:['Tojikiston','🇹🇯'],TM:['Turkmaniston','🇹🇲'],AZ:['Ozarbayjon','🇦🇿'],UA:['Ukraina','🇺🇦'],BY:['Belarus','🇧🇾'],GE:['Gruziya','🇬🇪'],AM:['Armaniston','🇦🇲'],MD:['Moldova','🇲🇩'],TR:['Turkiya','🇹🇷'],DE:['Germaniya','🇩🇪'],FR:['Fransiya','🇫🇷'],GB:['Buyuk Britaniya','🇬🇧'],IT:['Italiya','🇮🇹'],ES:['Ispaniya','🇪🇸'],NL:['Niderlandiya','🇳🇱'],PL:['Polsha','🇵🇱'],RO:['Rumyniya','🇷🇴'],CZ:['Chexiya','🇨🇿'],BG:['Bolgariya','🇧🇬'],HU:['Vengriya','🇭🇺'],SE:['Shvetsiya','🇸🇪'],NO:['Norvegiya','🇳🇴'],DK:['Daniya','🇩🇰'],FI:['Finlandiya','🇫🇮'],LT:['Litva','🇱🇹'],LV:['Latviya','🇱🇻'],EE:['Estoniya','🇪🇪'],CH:['Shveytsariya','🇨🇭'],AT:['Avstriya','🇦🇹'],RS:['Serbiya','🇷🇸'],HR:['Xorvatiya','🇭🇷'],GR:['Gretsiya','🇬🇷'],PT:['Portugaliya','🇵🇹'],IL:['Isroil','🇮🇱'],AE:['BAA','🇦🇪'],SA:['Saudiya Arabistoni','🇸🇦'],IR:['Eron','🇮🇷'],IQ:['Iroq','🇮🇶'],AF:['Afg‘oniston','🇦🇫'],CN:['Xitoy','🇨🇳'],KR:['Koreya','🇰🇷'],JP:['Yaponiya','🇯🇵'],IN:['Hindiston','🇮🇳'],PK:['Pokiston','🇵🇰'],VN:['Vetnam','🇻🇳'],TH:['Tailand','🇹🇭'],ID:['Indoneziya','🇮🇩'],MY:['Malayziya','🇲🇾'],PH:['Filippin','🇵🇭'],US:['AQSh / Kanada','🇺🇸'],BR:['Braziliya','🇧🇷'],XX:['Boshqa','🌐']}
+function ccName(k){var x=CC[k];return x?(x[1]+' '+x[0]):'🌐 Boshqa'}
+function api(p,m,b){
+  return fetch('/api/panel/'+p,{method:m||'GET',headers:{'content-type':'application/json',authorization:'Bearer '+T},body:b?JSON.stringify(b):undefined})
+    .then(function(r){return r.json().then(function(j){return{s:r.status,j:j||{}}}).catch(function(){return{s:r.status,j:{}}})})
+    .catch(function(){return{s:0,j:{}}})
+}
+function authFail(r){if(r&&r.s===401){localStorage.removeItem('g50adm');location.reload();return true}return false}
+function rel(ms){
+  if(!ms)return '—'
+  var d=Date.now()-ms
+  if(d<70000)return '🟢 Onlayn'
+  if(d<3600000)return Math.max(1,Math.round(d/60000))+' daqiqa oldin'
+  if(d<86400000)return Math.round(d/3600000)+' soat oldin'
+  return Math.floor(d/86400000)+' kun oldin'
+}
+function dt(ms){
+  if(!ms)return '—'
+  var d=new Date(ms),p=function(x){return (x<10?'0':'')+x}
+  return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes())
+}
+function loadStats(){
+  api('stats').then(function(r){
+    if(authFail(r))return
+    var s=r.j;if(!s||s.total===undefined)return
+    var C=[
+      ['Jami foydalanuvchi',s.total,'acc'],
+      ['Hozir onlayn',s.online,'grn'],
+      ['24 soatda faol',s.active24,''],
+      ['7 kunda faol',s.active7,''],
+      ['Bugun qo‘shildi',s.today,''],
+      ['7 kunda qo‘shildi',s.week,''],
+      ['Bloklangan',s.blocked,'red'],
+      ['Jami xabarlar',s.messages,''],
+      ['Suhbatlar',s.chats,''],
+      ['Qo‘ng‘iroqlar',s.calls,'']
+    ]
+    var h=''
+    for(var i=0;i<C.length;i++)h+='<div class="card '+C[i][2]+'"><small>'+C[i][0]+'</small><b>'+C[i][1]+'</b></div>'
+    $('cards').innerHTML=h
+    var mx=1
+    for(var k=0;k<s.countries.length;k++)if(s.countries[k].n>mx)mx=s.countries[k].n
+    var c=''
+    for(var i=0;i<s.countries.length;i++){var x=s.countries[i]
+      c+='<div class="crow"><span class="nm">'+ccName(x.cc)+'</span><span class="bar" style="width:'+Math.max(2,Math.round(x.n/mx*260))+'px"></span><span class="n">'+x.n+'</span></div>'}
+    $('ccs').innerHTML=c||'<p class="note">Hozircha malumot yoq</p>'
+  })
+}
+function loadUsers(p){
+  if(p)page=p
+  var url='users?page='+page
+  var q=$('q').value.trim()
+  if(q)url+='&q='+encodeURIComponent(q)
+  api(url).then(function(r){
+    if(authFail(r))return
+    var j=r.j;if(!j||!j.users)return
+    pages=j.pages
+    $('un').textContent='Jami: '+j.total+' foydalanuvchi'
+    var h=''
+    for(var i=0;i<j.users.length;i++){var u=j.users[i]
+      h+='<div class="u">'
+        +'<img data-uid="'+u.id+'" src="/api/avatar/u/'+u.id+'?v='+u.av+'" alt="">'
+        +'<div class="in"><div class="nm">'+esc(u.name||'(ism yozilmagan)')+(u.bl?'<span class="tag">Bloklangan</span>':'')+'</div>'
+        +'<div class="sub">'+esc(u.phone)+' · '+ccName(u.cc)+(u.username?' · @'+esc(u.username):'')+'</div>'
+        +'<div class="st">ID '+u.id+' · Royxat: '+dt(u.cr)+' · Faollik: '+rel(u.ls)+'</div></div>'
+        +(u.bl?'<button class="sec" data-un="'+u.id+'">Blokdan chiqarish</button>':'<button class="warn" data-bl="'+u.id+'">Bloklash</button>')
+        +'</div>'
+    }
+    $('ul').innerHTML=h||'<p class="note">Topilmadi</p>'
+    $('pgn').textContent=page+' / '+pages
+    $('pv').disabled=page<=1
+    $('nx').disabled=page>=pages
+    var ims=$('ul').querySelectorAll('img')
+    for(var i=0;i<ims.length;i++)ims[i].onerror=function(){this.style.visibility='hidden'}
+    var bs=$('ul').querySelectorAll('[data-bl],[data-un]')
+    for(var i=0;i<bs.length;i++)bs[i].onclick=function(){
+      var id=+(this.getAttribute('data-bl')||this.getAttribute('data-un')),on=!!this.getAttribute('data-bl')
+      var msg=on?'Bu foydalanuvchi BLOKLANADI — ilovaga kira olmaydi. Davom etamizmi?':'Blok olib tashlanadi — foydalanuvchi yana kira oladi. Davom etamizmi?'
+      if(!confirm(msg))return
+      var btn=this;btn.disabled=true
+      api('block','POST',{id:id,on:on}).then(function(r){
+        if(authFail(r))return
+        btn.disabled=false
+        if(r.j&&r.j.ok)loadUsers()
+        else alert((r.j&&r.j.error)||'Xatolik')
+      })
+    }
+  })
+}
+function doLogin(){
+  var pw=$('pw').value
+  if(!pw)return
+  $('lb').disabled=true
+  $('le').textContent=''
+  fetch('/api/panel/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pass:pw})})
+    .then(function(r){return r.json().then(function(j){return{s:r.status,j:j||{}}}).catch(function(){return{s:r.status,j:{}}})})
+    .then(function(r){
+      if(r.j&&r.j.token){T=r.j.token;localStorage.setItem('g50adm',T);showApp()}
+      else $('le').textContent=(r.j&&r.j.error)?r.j.error:'Kirish amalga oshmadi'
+    })
+    .catch(function(){$('le').textContent='Tarmoq xatosi'})
+    .then(function(){$('lb').disabled=false})
+}
+function showApp(){$('lg').classList.add('hidden');$('app').classList.remove('hidden');loadStats()}
+function logout(){localStorage.removeItem('g50adm');location.reload()}
+var tabs=document.querySelectorAll('.tabs button')
+for(var i=0;i<tabs.length;i++)tabs[i].onclick=function(){switchTab(this.getAttribute('data-t'))}
+function switchTab(t){
+  cur=t
+  var bs=document.querySelectorAll('.tabs button')
+  for(var i=0;i<bs.length;i++)bs[i].className=(bs[i].getAttribute('data-t')===t)?'on':''
+  $('st').classList.toggle('hidden',t!=='st')
+  $('us').classList.toggle('hidden',t!=='us')
+  $('br').classList.toggle('hidden',t!=='br')
+  if(t==='st')loadStats()
+}
+$('qb').onclick=function(){loadUsers(1)}
+$('q').onkeydown=function(e){if(e.key==='Enter')loadUsers(1)}
+$('pv').onclick=function(){if(page>1)loadUsers(page-1)}
+$('nx').onclick=function(){if(page<pages)loadUsers(page+1)}
+$('tx').oninput=function(){$('cnt').textContent=this.value.length+' / 4096'}
+$('sb').onclick=function(){
+  var v=$('tx').value.trim()
+  if(!v){alert('Xabar matnini yozing');return}
+  if(!confirm('Xabar BARCHA faol foydalanuvchiga «50gram admin» nomidan yuboriladi. Davom etamizmi?'))return
+  var b=this;b.disabled=true;$('bres').className='res';$('bres').textContent='Yuborilmoqda...'
+  api('broadcast','POST',{body:v}).then(function(r){
+    b.disabled=false
+    if(authFail(r))return
+    if(r.j&&r.j.ok){$('bres').textContent='✓ Yuborildi: '+r.j.sent+' foydalanuvchiga ('+r.j.new_chats+' yangi suhbat ochildi).';$('tx').value='';$('cnt').textContent='0 / 4096'}
+    else{$('bres').className='res err';$('bres').textContent=(r.j&&r.j.error)||'Xatolik'}
+  })
+}
+$('rf').onclick=function(){loadStats();if(cur==='us')loadUsers()}
+$('out').onclick=logout
+$('lb').onclick=doLogin
+$('pw').onkeydown=function(e){if(e.key==='Enter')doLogin()}
+setInterval(function(){if(cur==='st'&&!document.hidden&&T)loadStats()},60000)
+if(T)showApp()
+else{$('lg').classList.remove('hidden');setTimeout(function(){try{$('pw').focus()}catch(e){}},60)}
+</script>
+</body>
+</html>`
+
 // ------------------------- Router -------------------------
 type H = (c: C) => Promise<Response>
 const routes: Array<[string, string, H, boolean?]> = [
@@ -3278,6 +3745,13 @@ const routes: Array<[string, string, H, boolean?]> = [
   // XATO JURNALI — faqat egaga (DEV_PHONES). Serverdagi har 500-sinf xato err_jurnal'ga
   // yoziladi; bu yo'l orqali o'zbekcha tashxis: «log bilan topish» doktrinasi.
   ["GET", "/jurnal", adminJurnal],
+  // MAXFIY ADMIN PANEL (v104) — faqat egaga. Yo'l /panel/* — FW_TRAP'ga (/adm*, /admin...) KIRMAYDI.
+  // Barchasi open:true (o'z JWT'siz) — ichkarida admAuth() adm-token tekshiradi (JWT_SECRET imzosi).
+  ["POST", "/panel/login", panelLogin, true],
+  ["GET", "/panel/stats", panelStats, true],
+  ["GET", "/panel/users", panelUsers, true],
+  ["POST", "/panel/block", panelBlock, true],
+  ["POST", "/panel/broadcast", panelBroadcast, true],
   ["GET", "/me", getMe],
   ["PATCH", "/me", patchMe],
   ["POST", "/ping", async (c) => { const t = now(); await c.db.run("UPDATE users SET last_seen=?, token_exp=? WHERE id=?", [t, t + 180 * 86400 * 1000, c.uid]); return json({ ok: true, now: t }) }],
@@ -3527,6 +4001,13 @@ export default {
     // index.html: HAR SAFAR qayta tasdiqlansin — APK WebView va brauzer hech qachon eski
     // qobiqni (masalan TEST rejimi bannerisiz nusxani) xotirasidan qaytarmasin (Task 39)
     if (url.pathname === "/" || url.pathname === "/index.html") {
+      // v104 MAXFIY ADMIN PANEL: faqat /?adminpanel so'rovda (ilovada havola YO'Q, noindex).
+      // Sahifa worker xotirasidan — web/ papkada fayl yo'q, demak "saytda ma'lumot yo'q".
+      if (url.searchParams.has("adminpanel"))
+        return new Response(ADMIN_HTML, {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-robots-tag": "noindex, nofollow", ...SEC_H },
+        })
       const asset = await env.ASSETS!.fetch(new Request(url.toString(), { method: "GET" }))
       const h = new Headers(asset.headers)
       h.set("Cache-Control", "no-cache, must-revalidate")
@@ -3632,8 +4113,9 @@ export default {
         const payload = await verifyJwt(url.searchParams.get("token") || "", env.JWT_SECRET)
         if (!payload) { if (fwip) { if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404(); fwOchko(env, wait, fwip, "tok") } return json({ error: "Avtorizatsiya kerak" }, 401) }
         // Yagona sessiya nazorati (WS uchun ham): logout/qayta kirish eski ulanishni o'chiradi
-        const su = await db.one("SELECT sess, logout_at, token_exp FROM users WHERE id=?", [Number(payload.sub)])
-        if (!su || su.logout_at || (su.token_exp && +su.token_exp < now()) || (payload.s && payload.s !== su.sess))
+        // v104: bloklangan hisobning WS ulanishi ham darhol yopiladi
+        const su = await db.one("SELECT sess, logout_at, token_exp, blocked FROM users WHERE id=?", [Number(payload.sub)])
+        if (!su || su.logout_at || (su.token_exp && +su.token_exp < now()) || (payload.s && payload.s !== su.sess) || +su.blocked === 1)
           return json({ error: "Avtorizatsiya kerak" }, 401)
         if (req.headers.get("Upgrade") !== "websocket") return json({ error: "WebSocket kerak" }, 426)
         const stub = env.USER_SOCKET.get(env.USER_SOCKET.idFromName(String(payload.sub)))
@@ -3651,8 +4133,10 @@ export default {
         // YAGONA FAOL SESSIYA (bir raqam — bitta faol qurilma): logout barcha tokenlarni
         // o'ldiradi (logout_at), yangi kirish esa eskisini (sess mos emas → 401). Eski
         // tokenlar (s klaimsiz) moslik bo'yicha ishlaydi — yangilanish yumshoq o'tadi.
-        const su = await db.one("SELECT sess, logout_at, token_exp FROM users WHERE id=?", [uid])
-        if (!su || su.logout_at || (su.token_exp && +su.token_exp < now())) fail("Avtorizatsiya kerak", 401)
+        // v104 ADMIN PANEL BLOK: blocked=1 hisob — HAR BIR autentifikatsiyalangan so'rovda
+        // darhol 401 (ilova o'zi kirish ekraniga qaytaradi; qayta kirish ham authVerify'da yopiq)
+        const su = await db.one("SELECT sess, logout_at, token_exp, blocked FROM users WHERE id=?", [uid])
+        if (!su || su.logout_at || (su.token_exp && +su.token_exp < now()) || +su.blocked === 1) fail("Avtorizatsiya kerak", 401)
         if (payload.s && payload.s !== su.sess) fail("Avtorizatsiya kerak", 401)
         // MA'LUMOT TORTISH POSBONI (hatto yaroqli token bilan ham ma'lumot olib qochish mumkin emas):
         // bitta hisob 10 daqiqada 3000+ so'rov = skript (inson UI'da bunga yaqinlasha olmaydi —

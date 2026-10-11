@@ -18,6 +18,9 @@ const NUM = new Set([
   "online_ms", "score", "first_beat", "last_beat", "jobs", "free", "kids", "depth", "ready", "host_kids", "parent_id", "parent",
   "imp", "clk", "wt", "upd",
   "coins", "earned", "spent", "gifts_sent", "gifts_recv", "last_daily", "rewarded", "daily_left",
+  // v104 ADMIN PANEL: users.blocked bayrog'i (0/1) — TiDB BIGINT'ni string qaytaradi va
+  // JS'da "0" ham truthy — SHU RO'YXATDA bo'lishi SHART (aks holda hamma bloklangan bo'lib qoladi)
+  "blocked",
 ])
 
 function fix(row: Record<string, unknown>) {
