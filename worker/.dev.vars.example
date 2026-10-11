@@ -1,0 +1,3 @@
+# Lokal ishlab chiqish uchun namuna: nusxa oling → fayl nomini ".dev.vars" qiling
+DATABASE_URL="mysql://<user>.root:<parol>@gateway01.<hudud>.prod.aws.tidbcloud.com:4000/uzbekgram"
+JWT_SECRET="lokal-uchun-uzun-tasodifiy-satr"

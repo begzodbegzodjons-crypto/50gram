@@ -1,0 +1,67 @@
+# ============================================================
+# 50 Gram — ishlab chiqarish orkestratsiyasi
+#   caddy : 80/443 (HTTPS avtomatik) → web:3000, socket → chat:3003
+#   web   : Next.js (standalone)
+#   chat  : socket.io (gibrid xabar yetkazish)
+# Baza: db-data volume'ida /app/db/50gram.db (SQLite)
+# ============================================================
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # .env'da PRISMA_SCHEMA=prisma/schema-mysql.prisma bo'lsa TiDB rejimi
+      args:
+        PRISMA_SCHEMA: ${PRISMA_SCHEMA:-prisma/schema.prisma}
+    image: 50gram-app
+    command: ["bun", ".next/standalone/server.js"]
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      # .env fayldan olinadi (SQLite yoki TiDB mysql URL)
+      - DATABASE_URL=${DATABASE_URL:-file:/app/db/50gram.db}
+    volumes:
+      - db-data:/app/db
+    expose:
+      - "3000"
+    depends_on:
+      - chat
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "bun -e \"fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  chat:
+    image: 50gram-app
+    command: ["bun", "mini-services/chat-service/index.ts"]
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-file:/app/db/50gram.db}
+    volumes:
+      - db-data:/app/db
+    expose:
+      - "3003"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-:80}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:

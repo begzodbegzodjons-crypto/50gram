@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "50gram-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-06-01",
+  "account_id": "<ACCOUNT_ID>",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "USER_SOCKET",
+        "class_name": "UserSocket"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["UserSocket"]
+    }
+  ],
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
+  "observability": {
+    "enabled": true
+  }
+}

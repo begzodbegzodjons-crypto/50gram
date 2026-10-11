@@ -1,0 +1,75 @@
+# ============================================================
+# 50 Gram — Cloudflare Worker + Pages deploy (GitHub Actions)
+# Sozlash (repo → Settings → Secrets and variables → Actions):
+#   Secrets:  CLOUDFLARE_API_TOKEN (Workers/KV/DO/ Pages ruxsatlari bilan)
+#             CLOUDFLARE_ACCOUNT_ID
+#   Variables: CF_DEPLOY=1  (deploy yoqilishi)
+#              CF_PAGES_PROJECT=50gram (Pages proyekti nomi)
+# Vars bo'lmasa — faqat tekshiruv (typecheck + build) ishlaydi.
+# ============================================================
+
+name: 50 Gram CF Deploy
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Tekshiruv (worker tsc + web build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Worker typecheck
+        working-directory: cloudflare/worker
+        run: |
+          bun install
+          bun run typecheck
+
+      - name: Web build
+        run: |
+          bun install
+          bunx prisma generate
+          DATABASE_URL=file:/tmp/ci.db bun run build
+
+  deploy-worker:
+    name: Worker deploy
+    needs: check
+    runs-on: ubuntu-latest
+    if: ${{ vars.CF_DEPLOY == '1' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cloudflare/worker
+          command: deploy
+
+  deploy-pages:
+    name: Pages deploy (statik web)
+    needs: check
+    runs-on: ubuntu-latest
+    if: ${{ vars.CF_DEPLOY == '1' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Statik eksport
+        env:
+          NEXT_PUBLIC_API_BASE: ${{ vars.CF_API_URL }}
+          NEXT_PUBLIC_WS_BASE: ${{ vars.CF_WS_URL }}
+        run: |
+          bun install
+          bash scripts/cf-export.sh
+
+      - name: Pages deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy out --project-name=${{ vars.CF_PAGES_PROJECT }}

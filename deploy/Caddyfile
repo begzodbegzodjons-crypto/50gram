@@ -1,0 +1,27 @@
+# ============================================================
+# 50 Gram — Caddy (ishlab chiqarish)
+# DOMAIN env orqali (masalan 50gram.uz yoki :80).
+# Domain bo'lsa HTTPS sertifikatni Caddy avtomatik oladi.
+# Socket: client /?XTransformPort=3003 so'rovi bilan ulanadi
+# ============================================================
+
+{$DOMAIN} {
+	encode gzip zstd
+
+	# WebSocket: XTransformPort query param — chat xizmatiga yo'naltiriladi
+	@socket query XTransformPort=*
+	handle @socket {
+		reverse_proxy chat:{query.XTransformPort} {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# Qolgan hammasi — Next.js
+	handle {
+		reverse_proxy web:3000 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+}

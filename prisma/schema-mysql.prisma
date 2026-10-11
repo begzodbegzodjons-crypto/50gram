@@ -1,0 +1,339 @@
+// ============================================================
+// 50 Gram — TiDB Cloud / MySQL varianti (bosqich B: kengayish)
+// Ishlatish:
+//   1) TiDB Cloud Serverless klaster oching (tidbcloud.com, bepul)
+//   2) bun run db:mysql:generate
+//   3) DATABASE_URL="mysql://...:4000/50gram?sslaccept=strict" bun run db:mysql:push
+//   4) .env'da DATABASE_URL ni mysql URL'ga almashtiring, compose qayta ishga tushiring
+// Eslatma: bu schema faollashganda Prisma client MySQL rejimida generate bo'ladi.
+// SQLite'ga qaytish: bunx prisma generate --schema prisma/schema.prisma
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== Foydalanuvchi ====================
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String // salt:hash (scrypt)
+  name      String
+  phone     String?  @unique // telefon raqami — qidiruv va ro'yxatdan o'tish uchun
+  balance   Float    @default(1000000) // demo hamyon (so'm)
+  avatar    String   @default("🙂") // emoji avatar
+  bio       String?  @db.Text
+  token     String?  @unique // session token
+  isAdmin   Boolean  @default(false) // dastur administratori
+  isBanned  Boolean  @default(false) // admin tomonidan bloklangan
+  banReason String?  @db.Text // bloklash sababi
+  createdAt DateTime @default(now())
+
+  interests      UserInterest[]
+  members        ChatMember[]
+  messages       Message[]
+  stories        Story[]
+  posts          FeedPost[]
+  likes          Like[]
+  comments       Comment[]
+  subscriptions  Subscription[]
+  payments       Payment[]
+  bans           ChatBan[]
+  blocksInit     Block[]        @relation("blocker")
+  blocksReceived Block[]        @relation("blocked")
+  reports        Report[]       @relation("reports")
+  contactsSaved  Contact[]      @relation("contactOwner")
+  contactsOf     Contact[]      @relation("contactLinked")
+}
+
+// Kontaktlar — telefon daftariga o'xshash
+model Contact {
+  id           String   @id @default(cuid())
+  ownerId      String // kim saqlagan
+  name         String
+  phone        String
+  linkedUserId String? // 50Gram akkaunt (topilsa)
+  createdAt    DateTime @default(now())
+
+  owner  User   @relation("contactOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  linked User?  @relation("contactLinked", fields: [linkedUserId], references: [id], onDelete: SetNull)
+
+  @@unique([ownerId, phone])
+  @@index([ownerId])
+}
+
+// Reklama — admin panel orqali guruh/kanal/lentalarga yuboriladi
+model Ad {
+  id        String    @id @default(cuid())
+  title     String
+  text      String    @db.Text
+  image     String?   @db.Text // emoji yoki data-uri
+  link      String?   @db.Text
+  targetKind String   @default("groups") // groups | channels | all
+  status    String    @default("draft") // draft | active | completed
+  sentCount Int       @default(0)
+  views     Int       @default(0)
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+}
+
+// Admin harakatlari jurnali
+model AdminLog {
+  id        String   @id @default(cuid())
+  action    String
+  target    String?  @db.Text
+  detail    String?  @db.Text
+  createdAt DateTime @default(now())
+}
+
+model Topic {
+  id   String @id @default(cuid())
+  slug String @unique
+  name String
+  emoji String
+
+  interests UserInterest[]
+  postTopics PostTopic[]
+  articles  NewsArticle[]
+}
+
+model UserInterest {
+  userId String
+  topicId String
+  weight Float @default(1)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@id([userId, topicId])
+}
+
+// ==================== Chat (gibrid model) ====================
+
+model Chat {
+  id          String   @id @default(cuid())
+  type        String
+  name        String?
+  description String?  @db.Text
+  avatar      String? // emoji
+  ownerId     String?
+  isPublic    Boolean  @default(true)
+  isPaid      Boolean  @default(false)
+  price       Float    @default(0)
+  inviteCode  String?  @unique
+  createdAt   DateTime @default(now())
+
+  members  ChatMember[]
+  messages Message[]
+  bans     ChatBan[]
+}
+
+model ChatMember {
+  chatId    String
+  userId    String
+  role      String   @default("member") // owner | admin | member
+  muted     Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([chatId, userId])
+}
+
+// Kanal/guruh qora ro'yxati
+model ChatBan {
+  chatId    String
+  userId    String
+  reason    String?  @db.Text
+  createdAt DateTime @default(now())
+
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([chatId, userId])
+}
+
+// Foydalanuvchilar orasidagi bloklar (shaxsiy qora ro'yxat)
+model Block {
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+}
+
+// Spam/shikoyat arizalari
+model Report {
+  id           String   @id @default(cuid())
+  reporterId   String
+  chatId       String?
+  targetUserId String?
+  kind         String   @default("spam")
+  createdAt    DateTime @default(now())
+
+  reporter User @relation("reports", fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@index([reporterId])
+}
+
+// Gibrid model: content serverda FAQAT hamma yetkazilmaguncha turadi
+model Message {
+  id          String    @id @default(cuid())
+  chatId      String
+  senderId    String
+  type        String    @default("text") // text | image
+  content     String?   @db.LongText // matn YOKI shifrlangan media — yetkazilgach o'chadi
+  caption     String?   @db.Text
+  pinned      Boolean   @default(false)
+  mediaName   String?
+  purged      Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  deliveredAt DateTime?
+
+  chat   Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender User @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  pending MessageDelivery[]
+
+  @@index([chatId, pinned])
+  @@index([chatId, createdAt])
+}
+
+model MessageDelivery {
+  messageId String
+  userId    String
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId])
+}
+
+// ==================== Lenta (Feed) ====================
+
+model FeedPost {
+  id           String   @id @default(cuid())
+  authorId     String
+  channelId    String?
+  channelName  String?
+  content      String   @db.Text
+  image        String?  @db.LongText // URL yoki data-uri
+  gradient     String?  @db.Text
+  emoji        String?
+  likeCount    Int      @default(0)
+  commentCount Int      @default(0)
+  viewCount    Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  author   User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  topics   PostTopic[]
+  likes    Like[]
+  comments Comment[]
+
+  sourceMessageId String? @unique
+}
+
+model PostTopic {
+  postId  String
+  topicId String
+
+  post  FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  topic Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@id([postId, topicId])
+}
+
+model Like {
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+
+  post FeedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ==================== Hikoyalar (24 soat) ====================
+
+model Story {
+  id        String   @id @default(cuid())
+  userId    String
+  image     String?  @db.LongText
+  gradient  String?  @db.Text
+  caption   String?  @db.Text
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ==================== Elektron gazeta ====================
+
+model NewsArticle {
+  id          String   @id @default(cuid())
+  source      String
+  title       String   @db.Text
+  summary     String   @db.Text
+  content     String   @db.LongText
+  image       String?  @db.LongText
+  gradient    String?  @db.Text
+  emoji       String?
+  topicId     String
+  viewCount   Int      @default(0)
+  publishedAt DateTime @default(now())
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+}
+
+// ==================== Kanal obunalari ====================
+
+model Subscription {
+  channelId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([channelId, userId])
+}
+
+// ==================== To'lovlar (pullik kanal obunasi) ====================
+
+model Payment {
+  id          String   @id @default(cuid())
+  userId      String
+  ownerId     String
+  channelId   String
+  channelName String
+  amount      Float
+  method      String   @default("hamyon")
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([ownerId])
+  @@index([channelId])
+}

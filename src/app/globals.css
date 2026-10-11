@@ -1,0 +1,556 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-neu-bg: var(--neu-bg);
+  --color-neu-text: var(--neu-text);
+  --color-neu-muted: var(--neu-muted);
+  --color-neu-dark: var(--neu-dark);
+  --color-neu-light: var(--neu-light);
+  --color-acc-blue: var(--acc-blue);
+  --color-acc-red: var(--acc-red);
+  --color-acc-green: var(--acc-green);
+  --color-acc-orange: var(--acc-orange);
+  --color-acc-purple: var(--acc-purple);
+  --color-acc-pink: var(--acc-pink);
+}
+
+:root {
+  /* ===== SOKIN DIZAYN — qum, firuza, lojuvard, oltin ===== */
+  --radius: 1.375rem; /* 22px — zip'dagi --r */
+
+  --neu-bg: #f4efe6;       /* qum — asosiy fon */
+  --neu-light: #fffcf7;    /* sirt — kartalar */
+  --neu-text: #22302d;     /* matn */
+  --neu-muted: #7a8783;    /* xira matn */
+  --neu-dark: #e8e1d4;     /* chiziq / fonlar */
+
+  --firuza: #1f8a80;       /* asosiy aksent (Samarqand koshini) */
+  --firuza-och: #ddf0ec;   /* yumshoq firuza fon */
+  --lojuvard: #2b4c7e;     /* lapis lazuli */
+  --oltin: #c9a23a;        /* oltin — premium/lenta */
+
+  --acc-blue: #1f8a80;     /* Suhbatlar / asosiy — firuza */
+  --acc-red: #c2603f;      /* XAVF amallari (o'chirish) — terrakota */
+  --acc-green: #5cc28f;    /* Onlayn nuqta */
+  --acc-orange: #c9a23a;   /* Lenta — oltin */
+  --acc-purple: #2b4c7e;   /* Gazeta — lojuvard */
+  --acc-pink: #d9775a;     /* Like / Profil — issiq terrakota */
+
+  --background: var(--neu-bg);
+  --foreground: var(--neu-text);
+  --card: var(--neu-light);
+  --card-foreground: var(--neu-text);
+  --popover: var(--neu-light);
+  --popover-foreground: var(--neu-text);
+  --primary: var(--firuza);
+  --primary-foreground: #ffffff;
+  --secondary: var(--firuza-och);
+  --secondary-foreground: var(--neu-text);
+  --muted: #f1ebe0;
+  --muted-foreground: var(--neu-muted);
+  --accent: var(--firuza-och);
+  --accent-foreground: var(--firuza);
+  --destructive: var(--acc-red);
+  --border: var(--neu-dark);
+  --input: #e0d8c8;
+  --ring: var(--firuza);
+  --chart-1: var(--firuza);
+  --chart-2: var(--acc-green);
+  --chart-3: var(--oltin);
+  --chart-4: var(--lojuvard);
+  --chart-5: var(--acc-pink);
+  --sidebar: var(--neu-light);
+  --sidebar-foreground: var(--neu-text);
+  --sidebar-primary: var(--firuza);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--firuza-och);
+  --sidebar-accent-foreground: var(--firuza);
+  --sidebar-border: var(--neu-dark);
+  --sidebar-ring: var(--firuza);
+}
+
+.dark {
+  /* ===== TUN — sokin qorong'u rejim ===== */
+  --neu-bg: #121a19;
+  --neu-light: #1a2423;
+  --neu-text: #e8eeec;
+  --neu-muted: #8fa09c;
+  --neu-dark: #26322f;
+
+  --firuza: #3fb5a8;
+  --firuza-och: #203836;
+  --lojuvard: #7fa3d9;
+  --oltin: #d9b856;
+
+  --acc-blue: #3fb5a8;
+  --acc-red: #d97b57;
+  --acc-green: #5cc28f;
+  --acc-orange: #d9b856;
+  --acc-purple: #7fa3d9;
+  --acc-pink: #e08e6d;
+
+  --background: var(--neu-bg);
+  --foreground: var(--neu-text);
+  --card: var(--neu-light);
+  --card-foreground: var(--neu-text);
+  --popover: var(--neu-light);
+  --popover-foreground: var(--neu-text);
+  --primary: var(--firuza);
+  --primary-foreground: #0d1413;
+  --secondary: var(--firuza-och);
+  --secondary-foreground: var(--neu-text);
+  --muted: #202c2a;
+  --muted-foreground: var(--neu-muted);
+  --accent: var(--firuza-och);
+  --accent-foreground: var(--firuza);
+  --destructive: var(--acc-red);
+  --border: var(--neu-dark);
+  --input: #2c3a37;
+  --ring: var(--firuza);
+  --sidebar: #16201e;
+  --sidebar-foreground: var(--neu-text);
+  --sidebar-primary: var(--firuza);
+  --sidebar-primary-foreground: #0d1413;
+  --sidebar-accent: var(--firuza-och);
+  --sidebar-accent-foreground: var(--firuza);
+  --sidebar-border: var(--neu-dark);
+  --sidebar-ring: var(--firuza);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ============================================================
+   SOKIN TIZIMI — "asabga tegmaydigan" o'zbek naqshli dizayn
+   Qum fon + sirt kartalar (chegarasiz, yumshoq soya) + firuza aksent.
+   Girih naqshi — juda nozik fon ornament.
+   ============================================================ */
+
+/* Girih naqshi — o'zbek me'morchiligidan, ko'zga tashlanmaydi */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  opacity: 0.05;
+  pointer-events: none;
+  z-index: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Cpath d='M30 0l8 22 22 8-22 8-8 22-8-22L0 30l22-8z' fill='none' stroke='%231F8A80' stroke-width='1.2'/%3E%3C/svg%3E");
+}
+.dark body::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Cpath d='M30 0l8 22 22 8-22 8-8 22-8-22L0 30l22-8z' fill='none' stroke='%233FB5A8' stroke-width='1.2'/%3E%3C/svg%3E");
+}
+
+/* Katta karta — sirt, chegara yo'q, yumshoq soya */
+.neu {
+  background: var(--neu-light);
+  border: none;
+  box-shadow: 0 8px 30px rgba(34, 48, 45, 0.08);
+  border-radius: var(--radius);
+}
+.dark .neu {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+}
+/* Kichik karta / element */
+.neu-sm {
+  background: var(--neu-light);
+  border: none;
+  box-shadow: 0 4px 20px rgba(34, 48, 45, 0.06);
+  border-radius: calc(var(--radius) - 4px);
+}
+.dark .neu-sm {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+/* Mayda chip/badge */
+.neu-xs {
+  background: var(--neu-light);
+  border: none;
+  box-shadow: 0 2px 10px rgba(34, 48, 45, 0.06);
+  border-radius: calc(var(--radius) - 8px);
+}
+/* To'ldirilgan sirt — input, qidiruv, trek */
+.neu-in {
+  background: var(--neu-light);
+  border: none;
+  box-shadow: 0 2px 12px rgba(34, 48, 45, 0.05);
+  border-radius: calc(var(--radius) - 2px);
+}
+.dark .neu-in {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.28);
+}
+.neu-in-sm {
+  background: var(--neu-light);
+  border: none;
+  box-shadow: 0 1px 8px rgba(34, 48, 45, 0.05);
+  border-radius: calc(var(--radius) - 8px);
+}
+.dark .neu-in-sm {
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.25);
+}
+
+/* Bosiladigan interaktivlik: hover ko'tariladi, active siqiladi */
+.neu-press {
+  transition: box-shadow 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+}
+.neu-press:hover {
+  box-shadow: 0 10px 34px rgba(34, 48, 45, 0.12);
+  transform: translateY(-1px);
+}
+.dark .neu-press:hover {
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4);
+}
+.neu-press:active,
+.neu-press[data-state="open"] {
+  transform: scale(0.98);
+  box-shadow: 0 2px 10px rgba(34, 48, 45, 0.06);
+}
+/* Tanlangan (aktiv nav) element — yumshoq firuza */
+.neu-active {
+  background: var(--firuza-och) !important;
+  color: var(--firuza) !important;
+  box-shadow: none !important;
+}
+
+/* Ajratuvchi chiziq */
+.groove {
+  height: 1px;
+  background: var(--neu-dark);
+}
+.groove-v {
+  width: 1px;
+  background: var(--neu-dark);
+}
+
+/* Xabar pufakchalari — firuza (meniki) va sirt (begona), dumi burchakda */
+.bubble-me {
+  background: var(--firuza);
+  color: #ffffff;
+  border-radius: 1.25rem 1.25rem 0.375rem 1.25rem;
+  box-shadow: 0 6px 18px -6px rgba(31, 138, 128, 0.45);
+}
+.bubble-them {
+  background: var(--neu-light);
+  border: none;
+  border-radius: 1.25rem 1.25rem 1.25rem 0.375rem;
+  box-shadow: 0 2px 10px rgba(34, 48, 45, 0.06);
+}
+.dark .bubble-me {
+  background: var(--firuza);
+  color: #0d1413;
+  box-shadow: 0 6px 18px -6px rgba(0, 0, 0, 0.5);
+}
+.dark .bubble-them {
+  background: var(--neu-light);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+/* O'qilmagan hisoblagich — QIZIL EMAS, yumshoq firuza (bezovta qilmaydi) */
+.neu-badge {
+  background: var(--firuza-och);
+  color: var(--firuza);
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+/* Avatar — kvadratchaga yaqin (squircle), halqa yo'q */
+.neu-avatar {
+  border-radius: 1.1875rem; /* 19px — zip'dagidek */
+  box-shadow: 0 3px 12px rgba(34, 48, 45, 0.12);
+  border: none;
+}
+.dark .neu-avatar {
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.45);
+  border: none;
+}
+/* To'ldirilgan squircle (bo'sh avatar) */
+.neu-avatar-in {
+  border-radius: 1.1875rem;
+  background: var(--firuza-och);
+  border: none;
+}
+
+/* Input — sirt + yumshoq soya, fokusda firuza halqa */
+.input-neu {
+  background: var(--neu-light);
+  border: none;
+  box-shadow: 0 2px 12px rgba(34, 48, 45, 0.06);
+  border-radius: 1.25rem;
+  transition: box-shadow 0.2s ease;
+}
+.dark .input-neu {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+.input-neu:focus,
+.input-neu:focus-visible {
+  outline: none;
+  box-shadow:
+    0 2px 12px rgba(34, 48, 45, 0.06),
+    0 0 0 3px color-mix(in srgb, var(--firuza) 25%, transparent);
+}
+.input-neu::placeholder {
+  color: var(--neu-muted);
+}
+
+/* Scrollbar — ingichka, nozik */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--neu-muted) 35%, transparent);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--neu-muted) 55%, transparent);
+}
+
+/* ===== shadcn komponentlariga Sokin qoplamalar ===== */
+[data-slot="dialog-content"] {
+  border: none !important;
+  box-shadow: 0 24px 70px -20px rgba(34, 48, 45, 0.35) !important;
+  border-radius: 1.75rem !important;
+  background: var(--neu-light) !important;
+}
+[data-slot="select-content"],
+[data-slot="dropdown-menu-content"],
+[data-slot="popover-content"] {
+  border: none !important;
+  box-shadow: 0 16px 50px -18px rgba(34, 48, 45, 0.3) !important;
+  border-radius: 1rem !important;
+  background: var(--neu-light) !important;
+}
+[data-slot="sonner-toast"] {
+  border: none !important;
+  box-shadow: 0 12px 40px -14px rgba(34, 48, 45, 0.3) !important;
+  border-radius: 0.875rem !important;
+  background: var(--neu-text) !important;
+  color: var(--neu-bg) !important;
+}
+
+/* Logotip suzish animatsiyasi */
+@keyframes neu-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+.neu-float {
+  animation: neu-float 2.6s ease-in-out infinite;
+}
+
+/* ============================================================
+   SOKIN MAXSUS KLASSLARI
+   ============================================================ */
+
+/* Nafas indikatori — tinchlantiruvchi puls */
+@keyframes nafas {
+  0%, 100% { transform: scale(0.7); opacity: 0.5; }
+  50% { transform: scale(1.25); opacity: 1; }
+}
+.nafas {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--firuza);
+  animation: nafas 4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+/* Sokin rejim paneli */
+.sokin-bar {
+  margin: 0 20px 10px;
+  padding: 10px 14px;
+  border-radius: 1rem;
+  background: var(--firuza-och);
+  font-size: 12.5px;
+  color: var(--firuza);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Balans kartasi — firuza→lojuvard gradient + ✦ watermark */
+.sokin-balans {
+  padding: 20px;
+  border-radius: 1.5rem;
+  background: linear-gradient(135deg, var(--firuza), var(--lojuvard));
+  color: #ffffff;
+  position: relative;
+  overflow: hidden;
+}
+.sokin-balans::after {
+  content: "✦";
+  position: absolute;
+  right: -10px;
+  top: -30px;
+  font-size: 140px;
+  opacity: 0.1;
+}
+.sokin-balans button {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+/* Premium kartasi — oltin gradient */
+.sokin-premium {
+  padding: 16px;
+  border-radius: 1.375rem;
+  background: linear-gradient(135deg, #fbf3dc, #f3e3b5);
+  color: #5e4708;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.dark .sokin-premium {
+  background: linear-gradient(135deg, #2e2814, #3a3118);
+  color: #e8d494;
+}
+
+/* Segmentli boshqaruv (Meniki / Obunalar / Kashf qilish) */
+.sokin-seg {
+  background: var(--neu-light);
+  border-radius: 1rem;
+  padding: 4px;
+  box-shadow: 0 4px 20px rgba(34, 48, 45, 0.06);
+}
+.dark .sokin-seg {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* Suzuvchi dok (mobil pastki navigatsiya) */
+.sokin-dock {
+  border-radius: 1.5rem;
+  background: var(--neu-light);
+  box-shadow: 0 10px 40px rgba(34, 48, 45, 0.14);
+}
+.dark .sokin-dock {
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* ============================================================
+   "50 GRAM" LOGOTIP — SOKIN USLUBIDA
+   "50" — firuza gradient + nozik yaltirash
+   "Gram" — lojuvard gradient
+   ============================================================ */
+.logo3d {
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.14em;
+  white-space: nowrap;
+  line-height: 1;
+}
+.logo3d-red {
+  font-size: 1.3em;
+  font-weight: 900;
+  letter-spacing: -0.045em;
+  background: linear-gradient(105deg, #16695f 0%, #1f8a80 30%, #3fb5a8 45%, #a8ded6 50%, #3fb5a8 55%, #1f8a80 70%, #16695f 100%);
+  background-size: 260% 100%;
+  background-position: 210% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 5px rgba(31, 138, 128, 0.25));
+  animation: logo50-shine 3.2s ease-in-out infinite;
+}
+@keyframes logo50-shine {
+  0% {
+    background-position: 210% 0;
+    filter: drop-shadow(0 0 4px rgba(31, 138, 128, 0.2));
+  }
+  45% {
+    background-position: -110% 0;
+    filter: drop-shadow(0 0 10px rgba(63, 181, 168, 0.45));
+  }
+  100% {
+    background-position: -110% 0;
+    filter: drop-shadow(0 0 4px rgba(31, 138, 128, 0.2));
+  }
+}
+.logo3d-blue {
+  background: linear-gradient(135deg, #3f6ba8 0%, #2b4c7e 55%, #1d3a63 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.dark .logo3d-red {
+  background: linear-gradient(105deg, #2c9c90 0%, #3fb5a8 30%, #5ccfc2 45%, #c8efe9 50%, #5ccfc2 55%, #3fb5a8 70%, #2c9c90 100%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.dark .logo3d-blue {
+  background: linear-gradient(135deg, #9db9e4 0%, #7fa3d9 55%, #5f83bb 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Logo hover — yengil sakrash */
+.logo3d:hover .logo3d-red,
+.logo3d:hover .logo3d-blue {
+  display: inline-block;
+  animation: logo-pop 0.45s ease;
+}
+@keyframes logo-pop {
+  0% { transform: translateY(0) scale(1); }
+  40% { transform: translateY(-3px) scale(1.04); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* Kirish animatsiyasi (zip'dagi 'kir') */
+@keyframes sokin-kir {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.sokin-kir {
+  animation: sokin-kir 0.35s ease;
+}

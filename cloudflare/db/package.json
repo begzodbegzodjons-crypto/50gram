@@ -1,0 +1,10 @@
+{
+  "name": "50gram-seed",
+  "private": true,
+  "scripts": {
+    "seed": "bun seed.ts"
+  },
+  "dependencies": {
+    "mysql2": "^3.11.0"
+  }
+}
