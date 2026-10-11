@@ -455,3 +455,23 @@ Stage Summary:
 - HIMOYA TUGMASI ISHLAYDI: paneldan o'chirilsa barcha izolyatlarda ≤45s himoya to'xtaydi (hech narsa bloklanmaydi, iz ham qolmaydi — curl/skript-sinovlar erkin), yoqilsa darhol qayta faol. DO SQLite'da saqlanadi — deploy/restart bilan ham holat yo'qolmaydi. Yakuniy holat: YONIQ.
 - XULQ 100% SAQLANGAN: MUHR/DATA/MEDIA/Call/XAVFSIZLIK/jurnal/domen — 10/10 yashil isbot; SMS Eskiz tegilmadi; APK o'zgarmagan; klient kodiga 0 bayt (chatOut aniq maydonlar, faqat BUILD_V satri); blok-flag faqat paneldan qo'yiladi (oddiy foydalanuvchi uchun yangi 403 hech qachon ishga tushmaydi).
 - Ehtiyot: (1) chats.blocked ALTER kafolati ensureSchema'da — olib tashlamaslik; (2) cleanbad ≤100/so'rov (katta kanalda 2-3 marta bosiladi — panel o'zi ogohlantiradi); (3) 'panel' prefiksi hech qachon FW_TRAP'ga qo'shilmasin; (4) db.ts NUM'da 'blocked' bo'lishi SHART (v104 qoidasi — chats uchun ham ishlaydi); (5) himoyani o'chirib ish tugatilsa — YOQISH SHART (panelda qizil banner eslatib turadi).
+
+---
+Task ID: 53
+Agent: Super Z (asosiy)
+Task: v107 — HIMoya TUGMALARI JUFTLIKDA: egasi so'rovi «himoyani o'chirish tugmasi bor — himoyani yoqish tugmasini ham ishlab chiq». v106'da bitta toggle-tugma edi (holatga qarab yozuvi almashardi — himoya YONIQ bo'lganda panelda faqat «o'chirish» ko'rinardi, «yoqish» tugmasi alohida ko'rinmasdi). Endi IKKITA alohida tugma HAR DOIM ko'rinadi va ishlaydi.
+
+Work Log:
+- AUDIT: v106 fwtoggle API'si (on:0/on:1) va SEC DO cfg mexanizmi TO'LIQ ishlagan (Panel E2E 66/66, ikkala yo'nalish sinovdan o'tgan) — muammo faqat UI'da: bitta tugma id="fwbtn" holatga qarab label almashardi. Yechim: ADMIN_HTML ichidagi loadSecurity() qayta yozildi.
+- PANEL UI (v107): «Xavfsizlik» bo'limining tepasida endi IKKITA tugma yonma-yon: 🟢 «Himoyani YOQISH» (yangi button.grn yashil uslub — himoya o'chiq bo'lsa «(tavsiya etiladi)» yozuvi bilan) + «Himoyani o'chirish» (qizil warn — «faqat o'zgartirish paytida» yozuvi bilan). Tugmalar orasida «Hozirgi holat: YONIQ/O'CHIQ» qalin yozuv (.fwst). IKKALASI har doim ko'rinadi, hech biri holatga qarab yashirilmaydi — bosilsa confirm → POST /panel/fwtoggle {on:true|on:false} → loadSecurity() qayta chizish. Xatolikda tugmalar qayta faollashadi.
+- YADRO O'ZGARMAGAN: panelFwToggle + SEC DO cfg/fwoff + FW_OFF tarqatish (fwQollash, ≤45s) + 5 posbon (fwBlokli/fwLokal/fwLBlok/fwOchko/fw4xx) + gateway shartlari — v106 holatida qoldi. Faqat panel HTML/JS va CSS (3 qator: button.grn, .fwst, .fwst b).
+- VERSIYA QULFI v107: worker BUILD_V + core __50BUILD + sw V — uchlik sinxron (test bilan isbotlangan).
+- LOKAL TEST: scripts/test_admin_v107.js — 104/104 YASHIL (yangi bo'lim: fwon/fwof tugmalari, fwBos(true/false) ulashlari, grn/fwst CSS, «Hozirgi holat» matni, eski fwbtn qolmagani, on→v xaritasi; v106 kanal-moderatsiya bo'limlari to'liq saqlangan; maxfiylik skaneri 119 fayl — web/'da panel izi 0). tsc: 13 eski stream.ts xatosi bilan BITTA-XIL (mening kodimga 0 xato). wrangler dry-run OK. node --check (panel JS + e2e + test) OK.
+- CI YAKUNIY (1f210d7, v107) — 10/10 YASHIL: Deploy ✓×2 / Smoke ✓ (rerun) / MUHR 3-ketma-ket ✓ / Qo'ng'iroq MEDIA 2-brauzer ✓ (rerun) / MEDIA ✓ / DATA ✓ (rerun) / XAVFSIZLIK 25/25 ✓ / Jurnal ✓ (rerun) / Panel E2E ✓ / Domen ✓.
+- PANEL E2E JONLI DALILLAR: deploy sinxron v107; «v107 panel HTML: Himoyani YOQISH + O'CHIRISH tugmalari IKKALASI bor» ✓; «ikkala tugma fwtoggle API'ga ulangan» ✓; himoya O'CHIRILDI → fwoff=1 ✓; «v107 himoya QAYTA YOQILDI — YOQISH tugmasi ham ishlaydi» → fwoff=0 ✓ (YAKUNIY HOLAT: YONIQ — himoya FAOL qoldi); jurnalda himoya_yoqildi + himoya_ochirildi yozuvlari ✓.
+- DOMEN JONLI DALILLAR: apex 200 + www 200 + www/api/build 200; core.js __50BUILD = 'v107' (apex+www ikkalasida); health 200; APK 200 — 763312 bayt O'ZGARMAGAN.
+- DARSLIK (takror): ci_dispatch_wait.sh'ning o'z 10 daqiqalik timeout'i run natijasi emas — Panel E2E aslida SUCCESS bo'ldi (avval runs API'dan tekshirish kerak); push'da 8 workflow parallel otilishi + rerun ketma-ketligi (smoke→call→data→jurnal) odatiy holat bo'lib qoldi.
+
+Stage Summary:
+- ADMIN PANEL «XAVFSIZLIK» bo'limi endi JUFT TUGMA bilan: 🟢 Himoyani YOQISH + 🔴 Himoyani o'chirish — ikkalasi HAR DOIM ko'rinadi va ishlaydi, hozirgi holat (YONIQ/O'CHIQ) yonida yozilib turadi. Himoya o'chiq paytida YOQISH tugmasi yashil «tavsiya etiladi» bilan ajratiladi — egasi ish tugagach hech qachon unutmadi.
+- XULQ 100% SAQLANGAN: MUHR/DATA/MEDIA/Call/XAVFSIZLIK 25/25/Jurnal/domen — 10/10 yashil; SMS Eskiz tegilmadi; APK bayt-bayt bir xil; klient (ilova) kodiga 0 bayt — faqat worker xotirasidagi panel HTML; web/'da 'adminpanel'/'panel/*' izi 0 topilma. Yakuniy himoya holati: YONIQ (faol).
