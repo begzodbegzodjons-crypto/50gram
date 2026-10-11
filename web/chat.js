@@ -1218,7 +1218,10 @@ on('typing', (ev) => {
   scheduleChats()
   if (S.cur === ev.chat_id) renderHeader()
 })
-on('chat_update', () => { loadChats().catch(() => {}) })
+// v108: chat_update — chatlar ro'yxati + OCHIQ chat xabarlari ham yangilanadi (egapanel
+// bir zumda yomon so'zlarni o'chirganda ochiq turibdigan kanal/guruhda DARHOL ko'rinadi —
+// avval faqat ro'yxat yangilanardi, o'chirilgan xabarlar ekranda qolib ketardi)
+on('chat_update', () => { loadChats().catch(() => {}); if (S.cur) fetchMessages(S.cur).catch(() => {}) })
 on('pinned', (ev) => {
   const c = S.chats.get(ev.chat_id)
   if (c) { c.pinned_id = ev.message ? ev.message.id : 0; if (ev.message) merge(ev.chat_id, [ev.message]) }

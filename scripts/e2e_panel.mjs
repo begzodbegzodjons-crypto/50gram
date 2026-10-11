@@ -1,4 +1,4 @@
-/* 50 GRAM — MAXFIY ADMIN PANEL E2E (v104 → v105 → v106 kengaytirilgan): 50gram.uz/?adminpanel paneldagi API qatlami
+/* 50 GRAM — MAXFIY ADMIN PANEL E2E (v104 → v105 → v106 → v108 kengaytirilgan): 50gram.uz/?adminpanel paneldagi API qatlami
  * Jonli sinov (CI runner IP'sidan — sandbox IP firewall-bloklangani uchun lokal sinov mumkin emas):
  *   1) STATIK: /?adminpanel → panel HTML (id="pw" + noindex); / → ODDIY ilova (panel IZI YO'Q)
  *   2) PAROL: xato parol → 401; to'g'ri parol (ADMIN_PASS) → adm-token
@@ -8,7 +8,10 @@
  *   6) BLOK: paneldan bloklash → foydalanuvchining /api/me 401 (SESSIYA-DARVOZA ISBOTI),
  *      qayta kod so'rash → 403 "bloklangan" (KIRISH-BLOK ISBOTI)
  *   7) BLOKDAN CHIQARISH: /api/me yana 200 — foydalanuvchi tiklandi
- *   8) BROADCAST: validatsiya (bo'sh → 400)
+ *   8) v108 BROADCAST JONLI (uid param — FAQAT TEST HISOBIGA, real foydalanuvchilarga TEGMAYDI):
+ *      matn e'lon → qabul qiluvchi chatlar ro'yxatida ko'rinadi; RASM+izoh e'lon → photo xabar
+ *      + media bo'lagi yuklab olib AES-GCM deSHIFRLASH bayt-bayt ISBOTI;
+ *      TOMBSTONE: paneldan o'chirilgan xabar sinxronlashda deleted=1 qaytadi (oflayn klient ham biladi)
  *   9) v105 FOYDALANUVCHI OYNASI: /panel/user — profil+davlat+statistika; yomon id → 404; tokensiz → 401
  *  10) v105 ALOHIDA XABAR: /panel/dm — bo'sh → 400, yo'q → 404, bloklanganga → 400,
  *      JONLI YUBORISH FAQAT O'Z TEST HISOBIGA (real foydalanuvchilarga TEGMAYDI)
@@ -20,7 +23,7 @@
  *      egasini chiqarish → 400 (posbon), TAGI BILAN O'CHIRISH → chat 404 (o'zi-tozalanadi)
  *  13) v106 HIMOYA TUGMASI: fwtoggle off → security.fwoff=1 → fwtoggle ON (qayta YOQILADI —
  *      himoya faol holatda qoladi), boshqaruv jurnali /panel/log yozuvlari
- *  BROADCAST jonli yuborish SINALMAYDI (haqiqiy foydalanuvchilarga xabar ketmasin).
+ *  BROADCAST real foydalanuvchilarga SINALMAYDI — faqat uid parametr bilan TEST hisobiga.
  * Ishga tushirish: E2E_BASE=https://... node scripts/e2e_panel.mjs
  */
 import { readFileSync } from 'node:fs'
@@ -108,11 +111,59 @@ try {
   const meU = await j('/api/me', { h: { authorization: 'Bearer ' + tokT } })
   ok(meU.st === 200, 'tiklangan foydalanuvchi /api/me → 200', 'st=' + meU.st)
 
-  // 8) BROADCAST: jonli yuborish SINALMAYDI (haqiqiy foydalanuvchilarga yuborilmasin).
-  //    Faqat validatsiya tekshiriladi: bo'sh matn → 400.
+  // 8) v108 BROADCAST JONLI SINOV — uid param bilan FAQAT TEST HISOBIGA (real foydalanuvchilarga TEGMAYDI)
   const b0 = await j('/api/panel/broadcast', { method: 'POST', h: AT, body: { body: '' } })
-  ok(b0.st === 400, 'broadcast bo\'sh matn → 400 (validatsiya jonli)', 'st=' + b0.st)
-  console.log('  ℹ BROADCAST jonli yuborish ataylab sinalmagan (haqiqiy foydalanuvchilarga xabar ketmasin) — SQL konstruktsiyasi lokal simulyatsiyada tekshirilgan')
+  ok(b0.st === 400, 'v108 broadcast bo\u2018sh (matn+rasm yo\u2018q) → 400', 'st=' + b0.st)
+  const bBad = await j('/api/panel/broadcast', { method: 'POST', h: AT, body: { body: 'x', uid: 999999999999 } })
+  ok(bBad.st === 400, 'v108 broadcast noma\u2018lum uid → 400', 'st=' + bBad.st)
+  const b1 = await j('/api/panel/broadcast', { method: 'POST', h: AT, body: { body: 'v108-broadcast jonli sinov e\u2018loni', uid: uidT } })
+  ok(b1.st === 200 && b1.d.ok && b1.d.sent === 1, 'v108 BROADCAST JONLI YUBORILDI (uid=test, sent=1)', JSON.stringify(b1.d).slice(0, 120))
+  // QABUL QILUVCHI TOMONIDA KO'RINISHI ISBOTI — test hisobining chatlar ro'yxatida «50gram admin» e'loni
+  const chatsT = await j('/api/chats', { h: { authorization: 'Bearer ' + tokT } })
+  const admCh = (chatsT.d.chats || []).find((c) => c.type === 'direct' && c.peer && c.peer.id === 990000000001 && c.last_message && String(c.last_message.body || '').includes('v108-broadcast'))
+  ok(!!admCh, 'v108 broadcast QABUL QILUVCHIDA KO\u2018RINADI (chat ro\u2018yxatida «50gram admin» e\u2018loni)', admCh ? 'chat=' + admCh.id : 'topilmadi')
+  if (admCh) {
+    // 8b) v108 RASM E'LON — panel bilan AYNAN bir xil AES-GCM sxema (klient upload() kabi)
+    const plain = new Uint8Array(70000); for (let i = 0; i < plain.length; i++) plain[i] = (i * 7 + 13) & 255
+    const key = new Uint8Array(32); crypto.getRandomValues(key)
+    const iv = new Uint8Array(12); crypto.getRandomValues(iv)
+    const ck = await crypto.subtle.importKey('raw', key, 'AES-GCM', false, ['encrypt'])
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, ck, plain.buffer))
+    const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256', ct.buffer))].map((x) => x.toString(16).padStart(2, '0')).join('')
+    const bimg = { b64: Buffer.from(ct).toString('base64'), key: Buffer.from(key).toString('base64'), iv: Buffer.from(iv).toString('base64'), sha, size: ct.length, mime: 'image/jpeg', name: 'v108-test.jpg', fsize: plain.length }
+    const b2 = await j('/api/panel/broadcast', { method: 'POST', h: AT, body: { body: 'v108 rasm e\u2018lon izohi', uid: uidT, img: bimg } })
+    ok(b2.st === 200 && b2.d.ok && b2.d.sent === 1, 'v108 RASM E\u2018LON JONLI YUBORILDI (photo + izoh)', JSON.stringify(b2.d).slice(0, 120))
+    const msgsT = await j('/api/chats/' + admCh.id + '/messages?latest=80', { h: { authorization: 'Bearer ' + tokT } })
+    const ph1 = (msgsT.d.messages || []).find((m) => m.kind === 'photo' && m.meta && m.meta.media_id && String(m.body || '') === 'v108 rasm e\u2018lon izohi')
+    ok(!!ph1, 'v108 photo xabar meta bilan yetdi (media_id/key/iv/sha)', ph1 ? 'media=' + ph1.meta.media_id : 'topilmadi')
+    if (ph1) {
+      const mm = await j('/api/media/' + ph1.meta.media_id, { h: { authorization: 'Bearer ' + tokT } })
+      ok(mm.st === 200 && Number(mm.d.complete) === 1 && Number(mm.d.chunks) >= 1, 'v108 media yozuvi complete=1', JSON.stringify(mm.d).slice(0, 100))
+      const ckr = await fetch(BASE + '/api/media/' + ph1.meta.media_id + '/0', { headers: { 'user-agent': UA, accept: 'application/octet-stream', authorization: 'Bearer ' + tokT } })
+      ok(ckr.status === 200, 'v108 media bo\u2018lagi yuklab olindi', 'st=' + ckr.status)
+      const cib = new Uint8Array(await ckr.arrayBuffer())
+      try {
+        const dk = await crypto.subtle.importKey('raw', key, 'AES-GCM', false, ['decrypt'])
+        const pt = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, dk, cib.buffer))
+        let same = pt.length === plain.length; if (same) for (let i = 0; i < plain.length; i++) if (pt[i] !== plain[i]) { same = false; break }
+        ok(same, 'v108 RASM BAYT-BAYT TIKLANDI (AES-GCM deSHIFRLASH OK)')
+      } catch (e) { ok(false, 'v108 deSHIFRLASH', String(e).slice(0, 80)) }
+    }
+    // 8c) v108 TOMBSTONE — WS hodisasini o'tkazib yuborgan oflayn klient ham o'chirilganini biladi
+    const maxId = (msgsT.d.messages || []).reduce((a, m) => Math.max(a, m.id), 0)
+    const since0 = msgsT.d.now
+    const delMsg = (msgsT.d.messages || []).find((m) => String(m.body || '').includes('v108-broadcast'))
+    ok(!!delMsg, 'v108 tombstone-sinov: o\u2018chiriladigan xabar topildi', delMsg ? 'id=' + delMsg.id : '')
+    if (delMsg) {
+      const dmd = await j('/api/panel/msg/delete', { method: 'POST', h: AT, body: { id: delMsg.id } })
+      ok(dmd.st === 200 && dmd.d.ok, 'v108 paneldan xabar o\u2018chirildi (id=' + delMsg.id + ')')
+      const sync1 = await j('/api/chats/' + admCh.id + '/messages?after=' + maxId + '&since=' + since0, { h: { authorization: 'Bearer ' + tokT } })
+      const tomb = (sync1.d.messages || []).find((m) => m.id === delMsg.id && m.deleted === 1)
+      ok(!!tomb, 'v108 TOMBSTONE SINXRONDA KELDI (deleted=1 — klient o\u2018z-o\u2018zi tozalaydi)', tomb ? 'ok' : 'messages=' + (sync1.d.messages || []).length)
+      const still = await j('/api/chats/' + admCh.id + '/messages?latest=80', { h: { authorization: 'Bearer ' + tokT } })
+      ok(!(still.d.messages || []).some((m) => m.id === delMsg.id), 'v108 o\u2018chirilgan xabar yangi ro\u2018yxatda YO\u2018Q (ildizidan ketdi)')
+    }
+  }
 
   // 9) v105 FOYDALANUVCHI MA'LUMOT OYNASI: /panel/user?id=
   const ud = await j('/api/panel/user?id=' + uidT, { h: AT })
