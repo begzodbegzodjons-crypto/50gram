@@ -32,7 +32,7 @@
   "downloadUrl": "https://50gram.uz/50gram.apk"
 }
 </script>
-<meta name="theme-color" content="#2E7BFF">
+<meta name="theme-color" content="#1E8E4D">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
@@ -53,22 +53,29 @@
 <link rel="apple-touch-startup-image" media="(device-width:430px) and (device-height:932px) and (-webkit-device-pixel-ratio:3)" href="ios/1290x2796.png">
 <link rel="apple-touch-startup-image" media="(device-width:440px) and (device-height:956px) and (-webkit-device-pixel-ratio:3)" href="ios/1320x2868.png">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="tw.css">
 </head>
 <body>
 <div id="testbar" aria-hidden="true"><div class="tb-in"><span>🧪&nbsp;50 Gram messenjeri hozircha TEST rejimida ishlamoqda — ilova sinovdan o&lsquo;tmoqda, kamchiliklar uchun uzr! Yangi imkoniyatlar tez orada qo&lsquo;shiladi &mdash; fikr-mulohazalar uchun rahmat! &nbsp;&bull;&nbsp;&nbsp;</span><span>🧪&nbsp;50 Gram messenjeri hozircha TEST rejimida ishlamoqda &mdash; ilova sinovdan o&lsquo;tmoqda, kamchiliklar uchun uzr! Yangi imkoniyatlar tez orada qo&lsquo;shiladi &mdash; fikr-mulohazalar uchun rahmat! &nbsp;&bull;&nbsp;&nbsp;</span></div></div>
 <div id="app">
-  <section id="auth" class="scr hide">
+  <section id="auth" class="scr hide landing">
     <div class="auth-hero">
       <div class="auth-brand">
-        <img src="logo.png" class="brand-logo" alt="50 Gram">
-        <h1>50 Gram</h1>
-        <p class="brand-tag">Tezkor, xavfsiz va o‘zbekcha messenjer — chatlar, kanallar, qo‘ng‘iroqlar va lenta — barchasi bitta ilovada.</p>
-        <div class="brand-feats">
+        <div class="ab-top flex items-center gap-3 md:gap-4">
+          <img src="logo.png" class="brand-logo" alt="50 Gram">
+          <h1 class="ab-name tracking-tight">50 Gram</h1>
+        </div>
+        <h2 class="ab-h tracking-tight">Tezkor, xavfsiz va o‘zbekcha messenjer</h2>
+        <p class="brand-tag leading-relaxed">Chatlar, kanallar, qo‘ng‘iroqlar va lenta — barchasi bitta ilovada.</p>
+        <img src="hero.jpg" class="brand-hero w-full object-cover" alt="50 Gram messenjer — telefon bilan aloqada">
+        <div class="brand-feats grid gap-3">
           <div class="bf"><i>💬</i><b>Tezkor chatlar</b><span>Guruhlar, kanallar va ovozli xabarlar</span></div>
           <div class="bf"><i>🎬</i><b>Lenta va Shorts</b><span>Trend postlar va vertikal videolar</span></div>
           <div class="bf"><i>📞</i><b>Qo‘ng‘iroqlar</b><span>HD audio va video suhbatlar</span></div>
           <div class="bf"><i>🔒</i><b>Xavfsizlik</b><span>Ma’lumotlaringiz himoya ostida</span></div>
         </div>
+        <button id="b-kirish" class="btn big kirish-btn">Dasturga kirish</button>
+        <span class="ab-note">Akkauntingiz bormi — «Dasturga kirish»ni bosing va raqamingiz bilan kiring.</span>
       </div>
       <div class="auth-box">
       <img src="logo.png" class="logo" alt="50 Gram">
@@ -200,6 +207,22 @@
 <script src="rtc.js"></script>
 <script>
   if (S.token && S.me) startApp(); else showAuth();
+  // v111 «Dasturga kirish» — rasmdagi 1-oyna oqimi: avval landing, tugma bosilgach
+  // telefon kiritish formasi ochiladi (hech qanday asosiy mantig'ga tegilmagan).
+  (function () {
+    var a = document.getElementById('auth');
+    try { if (sessionStorage.getItem('g50_kir') === '1') a.classList.remove('landing'); } catch (e) {}
+    var bk = document.getElementById('b-kirish');
+    if (bk) bk.addEventListener('click', function () {
+      a.classList.remove('landing');
+      try { sessionStorage.setItem('g50_kir', '1'); } catch (e) {}
+      setTimeout(function () {
+        var box = document.querySelector('#auth .auth-box');
+        if (box && box.scrollIntoView) { try { box.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {} }
+        if (window.innerWidth >= 900) { var p = document.getElementById('phone'); if (p) { try { p.focus({ preventScroll: true }); } catch (e) {} } }
+      }, 80);
+    });
+  })();
   (function () {
     var apk = document.getElementById('apk-dl'), ios = document.getElementById('ios-dl'), mod = document.getElementById('ios-mod');
     var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
