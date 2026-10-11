@@ -562,3 +562,24 @@ Stage Summary:
 - REELS ENDI FOYDALANUVCHI SO'RGANDAY: lenta fonida FAQAT 50 Gram logotipi (jim, tez), video FAQAT alohida to'liq ekran oynada — 2 ovoz aralashishi IMKONSIZ (list'da video umuman yo'q + oyna tashqi mediani pauza qiladi).
 - 0 FUNKSIONAL O'ZGARISH: barcha tugmalar, izohlar, like'lar, trend slaydlar, prefs, qo'ng'iroqlar, SMS, panel — hammasi joyida. APK qayta qurilmadi (WebView jonli sayt).
 - Versiya qulfi v112 (worker+core+sw); 10/10 CI yashil; sayt LIVE: https://50gram.uz
+
+---
+Task ID: 58
+Agent: Super Z (asosiy)
+Task: v113 — LOGOTIP ALMASHTIRISH. Foydalanuvchi: "50gram logotipi bor joyga shu logoni qo'yib chiq — umuman logotip bor joyga shu rasmdagi logoni qo'y, boshqa hech qaysi narsa o'zgarmasin" (rasm: IMG_20261009_122657_780.jpg — «50 Gram» doppli emblema: qizil 50 + ko'k Gram + o'zbek doppisi + oltin halqa + atlas fond).
+
+Work Log:
+- MANBA TAHLILI: upload rasmi 1126x1133 RGB; doira markazi (566,566), tashqi oltin halqa radiusi ~556 (skan-deteksiya bilan topildi).
+- GENERATSIYA (scripts/gen_logo_v113.py): kvadrat crop markazdan → 5 xil stenok: emblem (doira shakl, shaffof burchak, 4x supersample antialias mask), fullbleed (to'liq kvadrat atlas fon bilan), maskable (emblem 76% — 80% xavfsiz zonasi), foreground (adaptive 58% — 108dp grid).
+- WEB 7 FAYL almashtirildi (nomlar/o'lchamlar SAQLANGAN): logo.png 1040 (emblem, 239KB — eskisidan yengil), icon-192/icon-512 (fullbleed), maskable-192/maskable-512, favicon.png 64 (emblem), apple-touch-icon.png 180 (fullbleed — iOS shaffoflikni qo'llamaydi).
+- ANDROID 11 FAYL almashtirildi: ic_launcher mdpi..xxxhdpi (48..192, fullbleed), ic_launcher_foreground mdpi..xxxhdpi (108..432, shaffof + emblem 58%), splash_logo.png 480 (emblem). ic_launcher_bg #1E4FB8 va adaptive-icon.xml TEGILMADI.
+- 0 KOD O'ZGARISHI: git diff — faqat 18 binar fayl + 3 qator versiya. HTML/CSS/JS mantiqiga tegilmadi (og:image, notification icon, SW precache ro'yxati — barchasi eski nomlar bilan ishlayveradi).
+- VERSIYA UCHLIGI v113: worker BUILD_V + core __50BUILD + sw V (SW precache'dagi logo/icon'lar yangi versiya bilan yangilanishi uchun MAJBURIY).
+- MAHALLIY ISBOT: node --check OK (core.js, sw.js); tsc 13 eski stream.ts (baseline, 0 yangi); wrangler dry-run OK; vizual tekshiruv — logo/icon-512/maskable-512/foreground/favicon Rasib'da ko'rilidi, sifat zo'r (dither bilan 256-rang quantize — og'irlik 1.66MB→239KB, vizual zo'rlik saqlangan).
+- CI JONLI ISBOT (cab3a52, v113) — 11/11 YASHIL: Deploy ✓×2 / Smoke ✓ / Qo'ng'iroq MEDIA ✓ / MUHR ✓ / MEDIA ✓ / DATA ✓ / Jurnal ✓ / XAVFSIZLIK ✓ / Panel E2E ✓ / Domen ✓. Ketma-ketlik darsi yana tasdiqlandi: E2E'lar bitta «testlar-zanjiri» concurrency guruhida — bir vaqtda rerun qilinganda pending'lar bekor qilinadi; qat'iy tartib: smoke→(XAVFSIZLIK avto-navbat)→MEDIA→DATA→panel dispatch→domen dispatch.
+- JONLI TASDIQ: https://50gram.uz/logo.png — 1040x1040, 239024 bayt (aynan yangi fayl). /api/build curl'ga 404 qaytaradi — bu FW_404 himoya qatlami ishlashi (dizayn bo'yicha; brauzer E2E smoke build tekshiruvi yashil). APK 763312 bayt O'ZGARMAGAN (WebView jonli sayt; ikonka keyingi APK build'da yangilanadi).
+
+Stage Summary:
+- LOGOTIP ENDI HAR JOYDA YANGI «50 GRAM» DOPPLI EMBLEMA: sayt header, landing, chat bo'sh holati, favicon, PWA ikonkalari, maskable, apple-touch, Android launcher (5 zichlik) + adaptive foreground (5 zichlik) + splash — 18 fayl.
+- 0 BOSHQA O'ZGARISH: funksiyalar, dizayn skin (Pine Green), matnlar, SMS, panel, himoya — hammasi tegilmagan; kodda faqat 3 qator versiya.
+- Versiya qulfi v113 (worker+core+sw); 11/11 CI yashil; sayt LIVE: https://50gram.uz
