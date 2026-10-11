@@ -1,0 +1,17 @@
+# TARJIMON JONLI TESTI (v115) — egaga tashxis: 50gram.uz live API'da
+# ovozli tarjimon zanjirini (Whisper ASR -> tarjima -> Edge TTS neyral ovoz) tekshiradi.
+# FAQAT workflow_dispatch — push'da ishga tushmaydi, deploy QILMAYDI (faqat o'qiydi).
+name: "Tarjimon jonli test (egaga)"
+on:
+  workflow_dispatch:
+jobs:
+  tekshir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tarjimon zanjiri (ASR -> tarjima -> O'zbek neyral ovoz)
+        run: node scripts/test_live_v115.mjs
