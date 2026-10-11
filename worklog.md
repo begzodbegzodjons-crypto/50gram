@@ -541,3 +541,24 @@ Stage Summary:
 - 50GRAM.uz ENDI «PINE GREEN» DIZAYNDA: ro'yxatdan o'tish rasmdagi «1-oyna» kabi (brend + katta sarlavha + hero rasm + yashil «Dasturga kirish» pill), barcha sahifalar (chat, kontaktlar, lenta, reels, kanallar, profil, sozlamalar, qo'ng'iroqlar) yashil palitra + oq kartalar + pill tugmalar bilan. APK WebView jonli saytni yuklaydi — APK qayta qurmasdan yangi dizayn oladi (ikonka esa keyingi APK build'da yangilanadi).
 - 0 FUNKSIONAL O'ZGARISH: hech qanday ID/klass/mantıq o'chmagan — tw.css FAQAT ko'rinishni yozadi; aksent tanlagich, fon rasmlari, dark rejim, --msgfs/--mrad — hammasi ishlaydi. Eskiz SMS + APK + panel maxfiyligi tegilmagan. Himoya YONIQ (fwoff=0).
 - Versiya qulfi v111 (worker+core+sw); 11/11 CI yashil; sayt LIVE: https://50gram.uz
+
+---
+Task ID: 57
+Agent: Super Z (asosiy)
+Task: v112 — REELS «2 ta video, ovoz aralashadi» shikoyati batamom hal qilindi. Foydalanuvchi: "reels bo'limida fonda video avtomatik ko'rsatib ketmoqda va alohida video ko'rsatish oynasi ochilib yana video ko'rsatmoqda — 2 ta video bir vaqtda ovozi aralashib ketyapti. Reels bo'limida fonda FAQAT 50gram logotipi tursin, alohida video oynada video ko'rsatsin".
+
+Work Log:
+- ILDIZ TAHLILI (2 manzara): (1) social.js reelHTML — lenta kartasida <video> to'g'ridan-to'g'ri turib, renderReels'dagi IntersectionObserver (root #t-reels, ratio>0.6, S.prefs.shauto) uni KO'RINAR-OYOZLI avto-ijro qilardi; (2) core.js:1282 — tabga kirganda shortsStart({reelsOnly:true}) to'liq ekran oyna avtomatik ochiladi va o'z videosini ovozli ijro qiladi. Natija: lenta videosi + oyna videosi = 2 ovoz aralashadi (oyna list videosini pauza qilmasdi).
+- TUZATISH (social.js, 3 joyda): (1) reelHTML — <video data-media> OLIB TASHLANIB <div class="rl-bg"><img src="logo.png"></div> qo'yildi (karta fonida FAQAT 50 Gram logotipi; like/izoh/ulashish/o'chirish/rtap/rbot/rshade hammasi SAQLANGAN); (2) renderReels — IntersectionObserver avto-ijro bloki + preload tsikli + inkremental observe BUTUNLAY olib tashlandi (faqat eski observer disconnect+null); (3) openShorts — oyna ochilganda body'dagi oynadan tashqari HAR QANDAY ijro etilayotgan video/audio pauza qilinadi (himoya qatlami — Lenta'dagi video yoki ovozli xabar o'ynayotgan bo'lsa ham aralashmaydi).
+- style.css: .reel .rl-bg (to'liq kartani qoplaydigan radial-gradient #173a6e→#07070c, logotip markazda min(46vw,200px), drop-shadow, 6s rlfloat yumshoq suzish animatsiyasi) — .rlogo slaydi bilan bir uslub.
+- SAQLANGAN (0 funksional o'zgarish): trend kartalari (thumbnail+▶), logoSlide, likes/izohlar/hisoblagichlar (data-scc), del/like API, shSeen no-repeat, shauto pref OYNADA ishlashda davom etadi (2 joyda), manage.js pgReels prefs, core.js:1282 avto-oyna ochilishi (oyna ENDI yagona ijro joyi), mediaUrl/shifr kalitlar, Eskiz SMS, panel maxfiyligi (web'da iz 0).
+- FAYDALI TOMONI: lenta endi hech qanday video metadata/bayt yuklamaydi — Reels bo'limi ochilishi tezlashdi, trafik tejaldi.
+- VERSIYA UCHLIGI v112: worker BUILD_V + core __50BUILD + sw V (sw kesh avtomatik yangilanadi). APK 763312 bayt O'ZGARMAGAN.
+- MAHALLIY ISBOT: statik test_reels_v112.js 59/59 YASHIL (versiya-uchligi, reelHTML'da video yo'qligi, observer olib tashlangani, oyna saqlangani, matnlar, maxfiylik, node --check ×9). Playwright e2e_reels_v112.mjs 13/13 YASHIL: lenta 0 <video> + logo fon; karta bosilganda oyna ochiladi (1 slayd + video); BUTUN SAHIFADA FAQAT 1 ta media o'ynaydi (currentTime>0.3s — haqiqiy ijro, blob-url urug'i bilan); oyna ochiqligida lenta baribir videosiz; yopilganda jimlik tiklanadi; desktop 1280px ham toza; pageerror 0. Skrinshotlar: reels_v112_list.png (fon=logotip), reels_v112_viewer.png (oyna=video).
+- tsc: 13 eski stream.ts (baseline, 0 yangi); wrangler dry-run OK.
+- CI JONLI ISBOT (b96d470, v112) — 10/10 YASHIL: Deploy ✓×2 / Smoke ✓ / MUHR ✓ / Qo'ng'iroq MEDIA ✓ / MEDIA ✓ / DATA ✓ / Jurnal ✓ / XAVFSIZLIK ✓ (rerun script: scripts/ci_v112_rerun.sh — 10 daqiqa timeout o'rta yo'lda o'chsa ham qayta ochib davom etildi) / Panel E2E ✓ (yakuniy himoya YONIQ) / Domen ✓. JONLI: core='v112', sw='50gram-v112', social.js'da rl-bg bor, yagona qolgan IntersectionObserver = tObs (trend, tegilmagan), / 200, APK 763312.
+
+Stage Summary:
+- REELS ENDI FOYDALANUVCHI SO'RGANDAY: lenta fonida FAQAT 50 Gram logotipi (jim, tez), video FAQAT alohida to'liq ekran oynada — 2 ovoz aralashishi IMKONSIZ (list'da video umuman yo'q + oyna tashqi mediani pauza qiladi).
+- 0 FUNKSIONAL O'ZGARISH: barcha tugmalar, izohlar, like'lar, trend slaydlar, prefs, qo'ng'iroqlar, SMS, panel — hammasi joyida. APK qayta qurilmadi (WebView jonli sayt).
+- Versiya qulfi v112 (worker+core+sw); 10/10 CI yashil; sayt LIVE: https://50gram.uz
