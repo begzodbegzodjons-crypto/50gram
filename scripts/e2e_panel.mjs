@@ -10,8 +10,8 @@
  *   7) BLOKDAN CHIQARISH: /api/me yana 200 — foydalanuvchi tiklandi
  *   8) v108 BROADCAST JONLI (uid param — FAQAT TEST HISOBIGA, real foydalanuvchilarga TEGMAYDI):
  *      matn e'lon → qabul qiluvchi chatlar ro'yxatida ko'rinadi; RASM+izoh e'lon → photo xabar
- *      + media bo'lagi yuklab olib AES-GCM deSHIFRLASH bayt-bayt ISBOTI;
- *      TOMBSTONE: paneldan o'chirilgan xabar sinxronlashda deleted=1 qaytadi (oflayn klient ham biladi)
+ *      + media bo'lagi yuklab olib AES-GCM deSHIFRLASH bayt-bayt ISBOTI
+ *      (TOMBSTONE sinovi 12-bo'limda — kanal xabari bilan, direct-chat o'chirish v106 posboni)
  *   9) v105 FOYDALANUVCHI OYNASI: /panel/user — profil+davlat+statistika; yomon id → 404; tokensiz → 401
  *  10) v105 ALOHIDA XABAR: /panel/dm — bo'sh → 400, yo'q → 404, bloklanganga → 400,
  *      JONLI YUBORISH FAQAT O'Z TEST HISOBIGA (real foydalanuvchilarga TEGMAYDI)
@@ -149,20 +149,7 @@ try {
         ok(same, 'v108 RASM BAYT-BAYT TIKLANDI (AES-GCM deSHIFRLASH OK)')
       } catch (e) { ok(false, 'v108 deSHIFRLASH', String(e).slice(0, 80)) }
     }
-    // 8c) v108 TOMBSTONE — WS hodisasini o'tkazib yuborgan oflayn klient ham o'chirilganini biladi
-    const maxId = (msgsT.d.messages || []).reduce((a, m) => Math.max(a, m.id), 0)
-    const since0 = msgsT.d.now
-    const delMsg = (msgsT.d.messages || []).find((m) => String(m.body || '').includes('v108-broadcast'))
-    ok(!!delMsg, 'v108 tombstone-sinov: o\u2018chiriladigan xabar topildi', delMsg ? 'id=' + delMsg.id : '')
-    if (delMsg) {
-      const dmd = await j('/api/panel/msg/delete', { method: 'POST', h: AT, body: { id: delMsg.id } })
-      ok(dmd.st === 200 && dmd.d.ok, 'v108 paneldan xabar o\u2018chirildi (id=' + delMsg.id + ')')
-      const sync1 = await j('/api/chats/' + admCh.id + '/messages?after=' + maxId + '&since=' + since0, { h: { authorization: 'Bearer ' + tokT } })
-      const tomb = (sync1.d.messages || []).find((m) => m.id === delMsg.id && m.deleted === 1)
-      ok(!!tomb, 'v108 TOMBSTONE SINXRONDA KELDI (deleted=1 — klient o\u2018z-o\u2018zi tozalaydi)', tomb ? 'ok' : 'messages=' + (sync1.d.messages || []).length)
-      const still = await j('/api/chats/' + admCh.id + '/messages?latest=80', { h: { authorization: 'Bearer ' + tokT } })
-      ok(!(still.d.messages || []).some((m) => m.id === delMsg.id), 'v108 o\u2018chirilgan xabar yangi ro\u2018yxatda YO\u2018Q (ildizidan ketdi)')
-    }
+    // 8c) TOMBSTONE kanal-sinovi 12-bo'limda (direct chat xabarini paneldan o'chirish — v106 posboni: 404)
   }
 
   // 9) v105 FOYDALANUVCHI MA'LUMOT OYNASI: /panel/user?id=
@@ -245,10 +232,19 @@ try {
     ok(cln.st === 200 && cln.d.removed >= 1, 'v106 cleanbad yomon xabarlarni o\u2018chiradi', 'removed=' + cln.d.removed)
     const cd3 = await j('/api/panel/chat?id=' + CID, { h: AT })
     ok(!(cd3.d.messages || []).some((x) => x.bad === true), 'v106 cleanbad\u2019dan keyin yomon xabar ro\u2018yxatda YO\u2018Q')
-    // BITTA XABARNI O'CHIRISH (oddiy xabar)
+    // BITTA XABARNI O'CHIRISH (oddiy xabar) + v108 TOMBSTONE ISBOTI —
+    // WS hodisasini o'tkazib yuborgan (oflayn/fon) klient ham sinxronlashda o'chirilganini biladi
     if (goodMsg) {
+      const chBef = await j('/api/chats/' + CID + '/messages?latest=80', { h: { authorization: 'Bearer ' + tokT } })
+      const maxId = (chBef.d.messages || []).reduce((a, m) => Math.max(a, m.id), 0)
+      const since0 = chBef.d.now
       const md = await j('/api/panel/msg/delete', { method: 'POST', h: AT, body: { id: goodMsg.id } })
       ok(md.st === 200 && md.d.ok, 'v106 bitta xabarni o\u2018chirish (panel/msg/delete)', 'st=' + md.st)
+      const syncT = await j('/api/chats/' + CID + '/messages?after=' + maxId + '&since=' + since0, { h: { authorization: 'Bearer ' + tokT } })
+      const tomb = (syncT.d.messages || []).find((m) => m.id === goodMsg.id && m.deleted === 1)
+      ok(!!tomb, 'v108 TOMBSTONE SINXRONDA KELDI (deleted=1 — oflayn klient ham o\u2018z-o\u2018zi tozalaydi)', tomb ? 'id=' + tomb.id : 'messages=' + (syncT.d.messages || []).length)
+      const chAft = await j('/api/chats/' + CID + '/messages?latest=80', { h: { authorization: 'Bearer ' + tokT } })
+      ok(!(chAft.d.messages || []).some((m) => m.id === goodMsg.id), 'v108 o\u2018chirilgan xabar yangi ro\u2018yxatda YO\u2018Q (ildizidan ketdi)')
       const md2 = await j('/api/panel/msg/delete', { method: 'POST', h: AT, body: { id: goodMsg.id } })
       ok(md2.st === 404, 'v106 o\u2018chirilgan xabar qayta o\u2018chirilmaydi → 404')
     }
