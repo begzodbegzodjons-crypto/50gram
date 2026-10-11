@@ -13,5 +13,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Edge TTS yetish diagnostikasi (Actions IP — Azure)
+        run: |
+          npm i ws --no-save >/dev/null 2>&1 || true
+          node scripts/test_edge_tts.mjs uz-UZ-MadinaNeural "Salom dunyo sinov" /tmp/edge_diag.mp3 bing || echo "EDGE-DIAG: Actions IP dan ham yetmadi"
       - name: Tarjimon zanjiri (ASR -> tarjima -> O'zbek neyral ovoz)
         run: node scripts/test_live_v115.mjs

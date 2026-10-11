@@ -3464,9 +3464,11 @@ async function edgeMP3(text: string, voice: string, alt: boolean): Promise<strin
   const sekin = Math.floor(Date.now() / 1000) + 11644473600
   const gec = (await sha256(String((sekin - (sekin % 300)) * 10_000_000) + EJ_TRUSTED)).toUpperCase()
   const q = "TrustedClientToken=" + EJ_TRUSTED + "&ConnectionId=" + edgeHex32() + "&Sec-MS-GEC=" + gec + "&Sec-MS-GEC-Version=1-" + EJ_CHROMIUM
+  // v115.3: Workers'da outbound WebSocket FAQAT fetch+Upgrade orqali ochiladi va URL
+  // https:// bo'lishi SHART (wss:// esa ishlamaydi — Cloudflare docs talabi).
   const url = alt
-    ? "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1?" + q
-    : "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?" + q
+    ? "https://api.msedgeservices.com/tts/cognitiveservices/websocket/v1?" + q
+    : "https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?" + q
   const b = await edgeWS(url, cfg, ssml)
   return b.length > 1000 ? abToB64(b) : ""
 }
@@ -3537,6 +3539,24 @@ function arabLotin(t: string): string {
   return t.replace(/[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/g, (ch) =>
     /[\u064B-\u0652\u0670\u0640]/.test(ch) ? "" : (AR_LAT[ch] ?? " ")).replace(/ {2,}/g, " ").trim()
 }
+// v115.3: uyg'ur-arab transkripsiyasidan lotinga ko'chgan unlilarsiz matnni llama
+// bilan TUZATISH («aslam lykm bo 50 grm» -> «assalomu alaykum bu 50 gram»). Xato bo'lsa aslisi qaytadi.
+async function lotinTuzat(env: Env, text: string): Promise<string> {
+  try {
+    if (!env.AI || !text) return text
+    const r: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+      messages: [
+        { role: "system", content: "Fix garbled Uzbek text. The text is phonetic Uzbek written WITHOUT vowels (auto-transliterated from Arabic-script ASR). Rewrite it as proper Uzbek in Latin script with correct vowels and apostrophes (o', g'). Reply with ONLY the corrected Uzbek text. If unsure, reply with the original text unchanged." },
+        { role: "user", content: text.slice(0, 900) },
+      ],
+      max_tokens: 600,
+    })
+    const t = String(r?.response || "").trim().replace(/^["'ʻ"]/, "").trim()
+    const unli = (t.match(/[aeiouou']/gi) || []).length
+    if (t && unli >= 3 && t.length >= Math.floor(text.length * 0.7) && t.length <= text.length * 3) return t
+    return text
+  } catch { return text }
+}
 async function whisperMatn(env: Env, bytes: Uint8Array): Promise<string> {
   if (!env.AI) return ""
   const urin = async (m: string, audio: unknown): Promise<string> => {
@@ -3552,7 +3572,8 @@ async function whisperMatn(env: Env, bytes: Uint8Array): Promise<string> {
   if (!natija) natija = (await urin(LEGACY, b64)) || (arr ? await urin(LEGACY, arr) : "")
   if (natija && arabShubha(natija)) {
     const t2 = (await urin(LEGACY, b64)) || (arr ? await urin(LEGACY, arr) : "")
-    natija = t2 && !arabShubha(t2) ? t2 : arabLotin(natija)
+    if (t2 && !arabShubha(t2)) natija = t2
+    else natija = await lotinTuzat(env, arabLotin(natija))
   }
   return natija.slice(0, 2000)
 }
