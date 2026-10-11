@@ -727,6 +727,10 @@ body.dark .sheet .grab{background:linear-gradient(90deg,#31415F,#42527A);box-sha
 .reels{display:flex;flex-direction:column}
 .reel{position:relative;scroll-snap-align:start;scroll-snap-stop:always;height:var(--vph,100dvh);min-height:0;background:#000;border-radius:0;overflow:hidden}
 .reel video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+/* v112: lenta kartasi fonida FAQAT 50 Gram logotipi — video FAQAT to'liq ekran oynada ijro etiladi */
+.reel .rl-bg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(120% 85% at 50% 8%,#173a6e 0%,#0c1428 52%,#07070c 100%)}
+.reel .rl-bg img{width:min(46vw,200px);height:auto;max-height:28dvh;object-fit:contain;filter:drop-shadow(0 14px 34px rgba(46,123,255,.4));animation:rlfloat 6s ease-in-out infinite}
+@keyframes rlfloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
 /* 50 GRAM LOGO SLAYD (foydalanuvchi tanlovi: tasodifiy rasmlar o'rniga logotip to'liq ko'rinsin) —
    platform Reels kam bo'lsa lenta oxirida chiqadi: brend logotipi markazda, to'liq, bujmaydi */
 .reel.rlogo{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:radial-gradient(120% 85% at 50% 8%,#173a6e 0%,#0c1428 52%,#07070c 100%);color:#fff;text-align:center;padding:28px}

@@ -467,7 +467,7 @@ function reelHTML(p) {
   const who = p.chat ? `<div class="rw" data-who="c${p.chat.id}">${avHTML(p.chat, 38, { chat: true })}<b>${esc(p.chat.title)}</b></div>`
     : `<div class="rw" data-who="u${p.author?.id || 0}">${avHTML(p.author, 38)}<b>${esc(uname(p.author))}</b></div>`
   return `<div class="reel" data-reel="${p.id}">
-    <video data-media="${p.media_id}" loop playsinline preload="metadata" muted></video>
+    <div class="rl-bg"><img src="logo.png" alt="50 Gram"></div>
     <div class="rshade"></div>
     <div class="rbot">
       ${who}${p.views ? `<small class="rviews">👁 ${p.views}</small>` : ''}
@@ -601,10 +601,6 @@ function renderReels(inc) {
       const lg = qs('.reel.rlogo', rd)
       if (lg) { if (reelPosts.length >= 10) lg.remove(); else rd.insertBefore(tp.content, lg) }
       else rd.appendChild(tp.content)
-      const added = qsa('.reel[data-reel]', rd).slice(-tail)
-      // VIDEO o'zi kuzatiladi (div emas!) — avval .reel div kuzatilgandi: callback'da div.play()
-      // xato berardi → inkremental yuklangan videolar ijro/pauza BUZILGAN edi
-      added.forEach((el) => { const v = qs('video', el); if (v) { v.preload = 'none'; reelsObserver && reelsObserver.observe(v) } })
       hydrate(rd)
       reelsHint(box)
       return
@@ -616,23 +612,11 @@ function renderReels(inc) {
     ? `<div class="reels">${reelPosts.map(reelHTML).join('')}${reelTrend.map(reelTrendHTML).join('')}${logoHTML}</div><div class="hint" id="reelshint" style="text-align:center;padding:12px"></div>`
     : `<div class="empty"><span class="big">🎬</span>Hali Reels yo‘q — <b>➕</b> tugmasi bilan birinchi videoni joylang!</div>`
   hydrate(box)
-  if (reelsObserver) reelsObserver.disconnect()
-  const rd2 = qs('.reels', box)
-  if (rd2) qsa('.reel video', rd2).forEach((v, i) => { if (i > 2) v.preload = 'none' }) // birinchi 3 tadan keyingi — play bosilgach yuklanadi (tezlik)
-  if (rd2 && 'IntersectionObserver' in window) {
-    reelsObserver = new IntersectionObserver((es) => {
-      for (const en of es) {
-        const v = en.target
-        if (en.isIntersecting && en.intersectionRatio > 0.6) {
-          // Ovozli ijro bloklansa — ovozsiz davom (video qotib qolmasin)
-          if (S.prefs.shauto) v.play().then(() => { v.muted = false }).catch(() => { v.muted = true; v.play().catch(() => {}) })
-          // Bir vaqtda 2-3 video ovoz chiqarib yuborsa — sekinlashadi: qolganlarini pauza
-          qsa('.reel video', box).forEach((o) => { if (o !== v && !o.paused) { o.muted = true; o.pause() } })
-        } else { v.pause(); v.muted = true }
-      }
-    }, { root: qs('#t-reels'), threshold: [0, 0.6, 1] })
-    qsa('.reel video', box).forEach((v) => reelsObserver.observe(v))
-  }
+  // v112: LENTA VIDEOLARI ENDI FONDA O'YNAMAYDI (foydalanuvchi shikoyati: "2 ta video bir
+  // vaqtda ovozi aralashib ketyapti") — lenta kartalarida FAQAT 50 Gram logotipi turadi,
+  // video FAQAT alohida to'liq ekran oynada (shortsStart) ijro etiladi. Lenta avto-ijro
+  // kuzatuvchisi (IntersectionObserver) butunlay olib tashlandi — fon DOIM jim.
+  if (reelsObserver) { reelsObserver.disconnect(); reelsObserver = null }
   reelsHint(box)
 }
 function reelsHint(box) {
@@ -1720,6 +1704,9 @@ function openShorts(list, startIdx = 0) {
   <div class="sh-scroll">${list.map(shSlideHTML).join('')}</div>`
   document.body.appendChild(w)
   document.body.classList.add('sh-lock')
+  // v112: oynadan TASHQARI ijro etilayotgan har qanday media pauza — ikki ovoz hech qachon
+  // aralashmasin (foydalanuvchi shikoyati: "2 ta video bir vaqtda ovozi aralashib ketyapti")
+  qsa('video,audio', document.body).forEach((m) => { if (!w.contains(m) && !m.paused) { try { m.pause() } catch {} } })
   shWrap = w
   shYTMsgBind(w)
   requestAnimationFrame(() => {
