@@ -121,7 +121,7 @@ ok(!/blocked/.test(idx.match(/function chatOut\(r: any\) \{[\s\S]*?\n\}/)[0]), '
 
 // 10) E2E yangi bo'limlari (e2e_panel.mjs yangilangandan keyin yashil bo'ladi)
 const e2e = readFileSync(join(ROOT, 'scripts/e2e_panel.mjs'), 'utf8')
-for (const s of ['uid: uidT', 'panel/broadcast', 'tombstone', 'img: bimg']) ok(e2e.includes(s), 'E2E: ' + s + ' sinovi bor')
+for (const s of ['uid: uidT', 'panel/broadcast', 'TOMBSTONE', 'img: bimg']) ok(e2e.includes(s), 'E2E: ' + s + ' sinovi bor')
 
 console.log(fails === 0 ? '== HAMMASI YASHIL ==' : '== ' + fails + ' FAIL ==')
 process.exit(fails === 0 ? 0 : 1)
