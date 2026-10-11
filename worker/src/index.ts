@@ -357,7 +357,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v113"
+const BUILD_V = "v114"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -3315,6 +3315,211 @@ async function giftLive(c: C) {
   return json({ ok: true, coins: Number(mw?.coins || 0), cost, host: { coins: Number(hw?.coins || 0), earned: Number(hw?.earned || 0) } })
 }
 
+// ========================= TARJIMON (v114) — 6 til: uz/ru/en/zh/tr/de =========================
+// Foydalanuvchi talabi: chet elda (masalan Xitoyda) suhbatlashish — ovozni yozib ol, tarjima
+// qilib OVOZ BILAN qaytar; PDF hujjatlarni 6 tilga tarjima. Tez va sifatli bo'lsin.
+// ZANJIR (trend'da isbotlangan): Google free endpoints (2 bosqich) -> Workers AI llama zaxira.
+// OVOZ: Whisper (Workers AI) matnga -> tarjima -> Google TTS ovoz (uz tilida TTS yo'q —
+//        o'zbekcha matnni TURKCHA ovoz o'qiydi: til jihatdan eng yaqin, tushunarli).
+const TR_LANGS: Record<string, { uz: string; tts: string; flag: string }> = {
+  uz: { uz: "O‘zbek", tts: "tr", flag: "🇺🇿" },
+  ru: { uz: "Rus", tts: "ru", flag: "🇷🇺" },
+  en: { uz: "Ingliz", tts: "en", flag: "🇬🇧" },
+  zh: { uz: "Xitoy", tts: "zh-CN", flag: "🇨🇳" },
+  tr: { uz: "Turk", tts: "tr", flag: "🇹🇷" },
+  de: { uz: "Nemis", tts: "de", flag: "🇩🇪" },
+}
+// Har uid uchun engil tezlik-posboni (izolat ichida): ovoz 10/min, matn 60/min
+const TR_THR = new Map<string, number[]>()
+function trTez(uid: number, tur: number, limit: number): boolean {
+  const t = Date.now(), k = uid + ":" + tur
+  const arr = (TR_THR.get(k) || []).filter((x) => t - x < 60_000)
+  if (arr.length >= limit) { TR_THR.set(k, arr); return false }
+  arr.push(t); TR_THR.set(k, arr)
+  if (TR_THR.size > 5000) TR_THR.clear()
+  return true
+}
+async function tarjimaJuft(env: Env, text: string, to: string): Promise<{ t: string; from: string } | null> {
+  const qisqa = text.length <= 250
+  // 1a) qisqa matn: clients5 dict-chrome-ex (eng tez, trend'da isbotlangan)
+  if (qisqa) try {
+    const r = await fetch("https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=" + to + "&q=" + encodeURIComponent(text), { headers: TREND_UA })
+    if (r.ok) {
+      const j: any = await r.json()
+      const out = Array.isArray(j) ? String(j?.[0]?.[0] ?? "").trim() : String(j?.sentences?.[0]?.trans ?? "").trim()
+      if (out && out !== text) return { t: out, from: String((Array.isArray(j) && j?.[0]?.[2]) || j?.src || "auto") }
+    }
+  } catch {}
+  // 1b) uzun matn / zaxira: gtx single (segmentlar bilan — ko'p gapirilgan matn uchun to'g'ri)
+  try {
+    const r = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=" + to + "&dt=t&q=" + encodeURIComponent(text.slice(0, 4500)), { headers: TREND_UA })
+    if (r.ok) {
+      const j: any = await r.json()
+      const out = (j?.[0] || []).map((x: any[]) => String(x?.[0] || "")).join("").trim()
+      if (out && out !== text) return { t: out, from: String(j?.[2] || "auto") }
+    }
+  } catch {}
+  // 2) Workers AI llama — subrequest limitiga KIRMAYDI (oxirgi zaxira)
+  try {
+    if (!env.AI) return null
+    const nom = TR_LANGS[to]?.uz || to
+    const r: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+      messages: [
+        { role: "system", content: "You are a professional translator. Translate the user's text into " + nom + " language. Reply with ONLY the translation, nothing else." },
+        { role: "user", content: text.slice(0, 1200) },
+      ],
+      max_tokens: 700,
+    })
+    const t = String(r?.response || "").trim().replace(/^(?:['‘ʻ"]|tarjima:|translation:)\s*/i, "").trim()
+    if (t && t.length > 1 && t !== text) return { t, from: "auto" }
+  } catch {}
+  return null
+}
+async function tarjimaKeshli(c: C, text: string, to: string) {
+  const h = await sha256(to + "|" + text)
+  const ck = "https://tarjimon.50gram.internal/m/" + h
+  try { const hit = await caches.default.match(ck); if (hit) { const j: any = await hit.json(); return { t: String(j.t), from: String(j.f) } } } catch {}
+  const r = await tarjimaJuft(c.env, text, to)
+  if (r) c.wait(caches.default.put(ck, new Response(JSON.stringify({ t: r.t, f: r.from }), { headers: { "cache-control": "public, s-maxage=21600" } })).catch(() => {}))
+  return r
+}
+// Ovoz sintezi: Google TTS (translate_tts) — 180 belgili gap-bo'laklar, baytlari birlashtiriladi.
+// uz -> tr ovozi (Google'da o'zbek ovozi YO'Q — turkcha eng yaqin; matn baribir to'liq ko'rsatiladi)
+const TTS_KESH = new Map<string, { b: string; t: number }>()
+async function ttsMP3(text: string, lang: string): Promise<string> {
+  const tl = TR_LANGS[lang]?.tts || "en"
+  const safe = text.replace(/\s+/g, " ").trim().slice(0, 600)
+  if (!safe) return ""
+  const h = (await sha256(tl + "|" + safe)).slice(0, 20)
+  const hit = TTS_KESH.get(h)
+  if (hit && Date.now() - hit.t < 1_800_000) return hit.b
+  const parts: string[] = []
+  let cur = ""
+  for (const s of safe.split(/(?<=[.!?。！？;:,])\s*/)) {
+    if (cur && (cur + " " + s).trim().length > 180) { parts.push(cur.trim()); cur = s } else cur = (cur + " " + s).trim()
+  }
+  if (cur.trim()) parts.push(cur.trim())
+  if (parts.length > 5) { parts.length = 5; parts[4] = parts[4].slice(0, 180) }
+  const bufs: Uint8Array[] = []
+  for (let i = 0; i < parts.length; i++) {
+    try {
+      const r = await fetch("https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=" + tl + "&total=" + parts.length + "&idx=" + i + "&textlen=" + parts[i].length + "&q=" + encodeURIComponent(parts[i]), { headers: TREND_UA })
+      if (!r.ok) continue
+      const ab = new Uint8Array(await r.arrayBuffer())
+      if (ab.length > 1000) bufs.push(ab)
+    } catch {}
+  }
+  if (!bufs.length) return ""
+  const total = bufs.reduce((a, b) => a + b.length, 0)
+  const out = new Uint8Array(total)
+  let off = 0
+  for (const b of bufs) { out.set(b, off); off += b.length }
+  const b64 = abToB64(out)
+  if (TTS_KESH.size > 80) TTS_KESH.clear()
+  TTS_KESH.set(h, { b: b64, t: Date.now() })
+  return b64
+}
+// Ovozni matnga: Whisper (Workers AI) — avval turbo (ko'ptilli, tez), bo'lmasa asosiy model
+async function whisperMatn(env: Env, bytes: Uint8Array): Promise<string> {
+  if (!env.AI) return ""
+  for (const m of ["@cf/openai/whisper-large-v3-turbo", "@cf/openai/whisper"]) {
+    try {
+      const r: any = await env.AI.run(m as any, { audio: bytes } as any)
+      const t = String(r?.text || "").trim()
+      if (t) return t.slice(0, 2000)
+    } catch {}
+  }
+  return ""
+}
+async function apiTranslate(c: C) {
+  const text = str(c.b.text, 5000)
+  if (!text) fail("Tarjima uchun matn yuboring")
+  const to = String(c.b.to || "uz")
+  if (!TR_LANGS[to]) fail("Bu til qo‘llab-quvvatlanmaydi")
+  if (!trTez(c.uid, 1, 60)) fail("Juda ko‘p so‘rov — bir daqiqa kuting", 429)
+  const r = await tarjimaKeshli(c, text, to)
+  if (!r) fail("Tarjima xizmati hozir javob bermaydi — birozdan keyin urinib ko‘ring", 502)
+  return json({ ok: true, text, translated: r!.t, from: r!.from, to })
+}
+async function apiTranslateSpeech(c: C) {
+  if (!trTez(c.uid, 2, 10)) fail("Ovozli tarjima limiti (10/daqiqa) — birozdan keyin urining", 429)
+  const audio = String(c.b.audio || "")
+  if (!audio) fail("Ovoz yozuvi yo‘q")
+  const raw = audio.includes(",") ? audio.slice(audio.indexOf(",") + 1) : audio
+  let bytes: Uint8Array = new Uint8Array(0)
+  try { bytes = b64ToU8(raw.slice(0, 7_000_000)) } catch { fail("Ovoz yozuvini o‘qib bo‘lmadi") }
+  if (bytes.length < 900) fail("Ovoz juda qisqa — yana bir marta gapirib ko‘ring")
+  const to = TR_LANGS[String(c.b.to || "")] ? String(c.b.to) : "uz"
+  const text = await whisperMatn(c.env, bytes)
+  if (!text) fail("Ovozni aniqlab bo‘lmadi — sokin joyda aniqroq gapirib ko‘ring", 422)
+  const r = await tarjimaKeshli(c, text, to)
+  if (!r) fail("Tarjima xizmati hozir javob bermaydi", 502)
+  const mp3 = await ttsMP3(r!.t, to)
+  return json({ ok: true, text, translated: r!.t, from: r!.from, to, audio: mp3 ? "data:audio/mpeg;base64," + mp3 : "" })
+}
+
+// ========================= REYTING (v114) — kanallar / guruhlar / aktiv foydalanuvchilar =========================
+// Foydalanuvchi talabi: «reytinglar kanallar gruppalar va aktiv foydalanuvchi reytingi».
+// Ma'lumot manbai: mavjud jadvallar (messages faolligi, chats member_count, wallets.earned
+// martaba) — YANGI JADVAL YO'Q, migratsiya KERAK EMAS. 2 daqiqalik xotira-kesh — TiDB himoyasi.
+const RAT_KESH = new Map<string, { j: any; t: number }>()
+async function apiRating(c: C) {
+  const tab = String(c.url.searchParams.get("tab") || "users")
+  if (!["users", "channels", "groups"].includes(tab)) fail("Noto‘g‘ri bo‘lim")
+  const hafta = now() - 7 * DAY
+  let j: any = RAT_KESH.get(tab)
+  if (!j || Date.now() - j.t > 120_000) {
+    let list: any[] = []
+    if (tab === "users") {
+      const rows = await c.db.q(
+        "SELECT m.sender_id AS id, COUNT(*) AS n, u.first_name, u.last_name, u.username, u.avatar_ver, COALESCE(w.earned,0) AS earned " +
+        "FROM messages m JOIN users u ON u.id=m.sender_id LEFT JOIN wallets w ON w.user_id=m.sender_id " +
+        "WHERE m.deleted=0 AND m.created_at>=? AND m.sender_id>0 AND u.blocked=0 " +
+        "GROUP BY m.sender_id ORDER BY n DESC LIMIT 50", [hafta]).catch(() => [])
+      list = (rows || []).map((r: any) => ({
+        id: Number(r.id), n: Number(r.n), earned: Number(r.earned || 0),
+        first_name: r.first_name || "", last_name: r.last_name || "", username: r.username || "", avatar_ver: Number(r.avatar_ver || 0),
+      }))
+    } else if (tab === "channels") {
+      const rows = await c.db.q(
+        "SELECT c.id, c.title, c.username, c.avatar_ver, c.member_count, c.last_msg_at, " +
+        "(SELECT COUNT(*) FROM messages m WHERE m.chat_id=c.id AND m.deleted=0 AND m.created_at>=?) AS n7 " +
+        "FROM chats c WHERE c.type='channel' AND c.is_public=1 AND c.blocked=0 " +
+        "ORDER BY c.member_count DESC LIMIT 50", [hafta]).catch(() => [])
+      list = (rows || []).map((r: any) => ({
+        id: Number(r.id), title: r.title || "", username: r.username || "", avatar_ver: Number(r.avatar_ver || 0),
+        member_count: Number(r.member_count || 0), n7: Number(r.n7 || 0), last_msg_at: Number(r.last_msg_at || 0),
+      }))
+    } else {
+      const rows = await c.db.q(
+        "SELECT c.id, c.title, c.username, c.avatar_ver, c.member_count, c.last_msg_at, " +
+        "(SELECT COUNT(*) FROM messages m WHERE m.chat_id=c.id AND m.deleted=0 AND m.created_at>=?) AS n7 " +
+        "FROM chats c WHERE c.type='group' AND c.is_public=1 AND c.blocked=0 " +
+        "ORDER BY n7 DESC, c.member_count DESC LIMIT 50", [hafta]).catch(() => [])
+      list = (rows || []).map((r: any) => ({
+        id: Number(r.id), title: r.title || "", username: r.username || "", avatar_ver: Number(r.avatar_ver || 0),
+        member_count: Number(r.member_count || 0), n7: Number(r.n7 || 0), last_msg_at: Number(r.last_msg_at || 0),
+      }))
+    }
+    j = { list, t: Date.now() }
+    if (RAT_KESH.size > 8) RAT_KESH.clear()
+    RAT_KESH.set(tab, j)
+  }
+  // Mening o'rnim (faqat users tab): mavqeni hisoblash — 2 yengil so'rov
+  let me: any = null
+  if (tab === "users") {
+    try {
+      const mine = await c.db.one("SELECT COUNT(*) AS n FROM messages WHERE deleted=0 AND created_at>=? AND sender_id=?", [hafta, c.uid])
+      const n = Number(mine?.n || 0)
+      if (n > 0) {
+        const hi = await c.db.one("SELECT COUNT(*) AS c FROM (SELECT sender_id FROM messages WHERE deleted=0 AND created_at>=? AND sender_id>0 AND sender_id<>? GROUP BY sender_id HAVING COUNT(*) > ?) x", [hafta, c.uid, n])
+        me = { n, rank: Number(hi?.c || 0) + 1 }
+      }
+    } catch {}
+  }
+  return json({ ok: true, tab, list: j.list, me })
+}
+
 // ------------------------- Kanal postlari izohlari -------------------------
 async function msgCommentsAllowed(c: C, mid: number) {
   await ensureSchema(c.db)
@@ -4943,6 +5148,10 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/lives/:id/end", endLive],
   ["GET", "/wallet", getWallet],
   ["POST", "/wallet/daily", dailyBonus],
+  // v114 TARJIMON + REYTING
+  ["POST", "/translate", apiTranslate],
+  ["POST", "/translate/speech", apiTranslateSpeech],
+  ["GET", "/rating", apiRating],
   ["GET", "/messages/:id/comments", listMsgComments],
   ["POST", "/messages/:id/comments", addMsgComment],
   ["DELETE", "/messages/:id/comments/:cid", delMsgComment],

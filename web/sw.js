@@ -1,6 +1,6 @@
 // 50 Gram service worker: ilova qobig'ini keshlaydi (oflayn ochiladi) + Telegram-uslubidagi Web Push.
-const V = '50gram-v113'
-const SHELL = ['./', 'index.html', 'style.css', 'tw.css', 'config.js', 'core.js', 'p2p.js', 'storage.js', 'chat.js', 'manage.js', 'social.js', 'rtc.js', 'logo.png', 'hero.jpg', 'icon-192.png', 'icon-512.png', 'maskable-192.png', 'maskable-512.png', 'apple-touch-icon.png', 'favicon.png', 'manifest.json',
+const V = '50gram-v114'
+const SHELL = ['./', 'index.html', 'style.css', 'tw.css', 'config.js', 'core.js', 'p2p.js', 'storage.js', 'chat.js', 'manage.js', 'social.js', 'rtc.js', 'tools.js', 'logo.png', 'hero.jpg', 'icon-192.png', 'icon-512.png', 'maskable-192.png', 'maskable-512.png', 'apple-touch-icon.png', 'favicon.png', 'manifest.json',
   // Task 29: Manrope shrifti + animatsiyali stiker paketlari + sovg'alar
   'fonts/manrope-latin.woff2', 'fonts/manrope-latin-ext.woff2',
 ].concat(['mood/1', 'mood/2', 'mood/3', 'mood/4', 'mood/5', 'mood/6', 'mood/7', 'mood/8', 'love/1', 'love/2', 'love/3', 'love/4', 'love/5', 'love/6', 'love/7', 'love/8', 'party/1', 'party/2', 'party/3', 'party/4', 'party/5', 'party/6', 'party/7', 'party/8',

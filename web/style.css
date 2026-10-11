@@ -1369,3 +1369,71 @@ body.dark .trendchips{background:var(--fon)}
 *::-webkit-scrollbar-thumb{background:#D4D4D8;border:2.5px solid transparent;background-clip:content-box}
 *::-webkit-scrollbar-thumb:hover{background:#BDBDC3;border:2.5px solid transparent;background-clip:content-box}
 body.dark *::-webkit-scrollbar-thumb{background:#3F3F46;border:2.5px solid transparent;background-clip:content-box}
+
+/* ================= v114 — REYTING + TARJIMON (faqat qo'shimcha) ================= */
+/* Dock: 8 tugma sigimi — belgilar biroz torayadi (eski 6 tugma ham chizilishini saqlaydi) */
+.dock{padding:7px 3px}
+.dock button i{width:40px;font-size:18px}
+.dock button span{font-size:9.5px;letter-spacing:-.2px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:380px){.dock button span{font-size:8.6px}}
+.dock button[data-t="t-rating"]{--dcol:#E8A413;--ddark:#C98F0C;--dglo:rgba(232,164,19,.5)}
+.dock button[data-t="t-translate"]{--dcol:#12A5B8;--ddark:#0D8A9B;--dglo:rgba(18,165,184,.5)}
+
+/* --- Reyting --- */
+.rat-me{margin:10px 14px 2px;padding:10px 14px;border-radius:16px;background:linear-gradient(135deg,rgba(232,164,19,.16),rgba(232,164,19,.05));border:1px solid rgba(232,164,19,.3);font-size:13px;color:var(--matn)}
+.rat-it{align-items:center;gap:10px}
+.rat-rank{width:34px;text-align:center;font-size:22px;flex:none;display:flex;align-items:center;justify-content:center}
+.rat-rank .rnk{font-size:14px;font-weight:800;color:var(--xira);background:rgba(127,127,127,.14);width:28px;height:28px;line-height:28px;border-radius:50%}
+.rat-it .lv{font-size:13px}
+.rat-score{margin-left:auto;text-align:center;flex:none;min-width:52px}
+.rat-score b{display:block;font-size:15px;color:var(--dcol,#1E8E4D)}
+.rat-score span{font-size:10px;color:var(--xira)}
+body.dark .rat-me{background:linear-gradient(135deg,rgba(232,164,19,.14),rgba(232,164,19,.04));border-color:rgba(232,164,19,.25)}
+
+/* --- Tarjimon: umumiy --- */
+.tr-panel{padding:12px 14px 24px}
+.tilqator{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px}
+.tilchip{padding:7px 11px;border-radius:999px;background:rgba(127,127,127,.1);font-size:12.5px;font-weight:700;color:var(--matn);cursor:pointer;border:1.5px solid transparent;transition:all .15s}
+.tilchip.on{background:var(--dcol-soft,rgba(30,142,77,.14));border-color:var(--dcol,#1E8E4D);color:var(--dcol,#1E8E4D)}
+.tilswap{margin-left:auto;width:36px;height:34px;border-radius:12px;border:1.5px solid rgba(127,127,127,.22);background:rgba(255,255,255,.7);font-size:16px;color:var(--matn)}
+body.dark .tilchip{background:rgba(255,255,255,.07)}
+body.dark .tilswap{background:rgba(255,255,255,.06)}
+.tr-ta{width:100%;min-height:120px;resize:vertical;padding:14px;border-radius:16px;border:1.5px solid rgba(127,127,127,.22);background:var(--karta,#fff);color:var(--matn);font:15px/1.55 inherit;margin-bottom:10px}
+.tr-ta:focus{outline:none;border-color:var(--dcol,#1E8E4D)}
+.tr-out{margin-top:12px;padding:14px;border-radius:16px;background:var(--dcol-soft,rgba(30,142,77,.09));border:1.5px solid rgba(30,142,77,.25)}
+.tr-out-t{font:16px/1.6 inherit;color:var(--matn);white-space:pre-wrap;word-break:break-word;margin-bottom:8px}
+#tr-go{width:100%}
+
+/* --- Ovoz --- */
+.micbtn{display:flex;align-items:center;justify-content:center;width:96px;height:96px;margin:18px auto 10px;border-radius:50%;border:0;background:linear-gradient(135deg,#12A5B8,#0D8A9B);color:#fff;font-size:38px;box-shadow:0 12px 30px rgba(18,165,184,.4);transition:transform .15s}
+.micbtn:active{transform:scale(.94)}
+.micbtn.rec{background:linear-gradient(135deg,#E5484D,#C53030);box-shadow:0 12px 30px rgba(229,72,77,.45);animation:trpulse 1.1s ease-in-out infinite}
+@keyframes trpulse{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}
+.micstat{text-align:center;font-size:13px;color:var(--xira);min-height:20px;margin-bottom:12px}
+.trv-res{margin-top:8px}
+.trv-karta{padding:12px 14px;border-radius:16px;background:var(--karta,#fff);border:1.5px solid rgba(127,127,127,.18);margin-bottom:10px}
+.trv-karta.main{border-color:rgba(18,165,184,.4);background:rgba(18,165,184,.07)}
+.trv-t{font:15px/1.6 inherit;color:var(--matn);word-break:break-word}
+.trv-t.big{font-size:17px;font-weight:600}
+.trv-ctl{display:flex;gap:16px;margin-top:8px}
+body.dark .trv-karta{background:rgba(255,255,255,.05)}
+
+/* --- PDF --- */
+.pdfdrop{display:flex;flex-direction:column;align-items:center;gap:4px;padding:34px 20px;border-radius:18px;border:2px dashed rgba(127,127,127,.3);background:var(--karta,#fff);cursor:pointer;text-align:center;margin-bottom:12px}
+.pdfdrop b{font-size:15px;color:var(--matn)}
+.pdfdrop span{font-size:12px;color:var(--xira)}
+body.dark .pdfdrop{background:rgba(255,255,255,.05)}
+.pbar{height:8px;border-radius:99px;background:rgba(127,127,127,.15);overflow:hidden;margin-bottom:6px}
+.pbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#12A5B8,#1E8E4D);border-radius:99px;transition:width .3s}
+#trp-stat{text-align:center;font-size:12.5px;margin-bottom:10px}
+.trp-res{max-height:52vh;overflow-y:auto;border-radius:16px;border:1.5px solid rgba(127,127,127,.18)}
+.trp-blk{padding:11px 13px;border-bottom:1px solid rgba(127,127,127,.12)}
+.trp-blk:last-child{border-bottom:0}
+.trp-orig{font:12px/1.55 inherit;color:var(--xira);margin-bottom:5px;word-break:break-word}
+.trp-tr{font:14.5px/1.6 inherit;color:var(--matn);word-break:break-word}
+#trp-ctl{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px}
+
+/* --- Xabar tarjimasi (sheet) --- */
+.trmsg{padding:6px 2px}
+.trmsg .trt{font:16px/1.65 inherit;color:var(--matn);margin:10px 0 14px;white-space:pre-wrap;word-break:break-word}
+.trmsg .btn{width:100%}

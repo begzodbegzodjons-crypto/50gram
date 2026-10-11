@@ -1281,6 +1281,8 @@ function tabGo(id) {
   if (id === 't-feed') (feedMode === 'trend' ? loadTrend(true) : loadFeed(true))
   if (id === 't-reels') { loadReels(true); shortsStart({ reelsOnly: true }) }
   if (id === 't-channels') renderChannels()
+  if (id === 't-rating') { window.ratOch && ratOch() }
+  if (id === 't-translate') { window.trOch && trOch() }
   if (id === 't-me') renderMe()
 }
 qsa('.dock button').forEach((b) => (b.onclick = () => tabGo(b.dataset.t)))
@@ -1376,7 +1378,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v113'
+window.__50BUILD = 'v114'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return

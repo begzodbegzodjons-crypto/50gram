@@ -140,6 +140,20 @@
         <header class="top"><h1>Kanallar</h1><div class="sp"></div><button class="ic" id="b-create" title="Yaratish">＋</button></header>
         <div id="chanlist" class="list"></div>
       </div>
+      <div class="tab" id="t-rating">
+        <header class="top"><h1>🏆 Reyting</h1><div class="sp"></div><button class="ic" id="b-ratref" title="Yangilash">🔄</button></header>
+        <div class="seg" id="ratseg"><div class="on" data-r="users">🔥 Faol</div><div data-r="channels">📢 Kanallar</div><div data-r="groups">👥 Guruhlar</div></div>
+        <div id="ratlist" class="list"></div>
+      </div>
+      <div class="tab" id="t-translate">
+        <header class="top"><h1>🌐 Tarjimon</h1><div class="sp"></div></header>
+        <div class="seg" id="trseg"><div class="on" data-m="text">✍️ Matn</div><div data-m="voice">🎙 Ovoz</div><div data-m="pdf">📄 PDF</div></div>
+        <div id="tr-panellar">
+          <div id="tr-text" class="tr-panel"></div>
+          <div id="tr-voice" class="tr-panel hide"></div>
+          <div id="tr-pdf" class="tr-panel hide"></div>
+        </div>
+      </div>
       <div class="tab" id="t-me"><div id="melist"></div></div>
     </div>
     <nav class="dock">
@@ -148,6 +162,8 @@
       <button data-t="t-feed"><i>📰</i><span>Lenta</span></button>
       <button data-t="t-reels"><i>🎬</i><span>Reels</span></button>
       <button data-t="t-channels"><i>📢</i><span>Kanallar</span></button>
+      <button data-t="t-rating"><i>🏆</i><span>Reyting</span></button>
+      <button data-t="t-translate"><i>🌐</i><span>Tarjimon</span></button>
       <button data-t="t-me"><i>👤</i><span>Profil</span></button>
     </nav>
   </section>
@@ -205,6 +221,7 @@
 <script src="manage.js"></script>
 <script src="social.js"></script>
 <script src="rtc.js"></script>
+<script src="tools.js"></script>
 <script>
   if (S.token && S.me) startApp(); else showAuth();
   // v111 «Dasturga kirish» — rasmdagi 1-oyna oqimi: avval landing, tugma bosilgach

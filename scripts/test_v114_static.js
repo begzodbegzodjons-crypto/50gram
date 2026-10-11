@@ -1,0 +1,90 @@
+#!/usr/bin/env node
+// v114 STATIK TEKSHIRUV — Reyting + Tarjimon. 0 xato = yashil.
+const fs = require('fs')
+const { execSync } = require('child_process')
+let ok = 0, bad = 0
+const T = (cond, name) => { if (cond) { ok++; console.log('  ✓ ' + name) } else { bad++; console.log('  ✗ ' + name) } }
+
+const read = (f) => fs.readFileSync('/home/z/my-project/' + f, 'utf8')
+const worker = read('worker/src/index.ts')
+const core = read('web/core.js')
+const sw = read('web/sw.js')
+const html = read('web/index.html')
+const tools = read('web/tools.js')
+const chat = read('web/chat.js')
+const css = read('web/style.css')
+
+console.log('— 1. VERSIYA UCHLIGI (v114) —')
+T(worker.includes('const BUILD_V = "v114"'), 'worker BUILD_V = v114')
+T(core.includes("window.__50BUILD = 'v114'"), 'core __50BUILD = v114')
+T(sw.includes("const V = '50gram-v114'"), 'sw V = 50gram-v114')
+
+console.log('— 2. WORKER: TARJIMON —')
+T(worker.includes('const TR_LANGS'), 'TR_LANGS tillar jadvali')
+T(worker.includes('async function tarjimaJuft'), 'tarjimaJuft (clients5→gtx→AI)')
+T(worker.includes('clients5.google.com/translate_a/t'), 'Google clients5 endpoint')
+T(worker.includes('translate.googleapis.com/translate_a/single'), 'Google gtx endpoint')
+T(worker.includes('@cf/meta/llama-3.1-8b-instruct'), 'Workers AI llama zaxira')
+T(worker.includes('async function ttsMP3'), 'ttsMP3 (Google TTS)')
+T(worker.includes('translate.google.com/translate_tts'), 'Google TTS endpoint')
+T(worker.includes('async function whisperMatn'), 'whisperMatn (ASR)')
+T(worker.includes('@cf/openai/whisper-large-v3-turbo'), 'Whisper turbo model')
+T(worker.includes('async function apiTranslate'), 'apiTranslate handler')
+T(worker.includes('async function apiTranslateSpeech'), 'apiTranslateSpeech handler')
+T(worker.includes('"POST", "/translate", apiTranslate'), '/translate rout')
+T(worker.includes('"POST", "/translate/speech", apiTranslateSpeech'), '/translate/speech rout')
+T(worker.includes('trTez(c.uid, 1, 60)'), 'matn tezlik-posboni 60/min')
+T(worker.includes('trTez(c.uid, 2, 10)'), 'ovoz tezlik-posboni 10/min')
+
+console.log('— 3. WORKER: REYTING —')
+T(worker.includes('async function apiRating'), 'apiRating handler')
+T(worker.includes('["GET", "/rating", apiRating]'), '/rating rout')
+T(worker.includes('["users", "channels", "groups"]') && worker.includes('tab === "users"') && worker.includes('tab === "channels"'), '3 bo‘lim: users/channels/groups')
+T(worker.includes('RAT_KESH'), 'reyting 2 daqiqa kesh')
+T(worker.includes('COALESCE(w.earned,0)'), 'martaba (earned) qo‘shilgan')
+T(worker.includes('u.blocked=0'), 'bloklanganlar reytingda YO‘Q')
+T(worker.includes("c.type='channel' AND c.is_public=1"), 'kanallar faqat ochiq')
+T(worker.includes('me = { n, rank:'), '«mening o‘rnim» hisoblanadi')
+
+console.log('— 4. WEB: TABLAR + DOCK —')
+T(html.includes('id="t-rating"'), 't-rating tab')
+T(html.includes('id="t-translate"'), 't-translate tab')
+T(html.includes('data-t="t-rating"'), 'dock Reyting tugmasi')
+T(html.includes('data-t="t-translate"'), 'dock Tarjimon tugmasi')
+T(html.includes('<script src="tools.js"></script>'), 'tools.js ulangan')
+T((html.match(/data-t="t-/g) || []).length === 8, 'dock 8 tugma')
+
+console.log('— 5. WEB: TOOLS.JS —')
+T(tools.includes('window.ratOch'), 'ratOch global')
+T(tools.includes('window.trOch'), 'trOch global')
+T(tools.includes('window.trMsg'), 'trMsg global (xabar tarjimasi)')
+T(tools.includes("import('./pdfjs/pdf.min.mjs')"), 'pdfjs dinamik yuklash')
+T(tools.includes("'audio/webm;codecs=opus'"), 'MediaRecorder WebView zanjiri')
+T(tools.includes('trOvozYubor'), 'ovoz yuborish mantiqi')
+T(tools.includes("'/rating?tab='"), 'reyting API chaqiruvi')
+T(tools.includes("post('/translate'"), 'matn tarjima API')
+T(tools.includes("post('/translate/speech'"), 'ovoz tarjima API')
+
+console.log('— 6. WEB: BOSHQA FAYLLAR —')
+T(chat.includes("['trans', '🌐', 'Tarjima']"), 'chat kontekst-menyu «Tarjima»')
+T(chat.includes('window.trMsg && trMsg(m)'), 'chat menyu handleri')
+T(core.includes("if (id === 't-rating')"), 'tabGo reyting hook')
+T(core.includes("if (id === 't-translate')"), 'tabGo tarjimon hook')
+T(sw.includes("'tools.js'"), 'sw SHELL tools.js')
+T(css.includes('.rat-rank') && css.includes('.micbtn') && css.includes('.pdfdrop'), 'CSS uslublar')
+T(fs.existsSync('/home/z/my-project/web/pdfjs/pdf.min.mjs') && fs.existsSync('/home/z/my-project/web/pdfjs/pdf.worker.min.mjs'), 'pdfjs fayllari mavjud')
+
+console.log('— 7. MUHR — MUHOFAZALANGANLAR TEGILMAGAN —')
+T(worker.includes('SMS_MODE = "app"') === false || read('worker/wrangler.toml').includes('SMS_MODE = "app"'), 'Eskiz SMS rejimi saqlangan')
+T(!tools.includes('ADMIN_HTML') && !tools.includes('adminpanel'), 'tools.js panel izi 0')
+T(worker.includes('const FW_OFF') || worker.includes('let FW_OFF'), 'himoya FW_OFF saqlangan')
+T(chat.includes("'audio/webm;codecs=opus', 'audio/mp4'"), 'chat ovoz yozish tegilmagan')
+T(core.includes('async function startApp') && core.includes('function wsConnect') || core.includes('wsConnect'), 'core asosiy funksiyalar joyida')
+
+console.log('— 8. SINTAKSIS —')
+for (const f of ['web/tools.js', 'web/core.js', 'web/chat.js', 'web/sw.js', 'web/manage.js', 'web/social.js', 'web/rtc.js', 'web/p2p.js', 'web/storage.js']) {
+  try { execSync('node --check /home/z/my-project/' + f, { stdio: 'pipe' }); T(true, f + ' node --check') } catch (e) { T(false, f + ' sintaksis XATO') }
+}
+
+console.log('\n=== NATIJA: ' + ok + ' YASHIL, ' + bad + ' QIZIL ===')
+process.exit(bad ? 1 : 0)

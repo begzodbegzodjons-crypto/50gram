@@ -524,6 +524,7 @@ function ctxMenu(m, x, y) {
   const items = []
   if (!m.deleted && c.joined !== false && !$('d-comp').classList.contains('hide')) items.push(['reply', '↩️', 'Javob berish'])
   if (!m.deleted && m.body && !protect) items.push(['copy', '📋', 'Nusxa olish'])
+  if (!m.deleted && m.body && m.kind === 'text' && !protect) items.push(['trans', '🌐', 'Tarjima'])
   if (!m.deleted && mine && m.kind === 'text') items.push(['edit', '✏️', 'Tahrirlash'])
   if (!m.deleted && !protect && m.kind !== 'call' && m.kind !== 'poll') items.push(['fwd', '↪️', 'Uzatish'])
   if (!m.deleted && m.meta?.media_id && !protect && ['photo', 'video', 'file', 'voice', 'round'].includes(m.kind)) items.push(['save', '⬇️', 'Saqlab olish'])
@@ -541,6 +542,7 @@ function ctxMenu(m, x, y) {
     const k = it.dataset.k
     if (k === 'reply') { replyTo = m; editId = 0; setReply(); $('inp').focus() }
     if (k === 'copy') copy(m.body)
+    if (k === 'trans') { try { window.trMsg && trMsg(m) } catch {} }
     if (k === 'edit') { editId = m.id; replyTo = null; $('inp').value = m.body; setReply(); autoGrow(); $('inp').focus() }
     if (k === 'fwd') forwardMsg(m)
     if (k === 'sel') enterSel(m)
