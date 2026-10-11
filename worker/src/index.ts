@@ -3515,8 +3515,28 @@ async function ttsMP3(text: string, lang: string): Promise<string> {
 // Ovozni matnga: Whisper (Workers AI).
 // v115 MUHIM TUZATISH: avval { audio: bytes } (Uint8Array) yuborilardi — JSON.stringify
 // uni {"0":82,"1":73,...} OBYEKTga aylantiradi va Whisper DOIM xato qaytarardi —
-// foydalanuvchi «sokin joyda gapiring» xatosini doim ko'rardi. Endi 4 urinish:
-// base64-string (kompakt) + oddiy massiv (rasmiy docs uslubi) x 2 model (turbo -> asosiy).
+// foydalanuvchi «sokin joyda gapiring» xatosini doim ko'rardi. Endi base64 + massiv urinishlari.
+// v115.2: Whisper o'zbekni UYG'UR (arab yozuvi) deb transkripsiya qiladi (jonli testda
+// tasdiqlandi) — arab-yozuvli natija shubhali deb, eski model ham sinanadi, baribir arab
+// bo'lsa LOTIN yozuviga ko'chiriladi (o'qilishi saqlanadi — «islam alaykum bu 50 gram...»).
+const AR_LAT: Record<string, string> = {
+  "ش": "sh", "چ": "ch", "ڭ": "ng", "خ": "x", "غ": "g", "ژ": "j", "ج": "j",
+  "ب": "b", "پ": "p", "ت": "t", "د": "d", "ر": "r", "ز": "z", "س": "s",
+  "ف": "f", "ق": "q", "ك": "k", "ک": "k", "گ": "g", "ل": "l", "م": "m",
+  "ن": "n", "ھ": "h", "ه": "h", "و": "o", "ۇ": "u", "ۆ": "o", "ۋ": "w",
+  "ئ": "y", "ي": "y", "ی": "y", "ى": "i", "ة": "a", "ە": "a", "ې": "e",
+  "ؤ": "o", "ا": "a", "ء": "",
+}
+function arabShubha(t: string): boolean {
+  const harf = (t.match(/\p{L}/gu) || []).length
+  if (harf < 8) return false
+  const arab = (t.match(/[\u0600-\u06FF]/gu) || []).length
+  return arab / harf > 0.6
+}
+function arabLotin(t: string): string {
+  return t.replace(/[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/g, (ch) =>
+    /[\u064B-\u0652\u0670\u0640]/.test(ch) ? "" : (AR_LAT[ch] ?? " ")).replace(/ {2,}/g, " ").trim()
+}
 async function whisperMatn(env: Env, bytes: Uint8Array): Promise<string> {
   if (!env.AI) return ""
   const urin = async (m: string, audio: unknown): Promise<string> => {
@@ -3527,15 +3547,14 @@ async function whisperMatn(env: Env, bytes: Uint8Array): Promise<string> {
   }
   const b64 = abToB64(bytes)
   const arr: number[] | null = bytes.length <= 3_500_000 ? Array.from(bytes) : null
-  for (const m of ["@cf/openai/whisper-large-v3-turbo", "@cf/openai/whisper"]) {
-    let t = await urin(m, b64)
-    if (t) return t.slice(0, 2000)
-    if (arr) {
-      t = await urin(m, arr)
-      if (t) return t.slice(0, 2000)
-    }
+  const TURBO = "@cf/openai/whisper-large-v3-turbo", LEGACY = "@cf/openai/whisper"
+  let natija = (await urin(TURBO, b64)) || (arr ? await urin(TURBO, arr) : "")
+  if (!natija) natija = (await urin(LEGACY, b64)) || (arr ? await urin(LEGACY, arr) : "")
+  if (natija && arabShubha(natija)) {
+    const t2 = (await urin(LEGACY, b64)) || (arr ? await urin(LEGACY, arr) : "")
+    natija = t2 && !arabShubha(t2) ? t2 : arabLotin(natija)
   }
-  return ""
+  return natija.slice(0, 2000)
 }
 async function apiTranslate(c: C) {
   const text = str(c.b.text, 5000)
@@ -3543,8 +3562,10 @@ async function apiTranslate(c: C) {
   const to = String(c.b.to || "uz")
   if (!TR_LANGS[to]) fail("Bu til qo‘llab-quvvatlanmaydi")
   if (!trTez(c.uid, 1, 60)) fail("Juda ko‘p so‘rov — bir daqiqa kuting", 429)
-  const r = await tarjimaKeshli(c, text, to)
-  if (!r) fail("Tarjima xizmati hozir javob bermaydi — birozdan keyin urinib ko‘ring", 502)
+  let r = await tarjimaKeshli(c, text, to)
+  // v115.2: xuddi shu til (yoki barcha bosqichlar javob bermasa) — matn O‘ZI qaytadi.
+  // 502 «xizmat javob bermaydi» o‘rniga foydalanuvchi baribir natija ko‘radi.
+  if (!r) r = { t: text, from: "auto" }
   return json({ ok: true, text, translated: r!.t, from: r!.from, to })
 }
 async function apiTranslateSpeech(c: C) {
@@ -3558,8 +3579,10 @@ async function apiTranslateSpeech(c: C) {
   const to = TR_LANGS[String(c.b.to || "")] ? String(c.b.to) : "uz"
   const text = await whisperMatn(c.env, bytes)
   if (!text) fail("Ovozni aniqlab bo‘lmadi — yaqinroq borib, aniqroq gapirib ko‘ring (yoki «Matn» bo‘limidan foydalaning)", 422)
-  const r = await tarjimaKeshli(c, text, to)
-  if (!r) fail("Tarjima xizmati hozir javob bermaydi", 502)
+  let r = await tarjimaKeshli(c, text, to)
+  // v115.2: xuddi shu til (masalan o'zbek gapirdi, natija ham o'zbek) — OVOZ BARIBIR
+  // O'QILADI (echo); 502 o'rniga to'liq natija qaytadi.
+  if (!r) r = { t: text, from: "auto" }
   const mp3 = await ttsMP3(r!.t, to)
   return json({ ok: true, text, translated: r!.t, from: r!.from, to, audio: mp3 ? "data:audio/mpeg;base64," + mp3 : "" })
 }
