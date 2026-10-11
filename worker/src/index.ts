@@ -130,12 +130,15 @@ const FW_4XX = new Map<string, { n: number; t: number }>() // 10 daqiqalik 4xx o
 const FW_ALOC = new Map<string, { n: number; t: number }>() // lokal ochkolar (ip|tur)
 const FW_DATA = new Map<number, { n: number; t: number }>() // ma'lumot-tortish posboni (uid)
 // v98 YUKLASH POSBONI: o'g'irlangan token bilan R2'ni to'ldirishga urinish — hisob bo'yicha
-// soatlik chegara. Haqiqiy foydalanuvchi BIRGA ham yaqinlasholmaydi (30MB fayl = 25 bo'lak):
-//   bo'lak-PUT: 4000/soat (≈4.8GB/soat ≈ 160 ta 30MB fayl) | fayl-yaratish: 600/soat.
+// soatlik chegara. Haqiqiy foydalanuvchi BIRGA ham yaqinlasholmaydi:
+//   v110: bo'lak-PUT 12000/soat (500MB fayl = 250 ta 2MB bo'lak — 5 ta 500MB fayl ham erkin)
+//   fayl-yaratish: 600/soat | BAYT-posbon: 6GB/soat (toshqin bayt bo'yicha ham to'siladi).
 // Oshsa — 429 (429 fw4xx hisobga kirmaydi, IP bloklanmaydi — ehtiyot korrigisi). R2 10GB
 // posboni (cleanup'dagi bosqichli) bilan BIRGA: o'g'irlangan token toshqini ham bucketni to'ldirolmaydi.
 const FW_UP = new Map<number, { n: number; t: number }>() // bo'lak-PUT hisobi (uid)
 const FW_UPF = new Map<number, { n: number; t: number }>() // fayl-yaratish hisobi (uid)
+const FW_UPB = new Map<number, { n: number; t: number }>() // v110: yuklangan BAYTLAR (uid) — 6GB/soat
+const FW_MSG = new Map<number, { n: number; t: number }>() // v110: xabar-spam posboni (uid) — 900/soat
 const FW_JLOG = new Map<string, number>() // fw-jurnal dedupe (ip|kind → oxirgi yozilgan vaqt)
 // soatlik hisobgar: chegara oshsa true (klientga 429) — RAM gigiyenasi bilan
 function fwSoat(m: Map<number, { n: number; t: number }>, uid: number, need: number) {
@@ -354,7 +357,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v109"
+const BUILD_V = "v110"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -599,7 +602,22 @@ async function circle(c: C) {
 }
 
 // ------------------------- Auth -------------------------
+// v110 AUTH-TANA SKANERI: kirish so'rovlarida (otp/verify) tana FAQAT {phone, code, force, dev}
+// bo'lishi mumkin — boshqa har qanday in'ektsiya/traversal qolipi (FW_INJ) = skaner/bot:
+// BIRINCHI urinishdayoq 30 kun blok + jurnal (halol foydalanuvchi bu qoliplarni UMUMAN yubormaydi).
+// true qaytarsa — chaqiruvchi FW_404() bilan javob beradi (hujumchiga hech narsa oshkor qilinmaydi).
+function authTanaSkan(c: C): boolean {
+  const fip = fwIp(c.req)
+  if (!fip) return false
+  let raw = ""
+  try { raw = JSON.stringify(c.b || {}) } catch { return false }
+  if (!FW_INJ.test(raw)) return false
+  fwLBlok(fip, 30 * DAY)
+  fwOchko(c.env, c.wait, fip, "inj", 1, secInfo(c.req, c.url))
+  return true
+}
 async function authOtp(c: C) {
+  if (authTanaSkan(c)) return FW_404()
   await ensureSchema(c.db)
   const phone = normPhone(c.b.phone)
   const t = now()
@@ -652,6 +670,7 @@ async function authOtp(c: C) {
   return fail("SMS xizmati sozlanmagan (SMS_MODE=eskiz qiling va ESKIZ secretlarini qo‘ying)", 503)
 }
 async function authVerify(c: C) {
+  if (authTanaSkan(c)) return FW_404()
   // v73: kirish paytida raqam shu qurilma guvohnomasiga bog'lanadi (dev) — keyingi
   // qayta kirishlarda aynan SHU qurilma «o'z raqami» ekanini bilib, DARHOL ochadi.
   const dev = String(c.req.headers.get("x-dev") || "").slice(0, 40)
@@ -1254,6 +1273,10 @@ async function getMessages(c: C) {
   return json({ messages, users: Object.fromEntries(um), now: t, peer_last_read: peer?.last_read ?? null, more })
 }
 async function sendMessage(c: C) {
+  // v110 XABAR-SPAM POSBONI: 900 xabar/soat (15/daqixa uzluksiz — inson uchun KOP).
+  // O'g'irlangan token boti chatlarni spam bilan to'ldirolmaydi. Oddiy foydalanuvchi
+  // bu chegaraga hech qachon yaqinlasholmaydi; panel e'lonlari shu yo'ldan O'TMAYDI.
+  if (fwSoat(FW_MSG, c.uid, 900)) fail("Juda ko‘p xabar — birozdan keyin davom eting", 429)
   const id = +c.p.id
   const ch = await needChat(c, id)
   // v106: egapanel bloklagan kanal/guruhga yozib bo'lmaydi (flag faqat paneldan qo'yiladi,
@@ -1478,7 +1501,9 @@ async function pushChatMsg(c: C, chatId: number, ch: any, m: any) {
 }
 
 // ------------------------- Media (bo'laklab) -------------------------
-const MAX_SIZE = 30 * 1024 * 1024
+// v110 EGANI TALABI: 500 MB gacha fayllar (avval 30MB). Bo'laklar: kichik fayl 512KB,
+// katta fayl (>30MB) mijozda 2MB — 500MB = 250 bo'lak (1200 chegarada 4.8 barobar zaxira).
+const MAX_SIZE = 500 * 1024 * 1024
 function abToB64(u: Uint8Array): string {
   let s = "", CH = 0x8000
   for (let i = 0; i < u.length; i += CH) s += String.fromCharCode(...u.subarray(i, i + CH))
@@ -1494,17 +1519,25 @@ async function mediaCreate(c: C) {
   // bilan D1'ni to'ldirmasin (oddiy foydalanuvchi soatiga o'nlab fayl yuboradi, 600 DAN YAQIN HAM KELMAYDI)
   if (fwSoat(FW_UPF, c.uid, 600)) fail("Juda ko‘p yuklash — birozdan keyin davom eting", 429)
   const size = +c.b.size || 0, chunks = +c.b.chunks || 1
-  if (size <= 0 || size > MAX_SIZE) fail("Fayl hajmi 30 MB dan oshmasin")
-  if (chunks < 1 || chunks > 80) fail("Bo‘laklar soni noto‘g‘ri")
+  // v110 EGANI TALABI: 500 MB gacha fayllar (avval 30MB edi). Katta fayl = ko'p bo'lak:
+  // 500MB = 250 ta 2MB bo'lak (mijoz v110'dan) yoki 977 ta 512KB bo'lak — chegara 1200.
+  if (size <= 0 || size > MAX_SIZE) fail("Fayl hajmi 500 MB dan oshmasin")
+  if (chunks < 1 || chunks > 1200) fail("Bo‘laklar soni noto‘g‘ri")
   const id = randomStr(22)
   await c.db.run("INSERT INTO media(id,owner_id,mime,name,size,chunks,complete,created_at,expires_at) VALUES(?,?,?,?,?,?,0,?,?)",
     [id, c.uid, str(c.b.mime, 100) || "application/octet-stream", str(c.b.name, 200) || "fayl", size, chunks, now(), now() + DAY])
   return json({ id })
 }
 async function mediaPut(c: C) {
-  // v98 YUKLASH POSBONI: bo'lak-PUT 4000/soat (≈4.8GB) — R2 10GB'ni toshqin bilan to'ldirish
-  // imkoni yo'q (bosqichli posbon bilan birga ikki qatlam). Oddiy foydalanuvchi: 30MB fayl = 25 PUT.
-  if (fwSoat(FW_UP, c.uid, 4000)) fail("Juda ko‘p yuklash — birozdan keyin davom eting", 429)
+  // v98 YUKLASH POSBONI: bo'lak-PUT 12000/soat (v110: 500MB fayllar uchun kengaytirildi —
+  // oddiy foydalanuvchi 500MB = 250 PUT, 5 ta katta fayl ham erkin). R2 10GB'ni toshqin bilan
+  // to'ldirish imkoni yo'q (bosqichli posbon + v110 BAYT-posbon bilan UCH qatlam).
+  if (fwSoat(FW_UP, c.uid, 12000)) fail("Juda ko‘p yuklash — birozdan keyin davom eting", 429)
+  // v110 BAYT POSBONI: soatiga 6GB — halol foydalanuvchi 12 ta 500MB fayl ham yuklay oladi;
+  // o'g'irlangan token bayt bo'yicha ham to'siladi (R2 toshqin himoyasi qatlami 2).
+  // Hisob shu yerda (quyida) BAYT bo'yicha yuritiladi — fwSoat so'rov sanaydi, bu esa bayt.
+  const upb = FW_UPB.get(c.uid), upbt = Date.now()
+  if (!upb || upbt - upb.t > 3_600_000) { if (FW_UPB.size > 10000) FW_UPB.clear(); FW_UPB.set(c.uid, { n: 0, t: upbt }) }
   const m = await c.db.one("SELECT owner_id,chunks,gone,chat_id FROM media WHERE id=?", [c.p.id])
   // v97 O'Z-O'ZINI TIKLASH: server nusxasi yo'qolgan (gone=1) faylga to'r a'zosi
   // (egasi / chat a'zosi / pin-job egasi) shifrlangan bo'laklarni QAYTA yuklashi mumkin
@@ -1518,11 +1551,13 @@ async function mediaPut(c: C) {
   const ct = c.req.headers.get("content-type") || ""
   if (ct.includes("octet-stream")) {
     const ab = await c.req.arrayBuffer()
-    if (ab.byteLength > 1_200_000) fail("Bo‘lak juda katta")
+    // v110: 2MB bo'laklar (katta fayllar 500MB'gacha) — chegarada 200KB zaxira
+    if (ab.byteLength > 2_200_000) fail("Bo‘lak juda katta")
     bytes = new Uint8Array(ab)
     data = abToB64(bytes)
   } else {
     data = await c.req.text()
+    // v110: zaxira (R2 o'chgan) D1 yo'li eski 512KB bo'laklar uchun — 1.1MB limit qoldi
     if (data.length > 1_100_000 || !/^[A-Za-z0-9+/=]*$/.test(data.slice(0, 200))) fail("Bo‘lak noto‘g‘ri")
   }
   // v79 R2 ASOSIY YO'L: baytlar R2'ga (kalit m/<id>/<idx>), D1'ga faqat bo'sh MARKER —
@@ -1536,6 +1571,10 @@ async function mediaPut(c: C) {
     } catch (e) { jurnalYoz(c.env, "mediaPut", c.uid, "r2", String(e).slice(0, 200)) }
   }
   await c.db.run("REPLACE INTO media_chunks(media_id,idx,data) VALUES(?,?,?)", [c.p.id, idx, r2ok ? "" : data])
+  // v110: bayt-posbon — shu bo'lak baytlari hisobga qo'shiladi; chegara oshsa 429 (keyingi bo'laklar o'tmaydi)
+  const ub = FW_UPB.get(c.uid)
+  if (ub) ub.n += bytes?.byteLength || 0
+  if ((ub?.n || 0) > 6 * 1024 * 1024 * 1024) fail("Juda ko‘p yuklash — birozdan keyin davom eting", 429)
   return json({ ok: true, r2: r2ok, tik: tiklaydi ? 1 : 0 })
 }
 async function mediaDone(c: C) {

@@ -191,7 +191,11 @@ async function fetchMessages(id) {
 }
 function noteMedia(m) {
   const mt = m.meta
-  if (mt && mt.media_id) P2P.note(String(mt.media_id), { chat: m.chat_id, sha: mt.sha, size: mt.size, key: mt.key, iv: mt.iv, mime: mt.mime })
+  if (mt && mt.media_id) {
+    P2P.note(String(mt.media_id), { chat: m.chat_id, sha: mt.sha, size: mt.size, key: mt.key, iv: mt.iv, mime: mt.mime, enc: mt.enc, cs: mt.cs })
+    // v110: kalit DOIMIY saqlanadi — ilova qayta ochilganda eski rasm/ovoz «kalit yo'q» demasin
+    if (mt.key) try { IDB.put('mkeys', String(mt.media_id), { key: mt.key, iv: mt.iv, sha: mt.sha, size: mt.size, mime: mt.mime, enc: mt.enc, cs: mt.cs }) } catch {}
+  }
 }
 // Serverdan yoki tarmoqdan kelgan xabarlarni qurilmadagi ro'yxatga qo'shish
 function merge(id, msgs, users) {
@@ -361,10 +365,17 @@ $('msgs').addEventListener('click', async (e) => {
   const cb = t.closest('[data-callback]')
   if (cb) { const c = S.chats.get(S.cur); if (c?.peer) callUser(c.peer.id, cb.dataset.callback === '1') }
 })
-function playVoice(vc) {
+async function playVoice(vc) {
   const au = qs('audio', vc), pb = qs('.pb', vc), bars = qsa('.wave i', vc), sm = qs('small', vc)
   if (curAudio && curAudio !== au) curAudio.pause()
-  if (!au.src) { toast('⏳ Yuklanmoqda…'); return }
+  // v110: hali yuklanmagan ovoz — bosishda O'ZI yuklaydi va ijro etadi (avval «⏳ Yuklanmoqda…»
+  // toast qolib, ovoz HECH QACHON ijro etilmardi — egani shikoyati: «yuklanmoqda deb turibdi»)
+  if (!au.src) {
+    const mid = au.dataset.media
+    if (!mid) return toast('Ovoz fayli topilmadi')
+    pb.textContent = '⏳'
+    try { au.src = await mediaUrl(mid) } catch (e) { pb.textContent = '▶'; return toast('⚠️ ' + (e.message || 'Ovoz yuklanmadi')) }
+  }
   if (au.paused) {
     curAudio = au
     au.play().catch(() => toast('Ijro qilib bo‘lmadi'))
@@ -659,7 +670,8 @@ async function sendText() {
 async function sendFile(file, kind, extra = {}, chatId0) {
   const chatId = chatId0 || S.cur
   if (!chatId || !file) { mediaLog('sendFile-oldi', new Error('chatId=' + (chatId || 0) + ' fayl=' + !!file + ' kind=' + kind), { kind }, 'xato'); if (!chatId) toast('⚠️ Chat ochilmagan — yuborilmadi'); return }
-  if (file.size > 30 * 1024 * 1024) { mediaLog('sendFile-hajm', new Error('hajm=' + file.size + ' limitdan katta'), { kind, size: file.size, mime: file.type }); return toast('⚠️ Fayl 30 MB dan katta bo‘lmasin') }
+  // v110: 500 MB gacha fayllar (avval 30MB) — egni talabi. Katta fayl oqimli CTR bilan shifrlanadi.
+  if (file.size > 500 * 1024 * 1024) { mediaLog('sendFile-hajm', new Error('hajm=' + file.size + ' limitdan katta'), { kind, size: file.size, mime: file.type }); return toast('⚠️ Fayl 500 MB dan katta bo‘lmasin') }
   mediaLog('sendFile-boshlanmoqda', new Error('kind=' + kind + ' hajm=' + file.size + ' mime=' + (file.type || '?') + ' chat=' + chatId), { kind, size: file.size, mime: file.type }, 'qadam')
   let temp = null
   let baseMeta = null
@@ -685,8 +697,8 @@ async function sendFile(file, kind, extra = {}, chatId0) {
     await sendRaw(chatId, { kind, body: extra.body || undefined, meta: { ...baseMeta, ...mediaInfo(id), fsize: blob.size } }, temp)
     mediaLog('sendFile-YUBORILDI', new Error('ok'), { kind }, 'qadam')
   } catch (e) {
-    // v97 OUTBOX: fayl yuklashi tarmoqda uzilsa — FAYL NAVBATDA ushlanadi (30 MB gacha),
-    // internet qaytganda Outbox o'zi qayta yuboradi (foydalanuvchi talabi: yo'qolmasin)
+    // v97 OUTBOX: fayl yuklashi tarmoqda uzilsa — FAYL NAVBATDA ushlanadi (30 MB gacha —
+    // navbat IDB blob-limiti; katta fayllar onlayn yuboriladi),
     if (baseMeta && typeof Outbox !== 'undefined' && Outbox.netErr(e) && file.size <= 30 * 1024 * 1024) {
       await Outbox.add({ type: 'file', chat: chatId, kind, blob: file, extra: { body: extra.body, meta: baseMeta } })
       if (temp) dropTemp(chatId, temp)

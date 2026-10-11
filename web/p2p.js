@@ -27,7 +27,7 @@ const P2P = (() => {
     if (!id) return
     const o = ctx.get(id) || {}
     const n = { ...o }
-    for (const k of ['chat', 'sha', 'size', 'key', 'iv', 'mime']) if (info[k] !== undefined && info[k] !== null) n[k] = info[k]
+    for (const k of ['chat', 'sha', 'size', 'key', 'iv', 'mime', 'enc', 'cs']) if (info[k] !== undefined && info[k] !== null) n[k] = info[k]
     ctx.set(id, n)
   }
   // Serverga "bu fayl mening qurilmamda bor" deb xabar berish (fayl o'zi yuborilmaydi)

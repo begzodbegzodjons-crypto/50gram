@@ -233,7 +233,7 @@ const IDB = {
     if (this.db) return Promise.resolve(this.db)
     return new Promise((res) => {
       try {
-        const r = indexedDB.open('50gram', 4)
+        const r = indexedDB.open('50gram', 5)
         r.onupgradeneeded = () => {
           const d = r.result
           if (!d.objectStoreNames.contains('chats')) d.createObjectStore('chats')
@@ -242,6 +242,10 @@ const IDB = {
           // v97 OUTBOX: internet uzilgan paytda yuborilgan xabar/fayllar shu yerda ushlanadi —
           // onlayn bo'lganda avtomatik yuboriladi (foydalanuvchi talabi: hech narsa yo'qolmasin)
           if (!d.objectStoreNames.contains('outbox')) d.createObjectStore('outbox')
+          // v110 MKEYS: media ochish KALITLARI doimiy saqlanadi — avval faqat xotirada (Map)
+          // edi: ilova o'chib-yoqilganda eski rasm/ovozlarning kalitlari YO'QOLARDI —
+          // «Faylni ochish kaliti yo'q» + ovoz «yuklanmoqda» abadiy (egani shikoyati).
+          if (!d.objectStoreNames.contains('mkeys')) d.createObjectStore('mkeys')
         }
         r.onsuccess = () => { this.db = r.result; res(this.db) }
         r.onerror = () => res(null)
@@ -288,6 +292,10 @@ async function loadChatLocal(chatId) {
   const d = await IDB.get('chats', S.me.id + ':' + chatId)
   S.msgs.set(chatId, d?.messages || [])
   if (d?.since) S.since.set(chatId, d.since)
+  // v110 KALITLARNI TIKLASH: lokal xabarlardagi media-kalitlari P2P.ctx'ga qayta yoziladi —
+  // avval faqat YANGI kelgan xabarlar merge() orqali kalit olardi: ilova qayta ochilganda
+  // ESKI rasm/ovozlarning kalitlari xotirada bo'lmaydi → «kalit yo'q»/«yuklanmoqda» bug.
+  for (const m of d?.messages || []) if (m && m.meta && m.meta.media_id && typeof noteMedia === 'function') noteMedia(m)
 }
 
 // ---------------- OUTBOX (v97): internet yo'q — xabar NAVBATDA ushlanadi ----------------
@@ -372,13 +380,131 @@ async function decryptBlob(cipher, key, iv, mime) {
 }
 // Xabar meta'siga qo'shiladigan ma'lumot (kalit faqat chat a'zolariga xabar bilan boradi)
 const mediaInfo = (id) => ({ media_id: id, ...(S.mk.get(id) || {}) })
+// v110 KALITLAR DOIMIYLIGI: yozilgan kalitlar IDB'mkeys'da — ilova qayta ochilganda
+// mkeysYukla() ularni P2P.ctx'ga qaytaradi (ilgari RAM'dagina edi — «kalit yo'q» ildizi)
+async function mkeysYukla() {
+  try { for (const [id, info] of await IDB.entries('mkeys')) P2P.note(String(id), info || {}) } catch {}
+}
+// v110 OQIMLI SHA-256: WebCrypto digest faqat BUTUN buffer bilan ishlaydi — 500MB fayl
+// xotirada sig'maydi. Bo'lakma-bo'lak hisoblaydi (katta fayl yuklash/yuklab olish butunligi).
+function sha256Stream() {
+  const K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]
+  const H = new Int32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19])
+  let buf = new Uint8Array(64), bl = 0, len = 0
+  const rr = (x, n) => (x >>> n) | (x << (32 - n))
+  const block = (p, o) => {
+    const w = new Int32Array(64)
+    for (let i = 0; i < 16; i++) w[i] = (p[o + 4 * i] << 24) | (p[o + 4 * i + 1] << 16) | (p[o + 4 * i + 2] << 8) | p[o + 4 * i + 3]
+    for (let i = 16; i < 64; i++) {
+      const s0 = rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >>> 3)
+      const s1 = rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >>> 10)
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0
+    }
+    let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7]
+    for (let i = 0; i < 64; i++) {
+      const S1 = rr(e, 6) ^ rr(e, 11) ^ rr(e, 25), ch = (e & f) ^ (~e & g)
+      const t1 = (h + S1 + ch + K[i] + w[i]) | 0
+      const S0 = rr(a, 2) ^ rr(a, 13) ^ rr(a, 22), mj = (a & b) ^ (a & c) ^ (b & c)
+      const t2 = (S0 + mj) | 0
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0
+    }
+    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0
+    H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0
+  }
+  return {
+    update(u8) {
+      len += u8.length
+      if (bl) {
+        const take = Math.min(64 - bl, u8.length)
+        buf.set(u8.subarray(0, take), bl); bl += take
+        if (bl === 64) { block(buf, 0); bl = 0 }
+        u8 = u8.subarray(take)
+      }
+      for (let o = 0; o + 64 <= u8.length; o += 64) block(u8, o)
+      const r = u8.length % 64
+      if (r) { buf.set(u8.subarray(u8.length - r), 0); bl = r }
+    },
+    hex() {
+      const tailLen = (len % 64) < 56 ? 64 : 128
+      const tail = new Uint8Array(tailLen)
+      tail.set(buf.subarray(0, bl)); tail[bl] = 0x80
+      const bits = len * 8, dv = new DataView(tail.buffer)
+      dv.setUint32(tailLen - 8, Math.floor(bits / 0x100000000)); dv.setUint32(tailLen - 4, bits >>> 0)
+      block(tail, 0)
+      if (tailLen === 128) block(tail, 64)
+      let s = ''
+      for (let i = 0; i < 8; i++) s += (H[i] >>> 0).toString(16).padStart(8, '0')
+      return s
+    },
+  }
+}
+// v110 OQIMLI SHIFRLASH (AES-CTR): katta fayllar (>30MB) butunlay xotirada shifrlanolmaydi
+// (500MB = telefon o'chadi). CTR bo'lakma-bo'lak: har bo'lak o'z counter-ofsetida mustaqil
+// shifrlanadi/ochiladi (xotira ~2 bo'lak). Butunlik: butun SHIFRLANGAN fayl sha256 oqimi bilan.
+const ctrKey = (key64) => crypto.subtle.importKey('raw', b64d(key64), { name: 'AES-CTR', length: 256 }, false, ['encrypt'])
+function ctrBlock(iv12, byteOffset) {
+  const b = new Uint8Array(16); b.set(iv12, 0)
+  new DataView(b.buffer).setUint32(12, Math.floor(byteOffset / 16)) // 32-bit blok-ofset → 64GB gacha
+  return b
+}
+const ctrCrypt = (k, iv12, u8, byteOffset) => crypto.subtle.encrypt({ name: 'AES-CTR', counter: ctrBlock(iv12, byteOffset), length: 32 }, k, u8)
+// Katta fayl (enc:'ctr') bo'lakma-bo'lak OCHILADI — xotira ~2 bo'lak (500MB ham ishlaydi)
+async function decryptChunked(cipher, info) {
+  const cs = +info.cs || 2 * 1024 * 1024, mime = info.mime || 'application/octet-stream'
+  const k = await ctrKey(info.key), iv = b64d(info.iv), n = Math.ceil(cipher.size / cs), parts = []
+  for (let i = 0; i < n; i++) {
+    const u8 = new Uint8Array(await cipher.slice(i * cs, (i + 1) * cs).arrayBuffer())
+    parts.push(new Blob([await ctrCrypt(k, iv, u8, i * cs)], { type: mime }))
+  }
+  return new Blob(parts, { type: mime })
+}
 async function upload(plain, name, onProg) {
-  // v71: chegaradan 1 KB zaxira — server shifrlangan blob hajmini tekshiradi (AES-GCM +16 bayt
-  // teg qo'shadi), aks holda 30 MB − 15 bayt li haqiqiy fayl «Fayl hajmi 30 MB dan oshmasin»
-  // degan yolg'on xato bilan rad etilardi
-  if (plain.size > 30 * 1024 * 1024 - 1024) throw new Error('Fayl 30 MB dan katta')
-  const enc = await encryptBlob(plain)
-  const blob = enc.blob
+  // v110 EGANI TALABI: 500 MB gacha fayllar (avval 30MB). 1KB zaxira qoldi — server
+  // shifrlangan hajmni tekshiradi (AES-GCM +16 bayt teg).
+  const KATTA = plain.size > 30 * 1024 * 1024
+  const CS = KATTA ? 2 * 1024 * 1024 : CHUNK
+  if (plain.size > 500 * 1024 * 1024 - 4096) throw new Error('Fayl 500 MB dan katta')
+  // v110: KATTA fayllar (>30MB) OQIMLI CTR sxemada — butun fayl xotirada sig'maydi.
+  // KICHIK fayllar (≤30MB) ESKI GCM sxemada BITTA-BAYT O'ZGARMAS (eski klientlar bilan mos).
+  let enc, blob, info
+  if (KATTA) {
+    const raw = crypto.getRandomValues(new Uint8Array(32)), ivr = crypto.getRandomValues(new Uint8Array(12))
+    const k = await crypto.subtle.importKey('raw', raw, { name: 'AES-CTR', length: 256 }, false, ['encrypt'])
+    const sh = sha256Stream()
+    enc = { key: b64e(raw), iv: b64e(ivr) }
+    const n = Math.max(1, Math.ceil(plain.size / CS))
+    const { id: id0 } = await post('/media', { mime: plain.type || 'application/octet-stream', name: name || 'fayl', size: plain.size, chunks: n })
+    let done = 0
+    const putPart = async (i) => {
+      const part = new Uint8Array(await plain.slice(i * CS, (i + 1) * CS).arrayBuffer())
+      const ct = new Uint8Array(await ctrCrypt(k, ivr, part, i * CS))
+      sh.update(ct)
+      let ok = false
+      for (let a = 0; a < 4 && !ok; a++) {
+        try {
+          const r = await fetch(API + '/media/' + id0 + '/' + i, { method: 'PUT', headers: { Authorization: 'Bearer ' + S.token, 'content-type': 'application/octet-stream' }, body: ct })
+          ok = r.ok
+          if (!ok && r.status >= 500) await sleep(700 * (a + 1)); else if (!ok) break
+        } catch { await sleep(700 * (a + 1)) }
+      }
+      if (!ok) throw new Error('Yuklashda xato — internetni tekshiring')
+      done++; onProg && onProg(done / n)
+    }
+    let next = 0
+    const wr = async () => { while (next < n) { const i = next++; await putPart(i) } }
+    await Promise.all([wr(), wr()])
+    const sha = sh.hex()
+    await post('/media/' + id0 + '/done', { sha })
+    info = { sha, size: plain.size, key: enc.key, iv: enc.iv, mime: plain.type || 'application/octet-stream', enc: 'ctr', cs: CS }
+    S.sha.set(id0, sha); S.mk.set(id0, info)
+    try { IDB.put('mkeys', id0, info) } catch {}
+    P2P.note(id0, info)
+    Store.record(id0, 0, null, 0) // katta fayl lokal keshga yozilmaydi (xotira) — serverdan oqim bilan o'qiladi
+    mediaCache.set(id0, Promise.resolve(URL.createObjectURL(plain)))
+    return id0
+  }
+  enc = await encryptBlob(plain)
+  blob = enc.blob
   const n = Math.max(1, Math.ceil(blob.size / CHUNK))
   const { id } = await post('/media', { mime: plain.type || 'application/octet-stream', name: name || 'fayl', size: blob.size || 1, chunks: n })
   // OPTIMIZATSIYA: bo'laklar endi binary (base64 emas — 33% kam trafik, CPU yuklamasi yo'q) + 2 tasi parallel
@@ -401,8 +527,9 @@ async function upload(plain, name, onProg) {
   await Promise.all([wr(), wr()])
   const sha = await P2P.sha256Hex(blob)
   await post('/media/' + id + '/done', { sha })
-  const info = { sha, size: blob.size, key: enc.key, iv: enc.iv, mime: plain.type || 'application/octet-stream' }
+  info = { sha, size: blob.size, key: enc.key, iv: enc.iv, mime: plain.type || 'application/octet-stream' }
   S.sha.set(id, sha); S.mk.set(id, info)
+  try { IDB.put('mkeys', id, info) } catch {} // v110: kalit doimiy — ilova qayta ochilganda ham ishlaydi
   P2P.note(id, info)
   await IDB.put('media', id, blob)
   Store.record(id, blob.size, null, 0)
@@ -440,7 +567,9 @@ async function getCipher(id) {
       while (next < meta.chunks) {
         const i = next++
         const u = await fetchChunk(id, i)
-        if (u) { parts[i] = u; got++; if (onMediaProg) onMediaProg(id, got, meta.chunks) } else failed.push(i)
+        // v110: har bo'lak DArhol Blob'ga o'raladi — katta faylda (500MB) ham xotira
+        // doimiy emas (raw bo'laklar GC bo'shatadi, Blob brauzer tomonidan diskka chiqariladi)
+        if (u) { parts[i] = new Blob([u]); got++; if (onMediaProg) onMediaProg(id, got, meta.chunks) } else failed.push(i)
       }
     }
     await Promise.all([wr(), wr()])
@@ -473,7 +602,9 @@ async function restoreToServer(id, cipher) {
     const mysha = await P2P.sha256Hex(cipher)
     if (info.sha && mysha !== info.sha) { try { console.info('[tiklash] sha mos emadi', String(id).slice(0, 8)) } catch {}; return }
     for (let i = 0; i < info.chunks; i++) {
-      const part = cipher.slice(i * CHUNK, (i + 1) * CHUNK)
+      // v110: katta fayllar (enc:'ctr') cs-o'lchamda bo'laklangan — tiklash ham SHU o'lchamda
+      const cs = +P2P.ctx.get(id)?.cs || CHUNK
+      const part = cipher.slice(i * cs, (i + 1) * cs)
       const r = await fetch(API + '/media/' + id + '/' + i, { method: 'PUT', headers: { Authorization: 'Bearer ' + S.token, 'content-type': 'application/octet-stream' }, body: part })
       if (!r.ok) return
     }
@@ -490,6 +621,8 @@ function mediaUrl(id) {
       const cipher = await getCipher(id)
       const info = P2P.ctx.get(id) || S.mk.get(id) || {}
       if (!info.key) throw new Error('Faylni ochish kaliti yo‘q')
+      // v110: katta fayllar (CTR) bo'lakma-bo'lak ochiladi — xotira ~2 bo'lak
+      if (info.enc === 'ctr') return URL.createObjectURL(await decryptChunked(cipher, info))
       return URL.createObjectURL(await decryptBlob(cipher, info.key, info.iv, info.mime))
     })().catch((e) => { mediaCache.delete(id); throw e }))
   }
@@ -1162,6 +1295,9 @@ async function startApp() {
   // «ochiq ko'rinib» turgan holda HAMMA real-vaqt hodisasi (qo'ng'iroq, signal, xabar)
   // yo'qolardi. Bu «avval ishlar, keyin o'zi buzilar edi»ning yashirin ildizi.
   wsConnect()
+  // v110: SAQLANGAN MEDIA KALITLARINI TIKLASH (mkeys) — ilova qayta ochilganda eski
+  // rasm/ovoz/fayllar «kalit yo'q» demasin. Fonda tez IDB o'qish — hech narsani bloklamaydi.
+  try { mkeysYukla() } catch {}
   // v87: ISHGA-TUSHDI MAYAGI — har qurilma ilova ochilganda jurnalda KO'RINADI
   // («brauzerda umuman ishlamadi» endi ko'rinmay qolmaydi — build/UA/tarmoq yoziladi)
   setTimeout(() => g50Beacon('ishga-tushdi'), 2500)
@@ -1240,7 +1376,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v109'
+window.__50BUILD = 'v110'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
