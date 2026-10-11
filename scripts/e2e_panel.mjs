@@ -57,6 +57,9 @@ try {
   ok(pr.status === 200 && ptxt.includes('id="pw"'), '/?adminpanel → panel HTML beriladi')
   ok((pr.headers.get('x-robots-tag') || '').includes('noindex'), 'panel noindex (qidiruvchilarga yopiq)')
   ok(!ptxt.includes('window.__50BUILD'), 'panel sahifasi ilova kodi EMAS (alohida sahifa)')
+  // v107: IKKITA himoya tugmasi — YOQISH + O'CHIRISH — ikkalasi HTML'da bo'lishi SHART
+  ok(ptxt.includes('id="fwon"') && ptxt.includes('id="fwof"'), 'v107 panel HTML: Himoyani YOQISH + O\u2018CHIRISH tugmalari IKKALASI bor')
+  ok(ptxt.includes('fwBos(') && ptxt.includes("'fwtoggle','POST'"), 'v107 panel HTML: ikkala tugma fwtoggle API\u2019ga ulangan')
   const home = await fetch(BASE + '/', { headers: { 'user-agent': UA } })
   const htxt = await home.text()
   ok(home.status === 200 && !htxt.includes('id="pw"') && !htxt.toLowerCase().includes('adminpanel'), '/ → oddiy ilova, panel izi YO\'Q')
@@ -208,7 +211,8 @@ try {
     ok(g404.st === 404, 'v106 o\u2018chirilgan kanal /api/chats/:id → 404 (to\u2018liq ketdi)', 'st=' + g404.st)
   }
 
-  // 13) v106 HIMOYA TUGMASI — O'CHIRISH → holat=O'CHIQ → QAYTA YOQISH (faol holatda qoladi)
+  // 13) v107 HIMOYA TUGMALARI — O'CHIRISH → holat=O'CHIQ → QAYTA YOQISH (faol holatda qoladi)
+  //     v107: panelda IKKITA alohida tugma (YOQISH + O'CHIRISH) — ikkalasi har doim ko'rinadi
   const fwAnon = await j('/api/panel/fwtoggle', { method: 'POST', body: { on: 0 } })
   ok(fwAnon.st === 401, 'v106 tokensiz /panel/fwtoggle → 401', 'st=' + fwAnon.st)
   const fw0 = await j('/api/panel/fwtoggle', { method: 'POST', h: AT, body: { on: 0 } })
@@ -217,7 +221,7 @@ try {
   const sec2 = await j('/api/panel/security', { h: AT })
   ok(sec2.st === 200 && sec2.d.fwoff === 1, 'v106 security.fwoff=1 — himoya holati O\u2018CHIQ ko\u2018rinadi', 'fwoff=' + sec2.d.fwoff)
   const fw1 = await j('/api/panel/fwtoggle', { method: 'POST', h: AT, body: { on: 1 } })
-  ok(fw1.st === 200 && fw1.d.ok && fw1.d.on === 1, 'v106 himoya QAYTA YOQILDI (doim faol holat)', 'st=' + fw1.st)
+  ok(fw1.st === 200 && fw1.d.ok && fw1.d.on === 1, 'v107 himoya QAYTA YOQILDI — YOQISH tugmasi ham ishlaydi (doim faol holat)', 'st=' + fw1.st)
   await sleep(800)
   const sec3 = await j('/api/panel/security', { h: AT })
   ok(sec3.st === 200 && sec3.d.fwoff === 0, 'v106 security.fwoff=0 — himoya YONIQ (yakuniy holat)', 'fwoff=' + sec3.d.fwoff)

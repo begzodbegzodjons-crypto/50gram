@@ -347,7 +347,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v106"
+const BUILD_V = "v107"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -4021,6 +4021,9 @@ button{background:#2b6cff;border:0;color:#fff;padding:9px 16px;border-radius:9px
 button:hover{filter:brightness(1.12)}
 button.sec{background:#23262d;color:#e6e8ec}
 button.warn{background:#8b2332}
+button.grn{background:#2f7d4f}
+.fwst{color:#8b919c;font-size:13px;white-space:nowrap}
+.fwst b{color:#e6e8ec}
 button:disabled{opacity:.45;cursor:default}
 input,textarea{background:#171a1f;border:1px solid #2a2e36;color:#e6e8ec;padding:10px 12px;border-radius:9px;font-size:14px;width:100%}
 input:focus,textarea:focus{outline:1px solid #2b6cff}
@@ -4475,25 +4478,32 @@ function loadSecurity(){
   api('security').then(function(r){
     if(authFail(r))return
     var s=r.j;if(!s||s.eall===undefined)return
-    // v106: HIMOYA QATLAMI TUGMASI (o'zgartirish kiritayotganda o'chirish / keyin yoqish)
+    // v107: HIMOYA TUGMALARI — IKKITA ALOHIDA tugma (YOQISH + O‘CHIRISH), IKKALASI HAR DOIM
+    // ko‘rinadi va ishlaydi (egasi so‘rovi: «himoyani o‘chirish tugmasi bor — himoyani yoqish
+    // tugmasini ham ishlab chiq»). Hozirgi holat yonida qalin yozuv bilan ko‘rsatiladi.
     var fwoff=!!s.fwoff
     var fw=$('fwctl')
     fw.className=fwoff?'alarm':'alarm old'
     fw.innerHTML='<b>'+(fwoff?'⚠ HIMOYA QATLAMI O‘CHIQ — DASTUR HIMOYASIZ':'Himoya qatlami: YONIQ — dastur himoyalangan')+'</b>'
       +'<small>'+(fwoff
-        ?'Hujum-himoya VAQTINCHA ishlamaydi (hech kim bloklanmaydi, iz ham qolmaydi). O‘zgartirish kiritib bo‘lingach albatta YOQING — tizmni qayta yoqish tugmasi bilan.'
-        :'7 qatlam himoya faol: yadro/begona-mijoz/in‘ektsiya/ma’lumot-tortish/brute-force/toshqin/skaner. O‘zgartirish kiritayotganda shu yerdan VAQTINCHA o‘chirish mumkin.')+'</small>'
-      +'<div class="bar2" style="margin-top:10px"><button id="fwbtn" class="'+(fwoff?'':'warn')+'">'+(fwoff?'Himoyani YOQISH (tavsiya etiladi)':'Himoyani o‘chirish (faqat o‘zgartirish paytida)')+'</button></div>'
-    document.getElementById('fwbtn').onclick=function(){
-      var on=!fwoff
-      if(!confirm(on?'Himoya qatlami YOQILADI — hujumlar yana darhol bloklanadi. Davom etamizmi?':'Himoya qatlami O‘CHIRILADI — hujumlar VAQTINCHA bloklanmaydi (faqat dasturga o‘zgartirish kiritish paytida ishlatilsin). Davom etamizmi?'))return
-      var btn=this;btn.disabled=true
+        ?'Hujum-himoya VAQTINCHA ishlamaydi (hech kim bloklanmaydi, iz ham qolmaydi). O‘zgartirish kiritib bo‘lingach «Himoyani YOQISH» tugmasini bosib tizmni himoyalangan holatga qaytaring.'
+        :'7 qatlam himoya faol: yadro/begona-mijoz/in‘ektsiya/ma’lumot-tortish/brute-force/toshqin/skaner. Dasturga o‘zgartirish kiritayotganda «Himoyani o‘chirish» tugmasi bilan VAQTINCHA o‘chirib turib, ish bo‘lgach yana YOQING.')+'</small>'
+      +'<div class="bar2" style="margin-top:10px">'
+      +'<button id="fwon" class="grn">'+(fwoff?'🟢 Himoyani YOQISH (tavsiya etiladi)':'🟢 Himoyani YOQISH')+'</button>'
+      +'<button id="fwof" class="warn">'+(fwoff?'Himoyani o‘chirish (hozir o‘chiq turibdi)':'Himoyani o‘chirish (faqat o‘zgartirish paytida)')+'</button>'
+      +'<span class="fwst">Hozirgi holat: <b>'+(fwoff?'O‘CHIQ':'YONIQ')+'</b></span>'
+      +'</div>'
+    function fwBos(on){
+      if(!confirm(on?'Himoya qatlami YOQILADI — hujumlar yana darhol bloklanadi (7 qatlam himoya ishga tushadi). Davom etamizmi?':'Himoya qatlami O‘CHIRILADI — hujumlar VAQTINCHA bloklanmaydi (faqat dasturga o‘zgartirish kiritish paytida ishlatilsin; ish tugagach YOQISH SHART). Davom etamizmi?'))return
+      var b1=$('fwon'),b2=$('fwof');b1.disabled=true;b2.disabled=true
       api('fwtoggle','POST',{on:on}).then(function(r){
         if(authFail(r))return
         if(r.j&&r.j.ok)loadSecurity()
-        else{btn.disabled=false;alert((r.j&&r.j.error)||'Xatolik')}
+        else{b1.disabled=false;b2.disabled=false;alert((r.j&&r.j.error)||'Xatolik')}
       })
     }
+    document.getElementById('fwon').onclick=function(){fwBos(true)}
+    document.getElementById('fwof').onclick=function(){fwBos(false)}
     var aa=$('alrm'),an=s.alarmTs?(Date.now()-s.alarmTs):0
     if(s.alarmLast&&an<1800000){
       aa.innerHTML='<div class="alarm"><b>⚠ SIGNALIZATSIYA: HUJUM ANIQLANDI — himoya ishlab BLOKLAGAN</b><small>'+knName(s.alarmLast.kind)+' · IP '+esc(s.alarmLast.ip)+' · '+ccName(s.alarmLast.cc)+' · '+dt(s.alarmTs)+'</small><small>'+esc(s.alarmLast.note||'')+'</small></div>'
