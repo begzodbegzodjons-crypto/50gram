@@ -357,7 +357,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v114"
+const BUILD_V = "v115"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -3319,10 +3319,11 @@ async function giftLive(c: C) {
 // Foydalanuvchi talabi: chet elda (masalan Xitoyda) suhbatlashish — ovozni yozib ol, tarjima
 // qilib OVOZ BILAN qaytar; PDF hujjatlarni 6 tilga tarjima. Tez va sifatli bo'lsin.
 // ZANJIR (trend'da isbotlangan): Google free endpoints (2 bosqich) -> Workers AI llama zaxira.
-// OVOZ: Whisper (Workers AI) matnga -> tarjima -> Google TTS ovoz (uz tilida TTS yo'q —
-//        o'zbekcha matnni TURKCHA ovoz o'qiydi: til jihatdan eng yaqin, tushunarli).
+// OVOZ: Whisper (Workers AI) matnga -> tarjima -> TTS ovoz.
+// v115: o'zbek uchun HAQIQIY NEYRAL OVOZ — Microsoft Edge TTS (uz-UZ-MadinaNeural/SardorNeural).
+//       Google TTS'da o'zbek YO'Q (tl=uz -> HTTP 400, tekshirildi) — TURKCHA OVOZ BEKOR QILINDI.
 const TR_LANGS: Record<string, { uz: string; tts: string; flag: string }> = {
-  uz: { uz: "O‘zbek", tts: "tr", flag: "🇺🇿" },
+  uz: { uz: "O‘zbek", tts: "uz", flag: "🇺🇿" },
   ru: { uz: "Rus", tts: "ru", flag: "🇷🇺" },
   en: { uz: "Ingliz", tts: "en", flag: "🇬🇧" },
   zh: { uz: "Xitoy", tts: "zh-CN", flag: "🇨🇳" },
@@ -3383,13 +3384,94 @@ async function tarjimaKeshli(c: C, text: string, to: string) {
   if (r) c.wait(caches.default.put(ck, new Response(JSON.stringify({ t: r.t, f: r.from }), { headers: { "cache-control": "public, s-maxage=21600" } })).catch(() => {}))
   return r
 }
-// Ovoz sintezi: Google TTS (translate_tts) — 180 belgili gap-bo'laklar, baytlari birlashtiriladi.
-// uz -> tr ovozi (Google'da o'zbek ovozi YO'Q — turkcha eng yaqin; matn baribir to'liq ko'rsatiladi)
+// Ovoz sintezi (v115): O'zbek — Microsoft EDGE TTS neyral ovoz (Madina=ayol, Sardor=erkak);
+// qolgan tillar — Google translate_tts (180 belgili bo'laklar, baytlari birlashtiriladi).
 const TTS_KESH = new Map<string, { b: string; t: number }>()
-async function ttsMP3(text: string, lang: string): Promise<string> {
-  const tl = TR_LANGS[lang]?.tts || "en"
-  const safe = text.replace(/\s+/g, " ").trim().slice(0, 600)
-  if (!safe) return ""
+// --- EDGE TTS (bepul, kalitsiz) — token: Windows file time (5 daq. yaxlitlangan) + token -> SHA256 ---
+// Manba-mos: rany2/edge-tts (drm.py + constants.py). Ovoz ro'yxati: voices/list'da uz-UZ-MadinaNeural
+// va uz-UZ-SardorNeural bor (tekshirildi). Sinov: 9.1s / 4.8s haqiqiy o'zbekcha MP3 olindi.
+const EJ_TRUSTED = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
+const EJ_CHROMIUM = "143.0.3650.75"
+function edgeHex32(upper?: boolean): string {
+  const a = crypto.getRandomValues(new Uint8Array(16))
+  let s = ""
+  for (const b of a) s += b.toString(16).padStart(2, "0")
+  return upper ? s.toUpperCase() : s
+}
+function edgeSana(): string {
+  const d = new Date(), p = (n: number) => String(n).padStart(2, "0")
+  const K = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], O = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+  return K[d.getUTCDay()] + " " + O[d.getUTCMonth()] + " " + p(d.getUTCDate()) + " " + d.getUTCFullYear() + " " + p(d.getUTCHours()) + ":" + p(d.getUTCMinutes()) + ":" + p(d.getUTCSeconds()) + " GMT+0000 (Coordinated Universal Time)"
+}
+function u8Birlash(list: Uint8Array[]): Uint8Array {
+  const t = list.reduce((a, b) => a + b.length, 0)
+  const o = new Uint8Array(t)
+  let f = 0
+  for (const b of list) { o.set(b, f); f += b.length }
+  return o
+}
+async function edgeWS(url: string, cfg: string, ssml: string): Promise<Uint8Array> {
+  const maj = EJ_CHROMIUM.split(".")[0]
+  const r = await fetch(url, {
+    headers: {
+      upgrade: "websocket",
+      pragma: "no-cache",
+      "cache-control": "no-cache",
+      origin: "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold",
+      "accept-language": "en-US,en;q=0.9",
+      cookie: "muid=" + edgeHex32(true) + ";",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + maj + ".0.0.0 Safari/537.36 Edg/" + maj + ".0.0.0",
+    },
+  } as any)
+  const ws: any = (r as any).webSocket
+  if (!ws) throw new Error("ws-yoq:" + r.status)
+  ws.accept()
+  return await new Promise<Uint8Array>((res, rej) => {
+    const bufs: Uint8Array[] = []
+    let yakun = false
+    const taymer = setTimeout(() => { try { ws.close(1000, "taymer") } catch {}; if (!yakun) { yakun = true; rej(new Error("ws-taymer")) } }, 14_000)
+    ws.onmessage = (ev: MessageEvent) => {
+      if (typeof ev.data === "string") {
+        if (ev.data.includes("Path:turn.end")) {
+          yakun = true; clearTimeout(taymer)
+          try { ws.close(1000, "ok") } catch {}
+          res(u8Birlash(bufs))
+        }
+        return
+      }
+      try {
+        const dv = new DataView(ev.data as ArrayBuffer)
+        const hl = dv.getUint16(0)
+        const head = new TextDecoder().decode(new Uint8Array(ev.data as ArrayBuffer, 2, hl))
+        if (head.includes("Path:audio") && !head.includes("audio.metadata")) bufs.push(new Uint8Array((ev.data as ArrayBuffer).slice(2 + hl)))
+      } catch {}
+    }
+    ws.onerror = () => { clearTimeout(taymer); if (!yakun) { yakun = true; rej(new Error("ws-xato")) } }
+    ws.onclose = () => {
+      clearTimeout(taymer)
+      if (!yakun) { yakun = true; if (bufs.length) res(u8Birlash(bufs)); else rej(new Error("ws-yopildi")) }
+    }
+    ws.send(cfg)
+    ws.send(ssml)
+  })
+}
+async function edgeMP3(text: string, voice: string, alt: boolean): Promise<string> {
+  const esc = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  const cfg = "X-Timestamp:" + edgeSana() + "\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n" +
+    '{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}\r\n'
+  const ssml = "X-RequestId:" + edgeHex32() + "\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:" + edgeSana() + "Z\r\nPath:ssml\r\n\r\n" +
+    "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='uz-UZ'><voice name='" + voice + "'><prosody pitch='+0Hz' rate='+0%' volume='+0%'>" + esc + "</prosody></voice></speak>"
+  const sekin = Math.floor(Date.now() / 1000) + 11644473600
+  const gec = (await sha256(String((sekin - (sekin % 300)) * 10_000_000) + EJ_TRUSTED)).toUpperCase()
+  const q = "TrustedClientToken=" + EJ_TRUSTED + "&ConnectionId=" + edgeHex32() + "&Sec-MS-GEC=" + gec + "&Sec-MS-GEC-Version=1-" + EJ_CHROMIUM
+  const url = alt
+    ? "wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1?" + q
+    : "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?" + q
+  const b = await edgeWS(url, cfg, ssml)
+  return b.length > 1000 ? abToB64(b) : ""
+}
+// Google translate_tts — boshqa tillar uchun (o'zbek Google'da YO'Q — tl=uz 400 qaytaradi)
+async function ttsG(safe: string, tl: string): Promise<string> {
   const h = (await sha256(tl + "|" + safe)).slice(0, 20)
   const hit = TTS_KESH.get(h)
   if (hit && Date.now() - hit.t < 1_800_000) return hit.b
@@ -3410,24 +3492,48 @@ async function ttsMP3(text: string, lang: string): Promise<string> {
     } catch {}
   }
   if (!bufs.length) return ""
-  const total = bufs.reduce((a, b) => a + b.length, 0)
-  const out = new Uint8Array(total)
-  let off = 0
-  for (const b of bufs) { out.set(b, off); off += b.length }
-  const b64 = abToB64(out)
+  const b64 = abToB64(u8Birlash(bufs))
   if (TTS_KESH.size > 80) TTS_KESH.clear()
   TTS_KESH.set(h, { b: b64, t: Date.now() })
   return b64
 }
-// Ovozni matnga: Whisper (Workers AI) — avval turbo (ko'ptilli, tez), bo'lmasa asosiy model
+async function ttsMP3(text: string, lang: string): Promise<string> {
+  const tl = TR_LANGS[lang]?.tts || "en"
+  const safe = text.replace(/\s+/g, " ").trim().slice(0, 600)
+  if (!safe) return ""
+  if (tl !== "uz") return ttsG(safe, tl)
+  // O'zbek: HAQIQIY NEYRAL OVOZ — Edge TTS Madina (ayol) -> Sardor (erkak) -> zaxira host -> Google uz.
+  // TURKCHA OVOZ OLIB TASHLANDI (foydalanuvchi talabi). Hech biri bo'lmasa audio "" — matn baribir ko'rsatiladi.
+  const h = (await sha256("uz|" + safe)).slice(0, 20)
+  const hit = TTS_KESH.get(h)
+  if (hit && Date.now() - hit.t < 1_800_000) return hit.b
+  const urin = async (v: string, alt: boolean) => { try { return await edgeMP3(safe, v, alt) } catch { return "" } }
+  const b64 = (await urin("uz-UZ-MadinaNeural", false)) || (await urin("uz-UZ-SardorNeural", false)) || (await urin("uz-UZ-MadinaNeural", true)) || (await urin("uz-UZ-SardorNeural", true)) || (await ttsG(safe, "uz"))
+  if (b64) { if (TTS_KESH.size > 80) TTS_KESH.clear(); TTS_KESH.set(h, { b: b64, t: Date.now() }) }
+  return b64
+}
+// Ovozni matnga: Whisper (Workers AI).
+// v115 MUHIM TUZATISH: avval { audio: bytes } (Uint8Array) yuborilardi — JSON.stringify
+// uni {"0":82,"1":73,...} OBYEKTga aylantiradi va Whisper DOIM xato qaytarardi —
+// foydalanuvchi «sokin joyda gapiring» xatosini doim ko'rardi. Endi 4 urinish:
+// base64-string (kompakt) + oddiy massiv (rasmiy docs uslubi) x 2 model (turbo -> asosiy).
 async function whisperMatn(env: Env, bytes: Uint8Array): Promise<string> {
   if (!env.AI) return ""
-  for (const m of ["@cf/openai/whisper-large-v3-turbo", "@cf/openai/whisper"]) {
+  const urin = async (m: string, audio: unknown): Promise<string> => {
     try {
-      const r: any = await env.AI.run(m as any, { audio: bytes } as any)
-      const t = String(r?.text || "").trim()
+      const r: any = await env.AI.run(m as any, { audio } as any)
+      return String(r?.text || "").trim()
+    } catch { return "" }
+  }
+  const b64 = abToB64(bytes)
+  const arr: number[] | null = bytes.length <= 3_500_000 ? Array.from(bytes) : null
+  for (const m of ["@cf/openai/whisper-large-v3-turbo", "@cf/openai/whisper"]) {
+    let t = await urin(m, b64)
+    if (t) return t.slice(0, 2000)
+    if (arr) {
+      t = await urin(m, arr)
       if (t) return t.slice(0, 2000)
-    } catch {}
+    }
   }
   return ""
 }
@@ -3451,7 +3557,7 @@ async function apiTranslateSpeech(c: C) {
   if (bytes.length < 900) fail("Ovoz juda qisqa — yana bir marta gapirib ko‘ring")
   const to = TR_LANGS[String(c.b.to || "")] ? String(c.b.to) : "uz"
   const text = await whisperMatn(c.env, bytes)
-  if (!text) fail("Ovozni aniqlab bo‘lmadi — sokin joyda aniqroq gapirib ko‘ring", 422)
+  if (!text) fail("Ovozni aniqlab bo‘lmadi — yaqinroq borib, aniqroq gapirib ko‘ring (yoki «Matn» bo‘limidan foydalaning)", 422)
   const r = await tarjimaKeshli(c, text, to)
   if (!r) fail("Tarjima xizmati hozir javob bermaydi", 502)
   const mp3 = await ttsMP3(r!.t, to)

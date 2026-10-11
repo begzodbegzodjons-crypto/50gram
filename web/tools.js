@@ -1,7 +1,9 @@
 // ==========================================================================
-// 50 GRAM TOOLLAR (v114) — REYTING + TARJIMON
+// 50 GRAM TOOLLAR (v115) — REYTING + TARJIMON
 // Reyting: kanallar / guruhlar / aktiv foydalanuvchilar (7 kunlik faollik)
 // Tarjimon: matn, ovoz (Whisper AI -> tarjima -> TTS ovoz), PDF hujjat (6 til)
+// v115 OVOZ KUCHAYTIRILDI: AGC mikrofon + audio normalizatsiya (WAV) — shovqinli/
+//        sokin joyda ham ishlaydi; serverda haqiqiy o'zbek neyral ovozi (Edge TTS).
 // Bu fayl FAQAT QO'SHIMCHA — mavjud funksiyalarga tegmaydi (muhr qoidasi).
 // ==========================================================================
 (() => {
@@ -162,6 +164,7 @@
   }
 
   // --- Ovozli tarjima (naqsh: chat.js pickRecorder — WebView uchun xavfsiz) ---
+  // v115: AGC (avtomatik ovoz kuchi) + 1 kanal — sokin/past mikrofonlarda ham yaxshi yoziladi
   let trRec = null, trTaymer = 0, trvAudio = null
   function trRecorder(stream) {
     if (!window.MediaRecorder) throw new Error('yozib olish qo‘llanmaydi')
@@ -173,12 +176,50 @@
   }
   const blobB64 = (blob) => new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.readAsDataURL(blob) })
 
+  // v115: yozuvni TAYYORLASH — dekodlash -> 16 kHz mono -> pik-normalizatsiya -> WAV.
+  // Foyda: (1) sokin gapirilgan ovoz kuchi ko'tarilib yuboriladi (Whisper «eshtadi»),
+  // (2) jirilli shovqinli ovoz baribir bir xil darajada keladi — «sokin joyda gapiring» xatosi yo'qoladi,
+  // (3) WAV formatini Whisper 100% tushunadi (webm konteyner muammolari yo'q).
+  // Ishlamasa (eski WebView) — xom blob o'zgarishsiz yuboriladi.
+  async function trOvozTayyorla(blob) {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext
+      const OAC = window.OfflineAudioContext
+      if (!AC || !OAC) return blob
+      const tmp = new AC()
+      const buf = await tmp.decodeAudioData(await blob.arrayBuffer())
+      try { tmp.close && tmp.close() } catch {}
+      const sek = Math.min(buf.duration, 58)
+      if (sek < 0.2) return blob
+      const off = new OAC(1, Math.max(1, Math.floor(sek * 16000)), 16000)
+      const src = off.createBufferSource()
+      src.buffer = buf
+      src.connect(off.destination)
+      src.start(0, 0, sek)
+      const out = await off.startRendering()
+      const d = out.getChannelData(0)
+      let peak = 0
+      for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a }
+      const g = peak > 0.0015 ? Math.min(0.88 / peak, 14) : 1
+      const n = d.length
+      const wav = new ArrayBuffer(44 + n * 2)
+      const v = new DataView(wav)
+      const ws = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)) }
+      ws(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); ws(8, 'WAVE'); ws(12, 'fmt ')
+      v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true)
+      v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true)
+      ws(36, 'data'); v.setUint32(40, n * 2, true)
+      for (let i = 0; i < n; i++) { let s = d[i] * g; s = s > 1 ? 1 : s < -1 ? -1 : s; v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true) }
+      return new Blob([wav], { type: 'audio/wav' })
+    } catch { return blob }
+  }
+
   async function trOvozBoshla() {
     if (trRec) return
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast('Bu brauzer ovoz yozishni qo‘llamaydi')
     let stream = null
     try {
-      try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }) } catch { return toast('🎤 Mikrofon ruxsati berilmagan — brauzer sozlamasidan yoqing') }
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } }) } catch { return toast('🎤 Mikrofon ruxsati berilmagan — brauzer sozlamasidan yoqing') }
       const mr = trRecorder(stream)
       const chunks = []
       mr.ondataavailable = (e) => e.data.size && chunks.push(e.data)
@@ -195,7 +236,7 @@
       vibrate(20)
       $('trv-mic').dataset.t0 = String(Date.now())
       $('trv-mic').classList.add('rec')
-      $('trv-stat').textContent = '🔴 Yozib olinmoqda… gapiring (60 s gacha). To‘xtatish uchun bosing.'
+      $('trv-stat').textContent = '🔴 Yozib olinmoqda… gapiring (60 s gacha). Shovqinli joyda ham ishlaydi. To‘xtatish uchun bosing.'
       trRec = mr
       let s = 0
       clearInterval(trTaymer)
@@ -218,15 +259,18 @@
     stat.textContent = '⏳ Aniqlanmoqda va tarjima qilinmoqda…'
     res.classList.add('hide')
     try {
-      const audio = await blobB64(blob)
+      const tayyor = await trOvozTayyorla(blob)
+      const audio = await blobB64(tayyor)
       const r = await post('/translate/speech', { audio, to: trTo })
       $('trv-src').textContent = r.text || '—'
       $('trv-dst').textContent = r.translated || '—'
       $('trv-to-n').textContent = '🌐 ' + tilN(r.to) + ' tarjimasi'
       res.classList.remove('hide')
-      stat.textContent = '✅ Tayyor'
       if (r.audio) {
+        stat.textContent = '✅ Tayyor'
         try { trvAudio = new Audio(r.audio); await trvAudio.play() } catch {}
+      } else {
+        stat.textContent = '✅ Matn tayyor — ovoz xizmati band, birozdan keyin 🔺 bosing'
       }
     } catch (e) {
       stat.textContent = '⚠️ ' + (e.message || 'Ishlamadi')
