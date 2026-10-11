@@ -3362,22 +3362,45 @@ async function tarjimaJuft(env: Env, text: string, to: string, dbg?: string[]): 
       if (out && out !== text) return { t: out, from: String(j?.[2] || "auto") }
     } else dbg?.push("g1b:" + r.status)
   } catch {}
-  // 2) Workers AI llama — subrequest limitiga KIRMAYDI (oxirgi zaxira)
+  // 2) Workers AI LLM — subrequest limitiga KIRMAYDI (oxirgi zaxira).
+  // v115.6: llama-3.1-8b 2026-05-30 da DEPRECATED bo'ldi — yangi model zanjiri.
   try {
     if (!env.AI) return null
     const nom = TR_LANGS[to]?.uz || to
-    const r: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-      messages: [
-        { role: "system", content: "You are a professional translator. Translate the user's text into " + nom + " language. Reply with ONLY the translation, nothing else." },
-        { role: "user", content: text.slice(0, 1200) },
-      ],
-      max_tokens: 700,
-    })
-    const t = String(r?.response || "").trim().replace(/^(?:['‘ʻ"]|tarjima:|translation:)\s*/i, "").trim()
+    const t = await aiChat(env, "You are a professional translator. Translate the user's text into " + nom + " language. Reply with ONLY the translation, nothing else.", text.slice(0, 1200), 700, dbg, "tarj")
     dbg?.push("llama:" + t.length)
     if (t && t.length > 1 && t !== text) return { t, from: "auto" }
   } catch {}
   return null
+}
+// v115.6: Workers AI chat — model zanjiri (eskirganlar o'tkazib yuboriladi).
+// llama-3.1-8b deprecated (5028); hozirgi: llama-3.3-70b-fp8-fast, gpt-oss-20b.
+const AI_MODELLAR = ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/openai/gpt-oss-20b", "@cf/meta/llama-3.1-8b-instruct"]
+async function aiChat(env: Env, system: string, user: string, maxTok: number, dbg?: string[], teg?: string): Promise<string> {
+  let oxirgi = "model-yo'q"
+  for (const m of AI_MODELLAR) {
+    try {
+      const r: any = await env.AI.run(m as any, {
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        max_tokens: maxTok,
+      })
+      let t = String(r?.response || "")
+      // gpt-oss reasoning modellar javobni reasoning maydonida ham berishi mumkin
+      if (!t.trim() && r?.reasoning) t = String(r.reasoning)
+      t = t.trim().replace(/^(?:['‘ʻ"]|tarjima:|translation:|matn:)\s*/i, "").trim()
+      dbg?.push((teg || "ai") + ":" + m.split("/")[2]?.slice(0, 12) + ":" + t.length)
+      return t
+    } catch (e: any) {
+      const msg = String(e?.message || e).slice(0, 70)
+      dbg?.push((teg || "ai") + ":xato:" + msg)
+      oxirgi = msg
+      // Deprekatsiya/model-yo'q bo'lsa keyingi modelga o'tish; boshqa xato bo'lsa ham keyingisini sinab ko'ramiz
+    }
+  }
+  throw new Error(oxirgi)
 }
 async function tarjimaKeshli(c: C, text: string, to: string, dbg?: string[]) {
   const h = await sha256(to + "|" + text)
@@ -3447,7 +3470,7 @@ async function edgeWS(url: string, cfg: string, ssml: string, dbg?: string[]): P
     ws.onmessage = (ev: MessageEvent) => {
       if (typeof ev.data === "string") {
         matnSon++
-        if (matnSon <= 2) dbg?.push("T" + matnSon + ":" + ev.data.slice(0, 110).replace(/\s+/g, " "))
+        if (matnSon <= 3) dbg?.push("T" + matnSon + ":" + ev.data.slice(0, 330).replace(/\s+/g, " "))
         if (ev.data.includes("Path:turn.end")) {
           yakun = true; clearTimeout(taymer); dbg?.push("turn-end:matn=" + matnSon + ",bin=" + binSon)
           try { ws.close(1000, "ok") } catch {}
@@ -3460,6 +3483,7 @@ async function edgeWS(url: string, cfg: string, ssml: string, dbg?: string[]): P
         const dv = new DataView(ev.data as ArrayBuffer)
         const hl = dv.getUint16(0)
         const head = new TextDecoder().decode(new Uint8Array(ev.data as ArrayBuffer, 2, hl))
+        if (binSon <= 2) dbg?.push("B" + binSon + ":" + head.slice(0, 80).replace(/\s+/g, " ") + ":" + Math.max(0, (ev.data as ArrayBuffer).byteLength - 2 - hl))
         if (head.includes("Path:audio") && !head.includes("audio.metadata")) bufs.push(new Uint8Array((ev.data as ArrayBuffer).slice(2 + hl)))
       } catch {}
     }
@@ -3562,17 +3586,11 @@ function arabLotin(t: string): string {
 async function lotinTuzat(env: Env, text: string, dbg?: string[]): Promise<string> {
   try {
     if (!env.AI || !text) return text
-    const r: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-      messages: [
-        { role: "system", content: "Fix garbled Uzbek text. The text is phonetic Uzbek written WITHOUT vowels (auto-transliterated from Arabic-script ASR). Rewrite it as proper Uzbek in Latin script with correct vowels and apostrophes (o', g'). Reply with ONLY the corrected Uzbek text. If unsure, reply with the original text unchanged." },
-        { role: "user", content: text.slice(0, 900) },
-      ],
-      max_tokens: 600,
-    })
-    const t = String(r?.response || "").trim().replace(/^["'ʻ"]/, "").trim()
+    const t0 = await aiChat(env, "Fix garbled Uzbek text. The text is phonetic Uzbek written WITHOUT vowels (auto-transliterated from Arabic-script ASR). Rewrite it as proper Uzbek in Latin script with correct vowels and apostrophes (o', g'). Reply with ONLY the corrected Uzbek text. If unsure, reply with the original text unchanged.", text.slice(0, 900), 600, dbg, "tuzat")
+    const t = t0.trim().replace(/^["'ʻ"]/, "").trim()
     const unli = (t.match(/[aeiouou']/gi) || []).length
-    dbg?.push("tuzat:" + (t && t !== text ? "ok" : "echo") + ":" + t.length)
-    if (t && unli >= 3 && t.length >= Math.floor(text.length * 0.7) && t.length <= text.length * 3) return t
+    if (t && unli >= 3 && t.length >= Math.floor(text.length * 0.7) && t.length <= text.length * 3) { dbg?.push("tuzat-ok"); return t }
+    dbg?.push("tuzat-rad")
     return text
   } catch (e: any) { dbg?.push("tuzat:xato:" + String(e?.message || e).slice(0, 80)); return text }
 }
