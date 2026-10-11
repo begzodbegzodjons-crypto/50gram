@@ -3340,7 +3340,7 @@ function trTez(uid: number, tur: number, limit: number): boolean {
   if (TR_THR.size > 5000) TR_THR.clear()
   return true
 }
-async function tarjimaJuft(env: Env, text: string, to: string): Promise<{ t: string; from: string } | null> {
+async function tarjimaJuft(env: Env, text: string, to: string, dbg?: string[]): Promise<{ t: string; from: string } | null> {
   const qisqa = text.length <= 250
   // 1a) qisqa matn: clients5 dict-chrome-ex (eng tez, trend'da isbotlangan)
   if (qisqa) try {
@@ -3348,8 +3348,9 @@ async function tarjimaJuft(env: Env, text: string, to: string): Promise<{ t: str
     if (r.ok) {
       const j: any = await r.json()
       const out = Array.isArray(j) ? String(j?.[0]?.[0] ?? "").trim() : String(j?.sentences?.[0]?.trans ?? "").trim()
+      dbg?.push("g1a:" + r.status + ":" + out.length)
       if (out && out !== text) return { t: out, from: String((Array.isArray(j) && j?.[0]?.[2]) || j?.src || "auto") }
-    }
+    } else dbg?.push("g1a:" + r.status)
   } catch {}
   // 1b) uzun matn / zaxira: gtx single (segmentlar bilan — ko'p gapirilgan matn uchun to'g'ri)
   try {
@@ -3357,8 +3358,9 @@ async function tarjimaJuft(env: Env, text: string, to: string): Promise<{ t: str
     if (r.ok) {
       const j: any = await r.json()
       const out = (j?.[0] || []).map((x: any[]) => String(x?.[0] || "")).join("").trim()
+      dbg?.push("g1b:" + r.status + ":" + out.length)
       if (out && out !== text) return { t: out, from: String(j?.[2] || "auto") }
-    }
+    } else dbg?.push("g1b:" + r.status)
   } catch {}
   // 2) Workers AI llama — subrequest limitiga KIRMAYDI (oxirgi zaxira)
   try {
@@ -3372,15 +3374,16 @@ async function tarjimaJuft(env: Env, text: string, to: string): Promise<{ t: str
       max_tokens: 700,
     })
     const t = String(r?.response || "").trim().replace(/^(?:['‘ʻ"]|tarjima:|translation:)\s*/i, "").trim()
+    dbg?.push("llama:" + t.length)
     if (t && t.length > 1 && t !== text) return { t, from: "auto" }
   } catch {}
   return null
 }
-async function tarjimaKeshli(c: C, text: string, to: string) {
+async function tarjimaKeshli(c: C, text: string, to: string, dbg?: string[]) {
   const h = await sha256(to + "|" + text)
   const ck = "https://tarjimon.50gram.internal/m/" + h
-  try { const hit = await caches.default.match(ck); if (hit) { const j: any = await hit.json(); return { t: String(j.t), from: String(j.f) } } } catch {}
-  const r = await tarjimaJuft(c.env, text, to)
+  try { const hit = await caches.default.match(ck); if (hit) { const j: any = await hit.json(); dbg?.push("kesh-hit"); return { t: String(j.t), from: String(j.f) } } } catch {}
+  const r = await tarjimaJuft(c.env, text, to, dbg)
   if (r) c.wait(caches.default.put(ck, new Response(JSON.stringify({ t: r.t, f: r.from }), { headers: { "cache-control": "public, s-maxage=21600" } })).catch(() => {}))
   return r
 }
@@ -3439,16 +3442,20 @@ async function edgeWS(url: string, cfg: string, ssml: string, dbg?: string[]): P
   return await new Promise<Uint8Array>((res, rej) => {
     const bufs: Uint8Array[] = []
     let yakun = false
+    let matnSon = 0, binSon = 0
     const taymer = setTimeout(() => { try { ws.close(1000, "taymer") } catch {}; if (!yakun) { yakun = true; dbg?.push("taymer:bufs=" + bufs.length); rej(new Error("ws-taymer")) } }, 14_000)
     ws.onmessage = (ev: MessageEvent) => {
       if (typeof ev.data === "string") {
+        matnSon++
+        if (matnSon <= 2) dbg?.push("T" + matnSon + ":" + ev.data.slice(0, 110).replace(/\s+/g, " "))
         if (ev.data.includes("Path:turn.end")) {
-          yakun = true; clearTimeout(taymer)
+          yakun = true; clearTimeout(taymer); dbg?.push("turn-end:matn=" + matnSon + ",bin=" + binSon)
           try { ws.close(1000, "ok") } catch {}
           res(u8Birlash(bufs))
         }
         return
       }
+      binSon++
       try {
         const dv = new DataView(ev.data as ArrayBuffer)
         const hl = dv.getUint16(0)
@@ -3567,7 +3574,7 @@ async function lotinTuzat(env: Env, text: string, dbg?: string[]): Promise<strin
     dbg?.push("tuzat:" + (t && t !== text ? "ok" : "echo") + ":" + t.length)
     if (t && unli >= 3 && t.length >= Math.floor(text.length * 0.7) && t.length <= text.length * 3) return t
     return text
-  } catch { dbg?.push("tuzat:xato"); return text }
+  } catch (e: any) { dbg?.push("tuzat:xato:" + String(e?.message || e).slice(0, 80)); return text }
 }
 async function whisperMatn(env: Env, bytes: Uint8Array, dbg?: string[]): Promise<string> {
   if (!env.AI) return ""
@@ -3616,10 +3623,10 @@ async function apiTranslateSpeech(c: C) {
   const dbg: string[] = []
   const text = await whisperMatn(c.env, bytes, dbg)
   if (!text) fail("Ovozni aniqlab bo‘lmadi — yaqinroq borib, aniqroq gapirib ko‘ring (yoki «Matn» bo‘limidan foydalaning)", 422)
-  let r = await tarjimaKeshli(c, text, to)
+  let r = await tarjimaKeshli(c, text, to, dbg)
   // v115.2: xuddi shu til (masalan o'zbek gapirdi, natija ham o'zbek) — OVOZ BARIBIR
   // O'QILADI (echo); 502 o'rniga to'liq natija qaytadi.
-  if (!r) r = { t: text, from: "auto" }
+  if (!r) { dbg?.push("echo"); r = { t: text, from: "auto" } }
   const mp3 = await ttsMP3(r!.t, to, dbg)
   // dbg FAQAT so'rovda dbg:1 yuborgan DEV raqamga ko'rinadi (oddiy foydalanuvchiga yo'q)
   let d: string[] | undefined
