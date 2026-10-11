@@ -604,3 +604,23 @@ Stage Summary:
 - 50GRAM ENDI 2 YANGI BO'LIMGA BOY: 🏆 REYTING (faol foydalanuvchilar martaba+7kunlik xabar, kanallar obunachi bo'yicha, guruhlar faollik bo'yicha — «mening o'rnim» bilan) va 🌐 TARJIMON (matn, OVOZLI tarjima — xitoy/rus/ingliz/turk/nemis nutqini o'zbekchaga va teskarisiga ovoz bilan, PDF hujjat 6 tilga) — chet eldagi o'zbeklar uchun to'liq vosita.
 - 0 MAVJUD FUNKSIYAGA ZARAR: barcha o'zgarishlar QO'SHIMCHA (2 yangi tab + 1 menyu element + 2 tabGo hook); chat/reels/qo'ng'iroq/SMS/panel/himoya tegilmagan; migratsiya yo'q (0 xavf); xatolar graziyus toast bilan ushlanadi.
 - Versiya qulfi v114 (worker+core+sw); lokal 94 + CI 11/11 yashil; sayt LIVE: https://50gram.uz
+
+---
+Task ID: 59
+Agent: Super Z (asosiy agent)
+Task: v115 — OVOZLI TARJIMON ISHLAMASDI («sokin joyda gapiring» xatosi har doim chiqardi) + o'zbekcha o'rniga TURKCHA ovoz gapirardi. Foydalanuvchi: "har qanday sharoitda ishlashini kuchaytir, turk tilida emas uzbek tilida gapiradigan tarjimon ishlab chiq".
+
+Work Log:
+- ILDIZ-1 (Whisper): { audio: Uint8Array } JSON.stringify'da {"0":82,...} OBYEKTga aylanardi → Whisper AI DOIM xato → doim 422 «sokin joyda gapiring». Tuzatish: base64-string + oddiy massiv (docs uslubi) x 2 model (turbo/legacy) — 4 urinish.
+- ILDIZ-2 (TTS): TR_LANGS.uz.tts="tr" edi (Google'da tl=uz → HTTP 400, tekshirildi — o'zbek ovozi YO'Q). Yechim: Microsoft EDGE TTS — uz-UZ-MadinaNeural (ayol) / uz-UZ-SardorNeural (erkak) neyral o'zbek ovozlari (voices/list'da tasdiqlandi). rany2/edge-tts protokoli: Sec-MS-GEC token (Windows file time 5 daq. + TrustedClientToken → SHA256), speech.config + SSML over WebSocket. Turkcha ovoz OLIB TASHLANDI.
+- ILDIZ-3 (mijoz): getUserMedia + autoGainControl (AGC) + channelCount:1; trOvozTayyorla() — dekodlash → 16kHz mono OfflineAudioContext → pik-normalizatsiya (0.88/peak, max ×14) → WAV16 — sokin/shovqinli mikrofonlarda ham barqaror daraja, Whisper uchun ideal format.
+- JONLI TASHXIS (GitHub Actions'dan, bu VM IP FW-blokda — 47.57.242.119): yangi diagnostic workflow tarjimon-test.yml (faqat dispatch, deploy qilmaydi) + scripts/test_live_v115.mjs + audio namunalar (scripts/media/) — haqiqiy API zanjirini tekshiradi.
+- Tashxis bosqichlari: (1) yo'l nomlari /auth/otp+/auth/verify (sms/send emas); (2) g1a:429 — Google Workers IP'da vaqtinchalik 429 → llama zaxira SHART; (3) llama-3.1-8b 2026-05-30 DEPRECATED (5028) → AI model zanjiri: llama-3.3-70b-fp8-fast → gpt-oss-20b → llama-3.1-8b; (4) Whisper o'zbekni UYG'UR (arab yozuvi) deb yozadi → arabShubha() + AR_LAT transilteratsiya + lotinTuzat() (llama bilan unlilarni tiklaydi); (5) bir-xil til → echo (502 yo'q, ovoz baribir o'qiladi); (6) Edge TTS Workers'dan: fetch https:// + upgrade:websocket header (wss:// EMAS) — ws-ok:101, audio 48 kadrlar/33840 bayt tasdiqlandi. Tashxis dbg maydoni — FAQAT DEV_PHONES raqami + dbg:1 so'rovda ko'rinadi.
+- Versiya uchligi v115: worker BUILD_V + web/core.js __50BUILD + web/sw.js V.
+- CI: 12/12 YASHIL (commit 5417aef) — smoke, MUHR, qo'ng'iroq-MEDIA, MEDIA (1 marta flaky, rerun'da PASS), DATA, XAVFSIZLIK, Jurnal, Panel, domen, TARJIMON JONLI TEST (10/10 ✓), 2x deploy.
+- Tarjimon jonli test yakuniy natijasi: zh→uz "你好,请问火车站怎么走?今天天气很好。" → "Salom, vokzalga qanday borish mumkin? Bugun ob-havo juda yaxshi." + HAQIQIY o'zbek neyral ovozi (Madina); uz→en, uz→ru (WAV) ham o'z TTS ovozlarida.
+
+Stage Summary:
+- v115 muhrlandi: ovozli tarjimon endi «har qanday sharoitda» ishlaydi (AGC + normalizatsiya + 4×Whisper urinish + arab→lotin→llama tuzatish zanjiri) va o'zbekchani HAQIQIY NEYRAL OVOZ bilan o'qiydi (Edge TTS Madina/Sardor — Google'da o'zbek ovozi umuman yo'q).
+- Tarjima mustahkamligi: Google 429'da yangi Workers AI model zanjiri; bir-xil tilda echo; tashxis infrastrukturasi (tarjimon-test.yml + dbg) kelajakdagi tashxislar uchun qoldi.
+- Barcha qoidalar bajarildi: Eskiz SMS tegilmadi, web/ 0 panel izi, terminal himoya ON, mavjud funksiyalarga tegilmadi.
