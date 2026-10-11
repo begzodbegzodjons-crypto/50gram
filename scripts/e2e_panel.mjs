@@ -1,4 +1,4 @@
-/* 50 GRAM — MAXFIY ADMIN PANEL E2E (v104): 50gram.uz/?adminpanel paneldagi API qatlami
+/* 50 GRAM — MAXFIY ADMIN PANEL E2E (v104 → v105 kengaytirilgan): 50gram.uz/?adminpanel paneldagi API qatlami
  * Jonli sinov (CI runner IP'sidan — sandbox IP firewall-bloklangani uchun lokal sinov mumkin emas):
  *   1) STATIK: /?adminpanel → panel HTML (id="pw" + noindex); / → ODDIY ilova (panel IZI YO'Q)
  *   2) PAROL: xato parol → 401; to'g'ri parol (ADMIN_PASS) → adm-token
@@ -8,8 +8,13 @@
  *   6) BLOK: paneldan bloklash → foydalanuvchining /api/me 401 (SESSIYA-DARVOZA ISBOTI),
  *      qayta kod so'rash → 403 "bloklangan" (KIRISH-BLOK ISBOTI)
  *   7) BLOKDAN CHIQARISH: /api/me yana 200 — foydalanuvchi tiklandi
- *   BROADCAST: jonli yuborish SINALMAYDI (haqiqiy foydalanuvchilarga yuborilmasin) —
- *     SQL konstruktsiyasi lokal simulyatsiyada tekshiriladi (scripts/test_admin_v104.js).
+ *   8) BROADCAST: validatsiya (bo'sh → 400)
+ *   9) v105 FOYDALANUVCHI OYNASI: /panel/user — profil+davlat+statistika; yomon id → 404; tokensiz → 401
+ *  10) v105 ALOHIDA XABAR: /panel/dm — bo'sh → 400, yo'q → 404, bloklanganga → 400,
+ *      JONLI YUBORISH FAQAT O'Z TEST HISOBIGA (real foydalanuvchilarga TEGMAYDI)
+ *  11) v105 XAVFSIZLIK: /panel/security — statistika + taqsimotlar + 2-qadamdagi xato-parol
+ *      urinishi jurnalga tushgani (IP+davlat+tur) — SIGNALIZATSIYA JURNALI jonli dalil
+ *  BROADCAST jonli yuborish SINALMAYDI (haqiqiy foydalanuvchilarga xabar ketmasin).
  * Ishga tushirish: E2E_BASE=https://... node scripts/e2e_panel.mjs
  */
 import { readFileSync } from 'node:fs'
@@ -100,7 +105,41 @@ try {
   ok(b0.st === 400, 'broadcast bo\'sh matn → 400 (validatsiya jonli)', 'st=' + b0.st)
   console.log('  ℹ BROADCAST jonli yuborish ataylab sinalmagan (haqiqiy foydalanuvchilarga xabar ketmasin) — SQL konstruktsiyasi lokal simulyatsiyada tekshirilgan')
 
-  // 9) YOPILISH: test foydalanuvchisini logout (iz qolmasin)
+  // 9) v105 FOYDALANUVCHI MA'LUMOT OYNASI: /panel/user?id=
+  const ud = await j('/api/panel/user?id=' + uidT, { h: AT })
+  ok(ud.st === 200 && ud.d.phone === T.full && ud.d.cc === 'UZ', 'v105 foydalanuvchi ma\'lumot oynasi (profil+davlat)', 'st=' + ud.st)
+  ok(ud.st === 200 && typeof ud.d.messages === 'number' && typeof ud.d.files === 'number', 'v105 foydalanuvchi statistikasi (xabar/fayl hisobi)')
+  const udBad = await j('/api/panel/user?id=1', { h: AT })
+  ok(udBad.st === 404, 'v105 mavjud bo\'lmagan foydalanuvchi → 404', 'st=' + udBad.st)
+  const udAnon = await j('/api/panel/user?id=' + uidT)
+  ok(udAnon.st === 401, 'v105 tokensiz /panel/user → 401', 'st=' + udAnon.st)
+
+  // 10) v105 ALOHIDA XABAR: validatsiyalar + TEST HISOBIGA JONLI YUBORISH (faqat o'z test foydalanuvchimizga — real foydalanuvchilarga TEGMAYDI)
+  const dm0 = await j('/api/panel/dm', { method: 'POST', h: AT, body: { id: uidT, body: '' } })
+  ok(dm0.st === 400, 'v105 dm bo\'sh matn → 400', 'st=' + dm0.st)
+  const dmBad = await j('/api/panel/dm', { method: 'POST', h: AT, body: { id: 1, body: 'test' } })
+  ok(dmBad.st === 404, 'v105 dm mavjud bo\'lmagan foydalanuvchi → 404', 'st=' + dmBad.st)
+  const blD = await j('/api/panel/block', { method: 'POST', h: AT, body: { id: uidT, on: 1 } })
+  ok(blD.st === 200, 'v105 dm-sinov uchun qayta bloklash')
+  const dmBl = await j('/api/panel/dm', { method: 'POST', h: AT, body: { id: uidT, body: 'blok-sinov' } })
+  ok(dmBl.st === 400, 'v105 bloklangan foydalanuvchiga dm → 400', 'st=' + dmBl.st + ' msg=' + (dmBl.d.error || '').slice(0, 40))
+  await j('/api/panel/block', { method: 'POST', h: AT, body: { id: uidT, on: 0 } })
+  const dmOk = await j('/api/panel/dm', { method: 'POST', h: AT, body: { id: uidT, body: 'v105 panel dm jonli sinov xabari' } })
+  ok(dmOk.st === 200 && dmOk.d.ok && dmOk.d.chat_id, 'v105 ALOHIDA XABAR JONLI YUBORILDI («50gram admin» nomidan, test hisobiga)', 'st=' + dmOk.st)
+
+  // 11) v105 XAVFSIZLIK BO'LIMI: /panel/security (2-qadamdagi xato-parol urinishi sec_events'ga yozilgan bo'lishi kerak)
+  const secAnon = await j('/api/panel/security')
+  ok(secAnon.st === 401, 'v105 tokensiz /panel/security → 401', 'st=' + secAnon.st)
+  await sleep(2500) // waitUntil'dagi secYoz yozuvi yerga tushsin
+  const sec = await j('/api/panel/security', { h: AT })
+  ok(sec.st === 200 && typeof sec.d.e24 === 'number' && typeof sec.d.eall === 'number' && typeof sec.d.uip === 'number', 'v105 xavfsizlik statistikasi (e24/eall/uip)', 'st=' + sec.st + ' j=' + JSON.stringify(sec.d).slice(0, 100))
+  ok(Array.isArray(sec.d.kinds) && Array.isArray(sec.d.ccs) && Array.isArray(sec.d.paths) && Array.isArray(sec.d.recent) && Array.isArray(sec.d.alarms) && Array.isArray(sec.d.blocksTop), 'v105 xavfsizlik taqsimotlari (kinds/ccs/paths/recent/alarms/blocksTop)')
+  ok(typeof sec.d.blocks === 'number', 'v105 blokda turgan IP soni (SEC DO\'dan)', 'blocks=' + sec.d.blocks)
+  const authEv = (sec.d.recent || []).find((x) => x.kind === 'auth' && x.ip)
+  ok(!!authEv, 'v105 PANELGA HUJUM QAYD ETILGAN (2-qadamdagi xato-parol urinishi jurnalda)', authEv ? 'ip=' + authEv.ip + ' cc=' + authEv.cc + ' act=' + authEv.act : 'topilmadi')
+  console.log('  ℹ v105 xavfsizlik: ' + (sec.d.eall || 0) + ' jami urinish, ' + (sec.d.e24 || 0) + ' (24soat), ' + (sec.d.uip || 0) + ' noyob IP, ' + (sec.d.blocks || 0) + ' blokda')
+
+  // 12) YOPILISH: test foydalanuvchisini logout (iz qolmasin)
   try { await j('/api/auth/logout', { method: 'POST', h: { authorization: 'Bearer ' + tokT }, body: {} }) } catch {}
 } catch (e) {
   fails++

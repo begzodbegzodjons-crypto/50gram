@@ -230,14 +230,60 @@ function fwLokal(ip: string, kind: string, need: number, dur: number) {
 // v98: ochko BLOKGA aylanganda (faqat shunda) err_jurnal'ga yoziladi — egaga /api/jurnal
 // orqali hujum urinishlari KO'RINADI («yadroga kirishga urinishlar bloklandi» dalili).
 // Dedupe: bir (ip|kind) juftligi 1 soatda BIR marta yoziladi — hujum toshqinida jurnal o'smaydi.
-function fwOchko(env: Env, wait: (p: Promise<unknown>) => void, ip: string, kind: string, weight = 1) {
+// v105: hujum-hodisa konteksti — hujum qayerdan (davlat/shahar — Cloudflare cf.geodan,
+// bepul, API yo'q) va ilovaning QAYSI QISMIGA (yo'l). fwOchko'ga ixtiyoriy parametr —
+// barcha eski qo'ng'iroqlar o'zgarishsiz ishlaydi (xulq 0% o'zgargan).
+type SecInfo = { p?: string; cc?: string; city?: string }
+function secInfo(req: Request, url: URL): SecInfo {
+  const cf = (req as any)?.cf || {}
+  return { p: String(url.pathname || "").slice(0, 110), cc: String(cf.country || "").slice(0, 8), city: String(cf.city || "").slice(0, 60) }
+}
+// v105 SIGNALIZATSIYA + JURNAL: har ochko/blok → sec_events (D1) strukturaviy yozuv.
+// Jiddiy blok (root/ext/inj/data/auth) → DARHOL sec_alarm (egaga signal — panelda qizil
+// banner). 10 daqiqada 8+ ochko ham signal. 30 daqiqada signal SPAM'i YO'Q (dedupe).
+// Faqat fon (waitUntil) + try/catch — HECH QACHON javobni buzmaydi, himoya xulqi o'zgarmas.
+async function secYoz(env: Env, ip: string, kind: string, weight: number, info: SecInfo | undefined, act: string) {
+  try {
+    const db = env.__db || makeDb(env.DATABASE_URL)
+    try { await ensureSchema(db) } catch {}
+    const t = Date.now()
+    const cc = str(info?.cc, 8) || "??", city = str(info?.city, 60), pth = str(info?.p, 110)
+    const kn = SEC_KIND_UZ[kind] || kind
+    await db.run(
+      "INSERT INTO sec_events (ts, ip, cc, city, kind, path, act, note) VALUES (?,?,?,?,?,?,?,?)",
+      [t, ip.slice(0, 60), cc, city, String(kind).slice(0, 20), pth, String(act).slice(0, 14),
+        act === "blok" ? "Bloklandi (" + kn + ") — " + (weight > 1 ? weight + "x daraja" : "himoya ishlagan") : "Urinish ushlandi (" + kn + ") — to'siqqa naylon"],
+    )
+    const jiddiy = act === "blok" && (kind === "root" || kind === "ext" || kind === "inj" || kind === "data" || kind === "auth")
+    let alarm = jiddiy
+    if (!alarm) {
+      const c10 = await db.one("SELECT COUNT(*) AS n FROM sec_events WHERE ts>?", [t - 600_000]).catch(() => null)
+      if (Number(c10?.n || 0) >= 8) alarm = true
+    }
+    if (alarm) {
+      const la = await db.one("SELECT ts FROM sec_alarm ORDER BY id DESC LIMIT 1").catch(() => null)
+      if (!la || t - Number(la.ts) > 30 * 60_000) {
+        await db.run(
+          "INSERT INTO sec_alarm (id, ts, kind, ip, cc, n, note) VALUES (?,?,?,?,?,?,?)",
+          [newId(), t, String(kind).slice(0, 20), ip.slice(0, 60), cc, jiddiy ? weight : 1,
+            jiddiy ? "SIGNAL: " + kn + " hujumi bloklandi (" + (cc === "??" ? "davlat noma'lum" : cc) + ") — dastur himoyalangan, egaga xabar berildi" : "SIGNAL: 10 daqiqada 8+ hujum urinishi (" + kn + ") — himoya o'zi ishlagan"],
+        )
+      }
+    }
+  } catch {}
+}
+// v105 jurnal dedupe: bir (ip|kind) 30 sekundda BIR marta sec_events'ga yoziladi
+// (toshqin hujumida D1 yozuvlari portlab ketmasin; blok hodisasi — HAR DOIM yoziladi)
+const FW_SLOG = new Map<string, number>()
+function fwOchko(env: Env, wait: (p: Promise<unknown>) => void, ip: string, kind: string, weight = 1, info?: SecInfo) {
   if (!ip || !env.SEC) return
   wait((async () => {
     try {
       const st = env.SEC!.get(env.SEC!.idFromName("global"))
       const r = await st.fetch("https://fw/?op=strike", { method: "POST", body: JSON.stringify({ ip, kind, weight }) })
       const j: any = await r.json()
-      if (j && j.until > Date.now()) {
+      const blok = j && j.until > Date.now()
+      if (blok) {
         FW_KESH.set(ip, { u: j.until, t: Date.now(), v: 1 })
         const dk = ip + "|" + kind, t = Date.now()
         if (!FW_JLOG.has(dk) || t - FW_JLOG.get(dk)! > 3_600_000) {
@@ -246,8 +292,24 @@ function fwOchko(env: Env, wait: (p: Promise<unknown>) => void, ip: string, kind
           jurnalYoz(env, "fw:" + kind, 0, "fw", "himoya: IP *" + ip.slice(-6) + " bloklandi (" + kind + ")")
         }
       }
+      // v105: strukturaviy xavfsizlik yozuvi (blok — HAR DOIM; ochko — 30s dedupe)
+      if (blok) { await secYoz(env, ip, kind, weight, info, "blok") }
+      else {
+        const sk = ip + "|" + kind, tn = Date.now(), lw = FW_SLOG.get(sk)
+        if (!lw || tn - lw > 30_000) {
+          if (FW_SLOG.size > 4000) FW_SLOG.clear()
+          FW_SLOG.set(sk, tn)
+          await secYoz(env, ip, kind, weight, info, "ochko")
+        }
+      }
     } catch {}
   })())
+}
+// v105: hujum turlarining o'zbekcha nomlari (panel «Xavfsizlik» bo'limida ko'rinadi)
+const SEC_KIND_UZ: Record<string, string> = {
+  root: "Yadro/admin yo‘llariga kirish", ext: "Begona mijoz (skaner/bot)", inj: "In‘ektsiya/SQL hujumi",
+  data: "Ma’lumot tortish toshqini", auth: "Parol/kod brute-force", flood: "So‘rov toshqini",
+  tok: "Yaroqsiz token toshqini", otp: "OTP pumping", clog: "Jurnal toshqini", scan: "4xx skaner",
 }
 const newId = () => Date.now() * 1000 + Math.floor(Math.random() * 1000)
 const DAY = 86400000
@@ -274,7 +336,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v104"
+const BUILD_V = "v105"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -359,6 +421,16 @@ async function ensureSchema(db: Db) {
     "CREATE TABLE IF NOT EXISTS trend_stats (cat VARCHAR(20) PRIMARY KEY, imp BIGINT NOT NULL DEFAULT 0, clk BIGINT NOT NULL DEFAULT 0, wt BIGINT NOT NULL DEFAULT 0, upd BIGINT NOT NULL DEFAULT 0)",
     // v104 ADMIN PANEL: blok bayrog'i — egapanel bloklaydi, sessiya-darvoza/kirish nuqtalari tekshiradi
     "ALTER TABLE users ADD COLUMN blocked INT NOT NULL DEFAULT 0",
+    // v105 XAVFSIZLIK JURNALI: har himoya-ochko/blok strukturaviy yozuv (IP, DAVLAT, tur,
+    // ilovaning qaysi qismi hujumga uchradi, chora). Panel «Xavfsizlik» bo'limi o'qiydi —
+    // egada kim/qayerdan/qancha hujum dalili. Retensiyasi 30 kun (cleanup).
+    "CREATE TABLE IF NOT EXISTS sec_events (id BIGINT AUTO_INCREMENT PRIMARY KEY, ts BIGINT NOT NULL, ip VARCHAR(64) NOT NULL DEFAULT '', cc VARCHAR(8) NOT NULL DEFAULT '', city VARCHAR(60) NOT NULL DEFAULT '', kind VARCHAR(24) NOT NULL DEFAULT '', path VARCHAR(120) NOT NULL DEFAULT '', act VARCHAR(16) NOT NULL DEFAULT '', note VARCHAR(200) NOT NULL DEFAULT '')",
+    "CREATE INDEX IF NOT EXISTS idx_sec_ts ON sec_events (ts)",
+    "CREATE INDEX IF NOT EXISTS idx_sec_ip ON sec_events (ip, ts)",
+    // v105 SIGNALIZATSIYA: hujum aniqlanganda egaga signal-yozuv (panelda qizil banner) —
+    // jiddiy blok (root/ext/inj/data/auth-blok) DARHOL signal; 10 daqiqada 8+ ochko ham signal.
+    "CREATE TABLE IF NOT EXISTS sec_alarm (id BIGINT PRIMARY KEY, ts BIGINT NOT NULL, kind VARCHAR(24) NOT NULL DEFAULT '', ip VARCHAR(64) NOT NULL DEFAULT '', cc VARCHAR(8) NOT NULL DEFAULT '', n INT NOT NULL DEFAULT 0, note VARCHAR(200) NOT NULL DEFAULT '')",
+    "CREATE INDEX IF NOT EXISTS idx_secalm_ts ON sec_alarm (ts)",
   ]
   for (const s of stmts) { try { await db.run(s) } catch {} }
   try {
@@ -569,8 +641,8 @@ async function authVerify(c: C) {
     // bo'lsa IP 24 soatga to'siladi (bu haqda hujumchiga ma'lumot bermaydigan javob)
     const fip = fwIp(c.req)
     if (fip) {
-      if (fwLokal(fip, "auth", 12, 24 * 3_600_000)) { fwOchko(c.env, c.wait, fip, "auth"); return FW_404() }
-      fwOchko(c.env, c.wait, fip, "auth")
+      if (fwLokal(fip, "auth", 12, 24 * 3_600_000)) { fwOchko(c.env, c.wait, fip, "auth", 1, secInfo(c.req, c.url)); return FW_404() }
+      fwOchko(c.env, c.wait, fip, "auth", 1, secInfo(c.req, c.url))
     }
     fail("Kod noto‘g‘ri")
   }
@@ -3275,7 +3347,7 @@ async function adminJurnal(c: C) {
 }
 
 // =====================================================================
-// MAXFIY ADMIN PANEL (v104) — FAQAT SAYT EGASI uchun (50gram.uz/?adminpanel)
+// MAXFIY ADMIN PANEL (v104 → v105 KENGAYTIRILGAN) — FAQAT SAYT EGASI uchun (50gram.uz/?adminpanel)
 // ---------------------------------------------------------------------
 // MANZIL: 50gram.uz/?adminpanel → parol → panel (statistika, foydalanuvchilar,
 //   davlatlar, bloklash, hammaga xabar). Ilova ichida (web/) panel haqida BITTA
@@ -3298,6 +3370,17 @@ async function adminJurnal(c: C) {
 //   o'zi bloklaganlar chisqishtiriladi.
 // SUBREQUEST-BYUDJET: bepul planda so'roviga 50 subrequest — broadcast HAMMASI
 //   ko'p-qatorli INSERT/UPDATE (batch 400) bilan yoziladi (2000 ta ≈ 34 so'rov).
+// v105 YANGI:
+//  • XAVFSIZLIK BO'LIMI: har himoya-ochko/blok → sec_events (D1) — IP, DAVLAT
+//    (Cloudflare cf.country — bepul geo), shahar, hujum TURI, ilovaning QAYSI
+//    QISMIGA (yo'l), chora (blok/ushlandi). Statistika: 24soat/7kun/jami urinish,
+//    noyob IP'lar, turlar/davlatlar/qismlar taqsimoti, so'nggi 80 hujum jadvali.
+//  • SIGNALIZATSIYA: jiddiy blok (root/ext/inj/data/auth) → DARHOL sec_alarm
+//    → panelda QIZIL PARCHA QAYTUVCHI banner (egaga "hujum bo'ldi, bloklandi"
+//    xabari). 10 daqiqada 8+ urinish ham signal. 30 daqiqada signal-spam yo'q.
+//  • ALOHIDA XABAR (POST /panel/dm): "50gram admin" nomidan BITTA foydalanuvchiga.
+//  • FOYDALANUVCHI MA'LUMOT OYNASI (GET /panel/user?id=): to'liq profil + xabar/
+//    suhbat/qo'ng'iroq/fayl statistikasi + bloklash/xabar tugmalari bilan modal.
 // =====================================================================
 const ADM_ID = 990000000001
 const ADM_PHONE = "+999900000001" // +999 davlat kodi HAQIQIYATDA mavjud emas — hech qachon to'qnashmaydi
@@ -3341,8 +3424,8 @@ async function panelLogin(c: C) {
     const ip = fwIp(c.req)
     if (ip) {
       // OTP-brute posboni: 12 xato parol/1 soat → 24 soat doimiy IP-blok (javob — oddiy "Not found")
-      if (fwLokal(ip, "auth", 12, 24 * 3_600_000)) { fwOchko(c.env, c.wait, ip, "auth"); return FW_404() }
-      fwOchko(c.env, c.wait, ip, "auth")
+      if (fwLokal(ip, "auth", 12, 24 * 3_600_000)) { fwOchko(c.env, c.wait, ip, "auth", 1, secInfo(c.req, c.url)); return FW_404() }
+      fwOchko(c.env, c.wait, ip, "auth", 1, secInfo(c.req, c.url))
     }
     fail("Parol noto‘g‘ri", 401)
   }
@@ -3490,6 +3573,124 @@ async function panelBroadcast(c: C) {
   return json({ ok: true, sent, new_chats: newChats, total, now: t })
 }
 
+// ---- v105: XAVFSIZLIK BO'LIMI — egada hujumlar haqida TO'LIQ ma'lumot oynasi ----
+// Kim (IP), qayerdan (davlat/shahar), qancha urinish, QANDAY hujum turi, ilovaning
+// QAYSI QISMIGA, qanday chora qilingan (blok/ochko) — hammasi sec_events'dan.
+// Signalizatsiya holati — sec_alarm'dan (oxirgi signal 30 daqiqa ichida = FAOL signal).
+async function panelSecurity(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const t = now()
+  const [e24, e7, eall, uip, byKind, byCc, byPath, recent, alarms, lastAl] = await Promise.all([
+    c.db.one("SELECT COUNT(*) AS n FROM sec_events WHERE ts>?", [t - DAY]).catch(() => null),
+    c.db.one("SELECT COUNT(*) AS n FROM sec_events WHERE ts>?", [t - 7 * DAY]).catch(() => null),
+    c.db.one("SELECT COUNT(*) AS n FROM sec_events").catch(() => null),
+    c.db.one("SELECT COUNT(DISTINCT ip) AS n FROM sec_events WHERE ts>?", [t - 7 * DAY]).catch(() => null),
+    c.db.q("SELECT kind, COUNT(*) AS n FROM sec_events WHERE ts>? GROUP BY kind ORDER BY n DESC LIMIT 12", [t - 7 * DAY]).catch(() => [] as any[]),
+    c.db.q("SELECT cc, COUNT(*) AS n FROM sec_events WHERE ts>? GROUP BY cc ORDER BY n DESC LIMIT 12", [t - 7 * DAY]).catch(() => [] as any[]),
+    c.db.q("SELECT path, COUNT(*) AS n FROM sec_events WHERE ts>? GROUP BY path ORDER BY n DESC LIMIT 10", [t - 7 * DAY]).catch(() => [] as any[]),
+    c.db.q("SELECT id, ts, ip, cc, city, kind, path, act, note FROM sec_events ORDER BY id DESC LIMIT 80").catch(() => [] as any[]),
+    c.db.q("SELECT id, ts, kind, ip, cc, n, note FROM sec_alarm ORDER BY id DESC LIMIT 20").catch(() => [] as any[]),
+    c.db.one("SELECT ts, kind, ip, cc, note FROM sec_alarm ORDER BY id DESC LIMIT 1").catch(() => null),
+  ])
+  // Hozir blokda turgan IP'lar soni — SEC DO (doimiy bloklar ombori) — faqat egaga ko'rinadi
+  let blocks = 0, blocksTop: Array<{ ip: string; until: number; ms: number }> = []
+  try {
+    const r = await c.env.SEC!.get(c.env.SEC!.idFromName("global")).fetch("https://fw/?op=refresh")
+    const j: any = await r.json()
+    const bl: Array<[string, number]> = j.blocks || []
+    blocks = bl.length
+    blocksTop = bl
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([ip, until]) => ({ ip, until: Number(until), ms: Number(until) - t }))
+  } catch {}
+  return json({
+    e24: Number(e24?.n || 0), e7: Number(e7?.n || 0), eall: Number(eall?.n || 0), uip: Number(uip?.n || 0),
+    blocks, blocksTop,
+    kinds: (byKind as any[]).map((r) => ({ k: r.kind, n: Number(r.n), name: SEC_KIND_UZ[String(r.kind)] || String(r.kind) })),
+    ccs: (byCc as any[]).map((r) => ({ cc: String(r.cc || "??"), n: Number(r.n) })),
+    paths: (byPath as any[]).map((r) => ({ p: String(r.path || "?"), n: Number(r.n) })),
+    recent: (recent as any[]).map((r) => ({ id: +r.id, ts: +r.ts, ip: r.ip, cc: r.cc, city: r.city || "", kind: r.kind, path: r.path, act: r.act, note: r.note })),
+    alarms: (alarms as any[]).map((r) => ({ id: +r.id, ts: +r.ts, kind: r.kind, ip: r.ip, cc: r.cc, n: Number(r.n), note: r.note })),
+    alarmTs: lastAl ? +lastAl.ts : 0, alarmLast: lastAl || null,
+    now: t,
+  })
+}
+
+// ---- v105: BITTA FOYDALANUVCHI TO'LIQ MA'LUMOT OYNASI ("barcha ma'lumot oynasi") ----
+async function panelUser(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const id = Math.floor(+(c.url.searchParams.get("id") || 0) || 0)
+  if (!id || id === ADM_ID) fail("Noto‘g‘ri foydalanuvchi", 400)
+  const u = await c.db.one(
+    `SELECT id, phone, first_name, last_name, username, bio, avatar_ver, privacy_phone, privacy_last_seen, created_at, last_seen, blocked, token_exp
+     FROM users WHERE id=?`, [id],
+  ).catch(() => null)
+  if (!u) fail("Foydalanuvchi topilmadi", 404)
+  const [msg, ch, cl, med] = await Promise.all([
+    c.db.one("SELECT COUNT(*) AS n FROM messages WHERE sender_id=?", [id]).catch(() => null),
+    c.db.one("SELECT COUNT(*) AS n FROM chat_members WHERE user_id=?", [id]).catch(() => null),
+    c.db.one("SELECT COUNT(*) AS n FROM calls WHERE caller_id=? OR callee_id=?", [id, id]).catch(() => null),
+    c.db.one("SELECT COUNT(*) AS n, COALESCE(SUM(size),0) AS s FROM media WHERE owner_id=? AND dropped=0 AND gone=0", [id]).catch(() => null),
+  ])
+  return json({
+    id: +u.id, phone: u.phone, name: ((u.first_name || "") + " " + (u.last_name || "")).trim(),
+    username: u.username || "", bio: u.bio || "", av: +u.avatar_ver || 0,
+    cr: +u.created_at || 0, ls: +u.last_seen || 0, bl: +u.blocked === 1, cc: ccOf(u.phone),
+    sessEnd: +u.token_exp || 0,
+    messages: Number(msg?.n || 0), chats: Number(ch?.n || 0), calls: Number(cl?.n || 0),
+    files: Number(med?.n || 0), bytes: Number(med?.s || 0),
+    now: now(),
+  })
+}
+
+// ---- v105: ALOHIDA XABAR — "50gram admin" nomidan BITTA foydalanuvchiga ----
+// Hammaga-xabar bilan BIR XIL mexanizm (direct chat + oddiy xabar) — klient kodiga 0 bayt.
+async function panelDm(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const id = Math.floor(+(c.b?.id) || 0)
+  const body = str(c.b.body, 4096)
+  if (!id || id === ADM_ID) fail("Noto‘g‘ri foydalanuvchi", 400)
+  if (!body) fail("Xabar matni bo‘sh", 400)
+  const u = await c.db.one("SELECT id, blocked FROM users WHERE id=?", [id]).catch(() => null)
+  if (!u) fail("Foydalanuvchi topilmadi", 404)
+  if (+u.blocked === 1) fail("Foydalanuvchi bloklangan — avval blokdan chiqaring", 400)
+  if (await c.db.one("SELECT user_id FROM blocks WHERE user_id=? AND blocked_id=?", [id, ADM_ID]).catch(() => null))
+    fail("Foydalanuvchi admin xabarlarini o‘z tomonidan bloklagan — yuborilmadi", 400)
+  await admSysUser(c.db)
+  const t = now()
+  const key = id < ADM_ID ? id + ":" + ADM_ID : ADM_ID + ":" + id
+  let chid = Number((await c.db.one("SELECT id FROM chats WHERE direct_key=?", [key]).catch(() => null))?.id || 0)
+  if (!chid) {
+    chid = newId()
+    await c.db.run(
+      "INSERT INTO chats(id,type,owner_id,is_public,invite_hash,direct_key,member_count,last_msg_at,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+      [chid, "direct", ADM_ID, 0, randomStr(10), key, 2, t, t],
+    )
+    await c.db.run(
+      "INSERT INTO chat_members(chat_id,user_id,role,joined_at) VALUES(?,?,?,?),(?,?,?,?)",
+      [chid, ADM_ID, "member", t, chid, id, "member", t],
+    )
+  }
+  const mid = t * 1000 + Math.floor(Math.random() * 500)
+  try {
+    await c.db.run(
+      "INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)",
+      [mid, chid, ADM_ID, "text", body, null, t, t, t + 100 * 365 * DAY],
+    )
+  } catch {
+    await c.db.run(
+      "INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)",
+      [newId(), chid, ADM_ID, "text", body, null, t, t, t + 100 * 365 * DAY],
+    )
+  }
+  await c.db.run("UPDATE chats SET last_msg_at=? WHERE id=?", [t, chid])
+  return json({ ok: true, id, chat_id: chid, now: t })
+}
+
 // PANEL SAHIFASI — worker xotirasidan beriladi (web/ papkada FAYL YO'Q — saytda iz yo'q).
 // String.raw: ichida ${ va backtick TAQIQLANGAN (panel JS'da faqat '+' birlashmasi).
 const ADMIN_HTML = String.raw`<!doctype html>
@@ -3544,7 +3745,33 @@ textarea{min-height:140px;resize:vertical}
 .lg{max-width:340px;margin:12vh auto 0;padding:0 18px}
 .lg h1{font-size:22px;margin:0 0 6px}
 .lg p{color:#8b919c;font-size:14px;margin:0 0 18px}
-@media(max-width:640px){.crow .nm{width:112px}.u{flex-wrap:wrap}}
+/* v105: XAVFSIZLIK BO'LIMI uslublari */
+.alarm{border:1px solid #a1303f;background:#2a1114;border-radius:12px;padding:12px 14px;margin:0 0 14px;animation:bl 1.6s infinite}
+.alarm b{color:#ff7b72;font-size:15px}
+.alarm small{display:block;color:#d98a93;font-size:12px;margin-top:3px}
+.alarm.old{animation:none;background:#171a1f;border-color:#23262d}
+.alarm.old b{color:#c9cdd4}
+.alarm.old small{color:#8b919c}
+@keyframes bl{0%,100%{opacity:1}50%{opacity:.62}}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0 0}
+th{color:#8b919c;text-align:left;font-weight:600;padding:6px 8px;border-bottom:1px solid #23262d;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+td{padding:7px 8px;border-bottom:1px solid #1d2026;vertical-align:top}
+tr:hover td{background:#171a1f}
+.act{display:inline-block;padding:1px 8px;border-radius:6px;font-size:11px;background:#1f3a2a;color:#4ec97a;white-space:nowrap}
+.act.b{background:#3a1f24;color:#ff7b72}
+.ip{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.mdl{position:fixed;inset:0;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
+.mc{background:#171a1f;border:1px solid #2a2e36;border-radius:14px;max-width:440px;width:100%;max-height:86vh;overflow-y:auto;padding:18px}
+.mc h4{font-size:16px;margin:0 0 2px}
+.mc .sub{color:#8b919c;font-size:13px;margin:0 0 12px}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #1d2026;font-size:14px}
+.kv span{color:#8b919c}
+.kv b{text-align:right;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mrow2{display:flex;gap:8px;margin:14px 0 0}
+.mrow2 button{flex:1}
+.xcl{position:absolute;top:10px;right:12px;background:none;border:0;color:#8b919c;font-size:20px;padding:4px;cursor:pointer}
+.mc{position:relative}
+@media(max-width:640px){.crow .nm{width:112px}.u{flex-wrap:wrap}table{font-size:12px}.hiddencol{display:none}}
 </style>
 </head>
 <body>
@@ -3561,6 +3788,7 @@ textarea{min-height:140px;resize:vertical}
     <button data-t="st" class="on">Statistika</button>
     <button data-t="us">Foydalanuvchilar</button>
     <button data-t="br">Xabar yuborish</button>
+    <button data-t="sc">Xavfsizlik</button>
   </div>
   <section id="st">
     <div class="cards" id="cards"></div>
@@ -3579,14 +3807,31 @@ textarea{min-height:140px;resize:vertical}
     <div class="bar2" style="margin-top:10px"><span class="note" id="cnt">0 / 4096</span><button id="sb">Hammaga yuborish</button></div>
     <div class="res" id="bres"></div>
   </section>
+  <section id="sc" class="hidden">
+    <div id="alrm"></div>
+    <div class="cards" id="scards"></div>
+    <h3>Hujum turlari (7 kun)</h3>
+    <div id="skinds"></div>
+    <h3>Hujum davlatlari (7 kun)</h3>
+    <div id="sccs"></div>
+    <h3>Hujum qilingan qismlar (7 kun)</h3>
+    <div id="spaths"></div>
+    <h3>So‘nggi hujum urinishlari</h3>
+    <div style="overflow-x:auto"><table><thead><tr><th>Vaqt</th><th>IP</th><th>Davlat</th><th>Tur</th><th class="hiddencol">Qismi</th><th>Chora</th></tr></thead><tbody id="srec"></tbody></table></div>
+    <h3>Blokda turgan IP’lar</h3>
+    <div style="overflow-x:auto"><table><thead><tr><th>IP</th><th>Blok tugashi</th></tr></thead><tbody id="sblk"></tbody></table></div>
+    <h3>Signalizatsiya jurnali</h3>
+    <div id="salarms"></div>
+  </section>
 </div>
+<div id="mdl" class="mdl hidden"><div class="mc" id="mc"></div></div>
 <script>
 var T=localStorage.getItem('g50adm')||''
 var cur='st',page=1,pages=1
 function $(i){return document.getElementById(i)}
 var M={'"':"&quot;","'":"&#39;","&":"&amp;","<":"&lt;",">":"&gt;"}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return M[c]})}
-var CC={UZ:['O‘zbekiston','🇺🇿'],RU:['Rossiya','🇷🇺'],KZ:['Qozog‘iston','🇰🇿'],KG:['Qirg‘iziston','🇰🇬'],TJ:['Tojikiston','🇹🇯'],TM:['Turkmaniston','🇹🇲'],AZ:['Ozarbayjon','🇦🇿'],UA:['Ukraina','🇺🇦'],BY:['Belarus','🇧🇾'],GE:['Gruziya','🇬🇪'],AM:['Armaniston','🇦🇲'],MD:['Moldova','🇲🇩'],TR:['Turkiya','🇹🇷'],DE:['Germaniya','🇩🇪'],FR:['Fransiya','🇫🇷'],GB:['Buyuk Britaniya','🇬🇧'],IT:['Italiya','🇮🇹'],ES:['Ispaniya','🇪🇸'],NL:['Niderlandiya','🇳🇱'],PL:['Polsha','🇵🇱'],RO:['Rumyniya','🇷🇴'],CZ:['Chexiya','🇨🇿'],BG:['Bolgariya','🇧🇬'],HU:['Vengriya','🇭🇺'],SE:['Shvetsiya','🇸🇪'],NO:['Norvegiya','🇳🇴'],DK:['Daniya','🇩🇰'],FI:['Finlandiya','🇫🇮'],LT:['Litva','🇱🇹'],LV:['Latviya','🇱🇻'],EE:['Estoniya','🇪🇪'],CH:['Shveytsariya','🇨🇭'],AT:['Avstriya','🇦🇹'],RS:['Serbiya','🇷🇸'],HR:['Xorvatiya','🇭🇷'],GR:['Gretsiya','🇬🇷'],PT:['Portugaliya','🇵🇹'],IL:['Isroil','🇮🇱'],AE:['BAA','🇦🇪'],SA:['Saudiya Arabistoni','🇸🇦'],IR:['Eron','🇮🇷'],IQ:['Iroq','🇮🇶'],AF:['Afg‘oniston','🇦🇫'],CN:['Xitoy','🇨🇳'],KR:['Koreya','🇰🇷'],JP:['Yaponiya','🇯🇵'],IN:['Hindiston','🇮🇳'],PK:['Pokiston','🇵🇰'],VN:['Vetnam','🇻🇳'],TH:['Tailand','🇹🇭'],ID:['Indoneziya','🇮🇩'],MY:['Malayziya','🇲🇾'],PH:['Filippin','🇵🇭'],US:['AQSh / Kanada','🇺🇸'],BR:['Braziliya','🇧🇷'],XX:['Boshqa','🌐']}
+var CC={UZ:['O‘zbekiston','🇺🇿'],RU:['Rossiya','🇷🇺'],KZ:['Qozog‘iston','🇰🇿'],KG:['Qirg‘iziston','🇰🇬'],TJ:['Tojikiston','🇹🇯'],TM:['Turkmaniston','🇹🇲'],AZ:['Ozarbayjon','🇦🇿'],UA:['Ukraina','🇺🇦'],BY:['Belarus','🇧🇾'],GE:['Gruziya','🇬🇪'],AM:['Armaniston','🇦🇲'],MD:['Moldova','🇲🇩'],TR:['Turkiya','🇹🇷'],DE:['Germaniya','🇩🇪'],FR:['Fransiya','🇫🇷'],GB:['Buyuk Britaniya','🇬🇧'],IT:['Italiya','🇮🇹'],ES:['Ispaniya','🇪🇸'],NL:['Niderlandiya','🇳🇱'],PL:['Polsha','🇵🇱'],RO:['Rumyniya','🇷🇴'],CZ:['Chexiya','🇨🇿'],BG:['Bolgariya','🇧🇬'],HU:['Vengriya','🇭🇺'],SE:['Shvetsiya','🇸🇪'],NO:['Norvegiya','🇳🇴'],DK:['Daniya','🇩🇰'],FI:['Finlandiya','🇫🇮'],LT:['Litva','🇱🇹'],LV:['Latviya','🇱🇻'],EE:['Estoniya','🇪🇪'],CH:['Shveytsariya','🇨🇭'],AT:['Avstriya','🇦🇹'],RS:['Serbiya','🇷🇸'],HR:['Xorvatiya','🇭🇷'],GR:['Gretsiya','🇬🇷'],PT:['Portugaliya','🇵🇹'],IL:['Isroil','🇮🇱'],AE:['BAA','🇦🇪'],SA:['Saudiya Arabistoni','🇸🇦'],IR:['Eron','🇮🇷'],IQ:['Iroq','🇮🇶'],AF:['Afg‘oniston','🇦🇫'],CN:['Xitoy','🇨🇳'],KR:['Koreya','🇰🇷'],JP:['Yaponiya','🇯🇵'],IN:['Hindiston','🇮🇳'],PK:['Pokiston','🇵🇰'],VN:['Vetnam','🇻🇳'],TH:['Tailand','🇹🇭'],ID:['Indoneziya','🇮🇩'],MY:['Malayziya','🇲🇾'],PH:['Filippin','🇵🇭'],US:['AQSh / Kanada','🇺🇸'],BR:['Braziliya','🇧🇷'],XX:['Boshqa','🌐'],'??':['Noma’lum (VPN/proxy)','❓']}
 function ccName(k){var x=CC[k];return x?(x[1]+' '+x[0]):'🌐 Boshqa'}
 function api(p,m,b){
   return fetch('/api/panel/'+p,{method:m||'GET',headers:{'content-type':'application/json',authorization:'Bearer '+T},body:b?JSON.stringify(b):undefined})
@@ -3651,7 +3896,8 @@ function loadUsers(p){
         +'<div class="in"><div class="nm">'+esc(u.name||'(ism yozilmagan)')+(u.bl?'<span class="tag">Bloklangan</span>':'')+'</div>'
         +'<div class="sub">'+esc(u.phone)+' · '+ccName(u.cc)+(u.username?' · @'+esc(u.username):'')+'</div>'
         +'<div class="st">ID '+u.id+' · Royxat: '+dt(u.cr)+' · Faollik: '+rel(u.ls)+'</div></div>'
-        +(u.bl?'<button class="sec" data-un="'+u.id+'">Blokdan chiqarish</button>':'<button class="warn" data-bl="'+u.id+'">Bloklash</button>')
+        +'<div><button class="sec" data-in="'+u.id+'">Ma\'lumot</button> <button class="sec" data-dm="'+u.id+'">Xabar</button> '
+        +(u.bl?'<button class="sec" data-un="'+u.id+'">Blokdan chiqarish</button>':'<button class="warn" data-bl="'+u.id+'">Bloklash</button>')+'</div>'
         +'</div>'
     }
     $('ul').innerHTML=h||'<p class="note">Topilmadi</p>'
@@ -3673,6 +3919,116 @@ function loadUsers(p){
         else alert((r.j&&r.j.error)||'Xatolik')
       })
     }
+    var ds=$('ul').querySelectorAll('[data-dm]')
+    for(var i=0;i<ds.length;i++)ds[i].onclick=function(){sendDm(+(this.getAttribute('data-dm')))}
+    var ins=$('ul').querySelectorAll('[data-in]')
+    for(var i=0;i<ins.length;i++)ins[i].onclick=function(){showUser(+(this.getAttribute('data-in')))}
+  })
+}
+// v105: ALOHIDA XABAR — «50gram admin» nomidan BITTA foydalanuvchiga
+function sendDm(id){
+  var v=prompt('Foydalanuvchiga yuboriladigan xabar («50gram admin» nomidan):')
+  if(v===null)return
+  v=v.trim()
+  if(!v){alert('Xabar matni bo\'sh');return}
+  if(!confirm('Xabar shu foydalanuvchining xabar bo\'limiga yuboriladi. Davom etamizmi?'))return
+  api('dm','POST',{id:id,body:v}).then(function(r){
+    if(authFail(r))return
+    if(r.j&&r.j.ok)alert('✓ Xabar yuborildi («50gram admin» nomidan).')
+    else alert((r.j&&r.j.error)||'Xatolik')
+  })
+}
+// v105: BITTA FOYDALANUVCHI TO\'LIQ MA\'LUMOT OYNASI
+function kvr(k,v){return '<div class="kv"><span>'+k+'</span><b>'+v+'</b></div>'}
+function showUser(id){
+  $('mdl').classList.remove('hidden')
+  $('mc').innerHTML='<p class="note">Yuklanmoqda...</p>'
+  api('user?id='+id).then(function(r){
+    if(authFail(r))return
+    var u=r.j
+    if(!u||u.id===undefined){$('mc').innerHTML='<button class="xcl" onclick="document.getElementById(\'mdl\').classList.add(\'hidden\')">×</button><p class="note">'+esc((r.j&&r.j.error)||'Topilmadi')+'</p>';return}
+    var h='<button class="xcl" id="mx">×</button>'
+      +'<h4>'+esc(u.name||'(ism yozilmagan)')+'</h4>'
+      +'<div class="sub">ID '+u.id+' · '+ccName(u.cc)+'</div>'
+      +kvr('Telefon',esc(u.phone))
+      +kvr('Foydalanuvchi nomi',u.username?'@'+esc(u.username):'—')
+      +kvr('Tarjimai hol',u.bio?esc(u.bio):'—')
+      +kvr('Holati',u.bl?'<span class="tag">Bloklangan</span>':'Faol')
+      +kvr('Royxatdan o\'tgan',dt(u.cr))
+      +kvr('Oxirgi faollik',rel(u.ls))
+      +kvr('Sessiya tugashi',dt(u.sessEnd))
+      +kvr('Yozgan xabarlari',String(u.messages))
+      +kvr('Suhbatlari',String(u.chats))
+      +kvr('Qo\'ng\'iroqlari',String(u.calls))
+      +kvr('Fayllari',String(u.files))
+      +'<div class="mrow2"><button id="mdm">Xabar yozish</button>'+(u.bl?'<button class="sec" id="mun">Blokdan chiqarish</button>':'<button class="warn" id="mbl">Bloklash</button>')+'</div>'
+    $('mc').innerHTML=h
+    $('mx').onclick=closeMdl
+    $('mdm').onclick=function(){sendDm(u.id)}
+    var bb=document.getElementById(u.bl?'mun':'mbl')
+    if(bb)bb.onclick=function(){
+      var on=!u.bl
+      if(!confirm(on?'BLOKLANADI. Davom etamizmi?':'Blok olib tashlanadi. Davom etamizmi?'))return
+      api('block','POST',{id:u.id,on:on}).then(function(r){
+        if(authFail(r))return
+        if(r.j&&r.j.ok){closeMdl();loadUsers()}else alert((r.j&&r.j.error)||'Xatolik')
+      })
+    }
+  })
+}
+function closeMdl(){$('mdl').classList.add('hidden')}
+$('mdl').onclick=function(e){if(e.target===this)closeMdl()}
+// v105: XAVFSIZLIK BO'LIMI — hujumlar statistikasi + signalizatsiya
+var KN={root:'Yadro/admin yo‘llariga kirish',ext:'Begona mijoz (skaner/bot)',inj:'In‘ektsiya/SQL',data:'Ma’lumot tortish',auth:'Parol brute-force',flood:'So‘rov toshqini',tok:'Yaroqsiz token',otp:'OTP pumping',clog:'Jurnal toshqini',scan:'4xx skaner'}
+function knName(k){return KN[k]||k}
+function loadSecurity(){
+  api('security').then(function(r){
+    if(authFail(r))return
+    var s=r.j;if(!s||s.eall===undefined)return
+    var aa=$('alrm'),an=s.alarmTs?(Date.now()-s.alarmTs):0
+    if(s.alarmLast&&an<1800000){
+      aa.innerHTML='<div class="alarm"><b>⚠ SIGNALIZATSIYA: HUJUM ANIQLANDI — himoya ishlab BLOKLAGAN</b><small>'+knName(s.alarmLast.kind)+' · IP '+esc(s.alarmLast.ip)+' · '+ccName(s.alarmLast.cc)+' · '+dt(s.alarmTs)+'</small><small>'+esc(s.alarmLast.note||'')+'</small></div>'
+    }else if(s.alarmLast){
+      aa.innerHTML='<div class="alarm old"><b>So‘nggi signal: '+knName(s.alarmLast.kind)+'</b><small>IP '+esc(s.alarmLast.ip)+' · '+ccName(s.alarmLast.cc)+' · '+dt(s.alarmTs)+' — '+esc(s.alarmLast.note||'')+'</small></div>'
+    }else{
+      aa.innerHTML='<div class="alarm old"><b>Xavfsizlik holati: ODDIY</b><small>So‘nggi 30 kun ichida signal beruvchi hujum aniqlanmagan. Dastur 7 qatlam himoya ostida.</small></div>'
+    }
+    var C=[
+      ['24 soatda urinishlar',s.e24,'red'],
+      ['7 kunda urinishlar',s.e7,'red'],
+      ['Jami urinishlar (30 kun)',s.eall,''],
+      ['Noyob hujumchi IP (7 kun)',s.uip,''],
+      ['Blokda turgan IP',s.blocks,'acc'],
+      ['Signal (30 daqiqa ichida)',s.alarmTs&&an<1800000?1:0,'red']
+    ]
+    var hh=''
+    for(var i=0;i<C.length;i++)hh+='<div class="card '+C[i][2]+'"><small>'+C[i][0]+'</small><b>'+C[i][1]+'</b></div>'
+    $('scards').innerHTML=hh
+    function bars(arr,nm,val){
+      var mx=1,i
+      for(i=0;i<arr.length;i++)if(arr[i].n>mx)mx=arr[i].n
+      var h=''
+      for(i=0;i<arr.length;i++)h+='<div class="crow"><span class="nm">'+nm(arr[i])+'</span><span class="bar" style="background:#a1303f;width:'+Math.max(2,Math.round(arr[i].n/mx*260))+'px"></span><span class="n">'+val(arr[i])+'</span></div>'
+      return h||'<p class="note">Hozircha malumot yoq — hujum bo‘lmagan</p>'
+    }
+    $('skinds').innerHTML=bars(s.kinds,function(x){return esc(x.name||knName(x.k))},function(x){return x.n})
+    $('sccs').innerHTML=bars(s.ccs,function(x){return ccName(x.cc)},function(x){return x.n})
+    $('spaths').innerHTML=bars(s.paths,function(x){return esc(x.p)},function(x){return x.n})
+    var tr=''
+    for(var i=0;i<s.recent.length;i++){var e=s.recent[i]
+      tr+='<tr><td>'+dt(e.ts)+'</td><td class="ip">'+esc(e.ip)+(e.city?'<br><small style="color:#8b919c">'+esc(e.city)+'</small>':'')+'</td><td>'+ccName(e.cc)+'</td><td>'+esc(knName(e.kind))+'</td><td class="hiddencol ip">'+esc(e.path)+'</td><td><span class="act'+(e.act==='blok'?' b':'')+'">'+(e.act==='blok'?'BLOKLANDI':'Ushlandi')+'</span></td></tr>'
+    }
+    $('srec').innerHTML=tr||'<tr><td colspan="6" class="note">Hujum yo‘q — dastur tinch</td></tr>'
+    var bl=''
+    for(var i=0;i<s.blocksTop.length;i++){var b2=s.blocksTop[i]
+      bl+='<tr><td class="ip">'+esc(b2.ip)+'</td><td>'+(b2.ms>86400000?Math.round(b2.ms/86400000)+' kun':b2.ms>3600000?Math.round(b2.ms/3600000)+' soat':Math.max(1,Math.round(b2.ms/60000))+' daqiqa')+' dan keyin</td></tr>'
+    }
+    $('sblk').innerHTML=bl||'<tr><td colspan="2" class="note">Blokda IP yo‘q — hamma ochiq</td></tr>'
+    var al=''
+    for(var i=0;i<s.alarms.length;i++){var a=s.alarms[i]
+      al+='<div class="alarm old"><b>'+knName(a.kind)+(a.n>1?' ('+a.n+')':'')+'</b><small>IP '+esc(a.ip)+' · '+ccName(a.cc)+' · '+dt(a.ts)+'</small><small>'+esc(a.note||'')+'</small></div>'
+    }
+    $('salarms').innerHTML=al||'<p class="note">Signal yo‘q — hujum aniqlanmagan</p>'
   })
 }
 function doLogin(){
@@ -3700,7 +4056,9 @@ function switchTab(t){
   $('st').classList.toggle('hidden',t!=='st')
   $('us').classList.toggle('hidden',t!=='us')
   $('br').classList.toggle('hidden',t!=='br')
+  $('sc').classList.toggle('hidden',t!=='sc')
   if(t==='st')loadStats()
+  if(t==='sc')loadSecurity()
 }
 $('qb').onclick=function(){loadUsers(1)}
 $('q').onkeydown=function(e){if(e.key==='Enter')loadUsers(1)}
@@ -3719,7 +4077,7 @@ $('sb').onclick=function(){
     else{$('bres').className='res err';$('bres').textContent=(r.j&&r.j.error)||'Xatolik'}
   })
 }
-$('rf').onclick=function(){loadStats();if(cur==='us')loadUsers()}
+$('rf').onclick=function(){loadStats();if(cur==='us')loadUsers();if(cur==='sc')loadSecurity()}
 $('out').onclick=logout
 $('lb').onclick=doLogin
 $('pw').onkeydown=function(e){if(e.key==='Enter')doLogin()}
@@ -3752,6 +4110,9 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/panel/users", panelUsers, true],
   ["POST", "/panel/block", panelBlock, true],
   ["POST", "/panel/broadcast", panelBroadcast, true],
+  ["GET", "/panel/security", panelSecurity, true],
+  ["GET", "/panel/user", panelUser, true],
+  ["POST", "/panel/dm", panelDm, true],
   ["GET", "/me", getMe],
   ["PATCH", "/me", patchMe],
   ["POST", "/ping", async (c) => { const t = now(); await c.db.run("UPDATE users SET last_seen=?, token_exp=? WHERE id=?", [t, t + 180 * 86400 * 1000, c.uid]); return json({ ok: true, now: t }) }],
@@ -3942,6 +4303,10 @@ async function cleanup(env: Env) {
   await db.run("DELETE FROM peer_have WHERE updated_at<?", [t - 120 * DAY])
   // Xato-jurnali gigiyenasi: 14 kundan eski server-xatolar o'chadi (jurnal abadiy o'smaydi)
   await db.run("DELETE FROM err_jurnal WHERE ts<?", [t - 14 * DAY])
+  // v105: xavfsizlik hodisalari 30 kun, signalizatsiya yozuvlari 90 kun saqlanadi
+  // (egada hujum dalillari uzoq muddat bor; jadvallar abadiy o'smaydi)
+  await db.run("DELETE FROM sec_events WHERE ts<?", [t - 30 * DAY]).catch(() => {})
+  await db.run("DELETE FROM sec_alarm WHERE ts<?", [t - 90 * DAY]).catch(() => {})
   await db.run("UPDATE lives SET ended_at=? WHERE ended_at=0 AND started_at<?", [t, t - 12 * 3600000])
   // TiDB/R2 XOTIRA POSBONI (Task 39 + v79): server — faqat ko'prik. Asosiy xotira — foydalanuvchilar
   // qurilmalari (planReplicas kamida 15 nusxa yig'adi, P2P o'rgimchak to'ri yetkazadi).
@@ -3976,13 +4341,13 @@ async function cleanup(env: Env) {
 // 2) Chegara 100→300 (haqiqiy skaner 300ni ham tez yig'adi; CGNAT/mobil-IP'dagi YUZLAR
 //    halol foydalanuvchi birga yig'ilganda 4xx kam bo'ladi — kollaborativ zarar yo'q).
 // 3) Birinchi blok 30→5 daqiqa (takrorlanuvchilar fwOchko daraja-3 bilan uzayadi).
-function fw4xx(env: Env, wait: (p: Promise<unknown>) => void, ip: string) {
+function fw4xx(env: Env, wait: (p: Promise<unknown>) => void, ip: string, info?: SecInfo) {
   const e = FW_4XX.get(ip), t = Date.now()
   if (!e || t - e.t > 600_000) { if (FW_4XX.size > 5000) FW_4XX.clear(); FW_4XX.set(ip, { n: 1, t }); return false }
   if (++e.n <= 300) return false
   FW_4XX.delete(ip)
   fwLBlok(ip, 5 * 60_000)
-  fwOchko(env, wait, ip, "scan", 3)
+  fwOchko(env, wait, ip, "scan", 3, info)
   return true
 }
 export default {
@@ -4067,21 +4432,21 @@ export default {
       // ruxsat etilgan. Curl, skaner, skript, bot — tashqi jashnchi: 1-URINISHDA DARHOL
       // 30 kun blok. Oddiy foydalanuvchi (sayt/app) hech qachon shu to'siqqa urilmaydi.
       const fua = req.headers.get("user-agent") || ""
-      if (!FW_UA_OK.test(fua)) { fwLBlok(fwip, 30 * DAY); fwOchko(env, wait, fwip, "ext"); return FW_404() }
+      if (!FW_UA_OK.test(fua)) { fwLBlok(fwip, 30 * DAY); fwOchko(env, wait, fwip, "ext", 1, secInfo(req, url)); return FW_404() }
       // Toshqin: 1 IP → 10s ichida 80+ so'rov = darhol lokal blok + doimiy ochko
       const rt = FW_RATE.get(fwip), tn = Date.now()
       if (!rt || tn - rt.t > 10_000) { if (FW_RATE.size > 5000) FW_RATE.clear(); FW_RATE.set(fwip, { n: 1, t: tn }) }
-      else if (++rt.n > 80) { fwLBlok(fwip, 15 * 60_000); fwOchko(env, wait, fwip, "flood", 2); return FW_404() }
+      else if (++rt.n > 80) { fwLBlok(fwip, 15 * 60_000); fwOchko(env, wait, fwip, "flood", 2, secInfo(req, url)); return FW_404() }
       // Tizim ildiziga/admin yo'llariga RUXSATGIZ kirishga urinish — DARHOL 30 kun blok
-      if (FW_TRAP.test(url.pathname)) { fwLBlok(fwip, 30 * DAY); fwOchko(env, wait, fwip, "root"); return FW_404() }
+      if (FW_TRAP.test(url.pathname)) { fwLBlok(fwip, 30 * DAY); fwOchko(env, wait, fwip, "root", 1, secInfo(req, url)); return FW_404() }
       // v98: fayl-kengaytma datchiklari (backdoor/arxiv/qolib qoldiq qidiruvchilari) — trap kabi
-      if (FW_TRAPX.test(url.pathname)) { fwLBlok(fwip, 30 * DAY); fwOchko(env, wait, fwip, "root"); return FW_404() }
+      if (FW_TRAPX.test(url.pathname)) { fwLBlok(fwip, 30 * DAY); fwOchko(env, wait, fwip, "root", 1, secInfo(req, url)); return FW_404() }
       // In'ektsiya/traversal belgilari (yo'l + query) — 1-URINISHDA DARHOL 30 kun blok
       let dec = url.pathname + (url.search || "")
       try { dec += " " + decodeURIComponent(dec) } catch {}
       if (FW_INJ.test(dec)) {
         fwLBlok(fwip, 30 * DAY)
-        fwOchko(env, wait, fwip, "inj")
+        fwOchko(env, wait, fwip, "inj", 1, secInfo(req, url))
         return FW_404()
       }
       // OTP PUMPING: 50 so'rov/1 soat (mobil tarmoq CGNAT — bir IP'da YUZLARGA foydalanuvchi
@@ -4089,19 +4454,19 @@ export default {
       // v71: 50→100/soat — mobil operator CGNAT'ida yuzlab halol foydalanuvchi bitta tashqi IP'da
       // bo'ladi; 50 chegara ularni ham bloklab qo'yardi. Zararli toshqin baribir cheklangan:
       // har raqamga alohida 20-55s cooldown + auth (kod-urinish) alohida 12/24s firewall.
-      if (url.pathname === "/api/auth/otp" && fwLokal(fwip, "otp", 100, 3_600_000)) { fwOchko(env, wait, fwip, "otp"); return FW_404() }
+      if (url.pathname === "/api/auth/otp" && fwLokal(fwip, "otp", 100, 3_600_000)) { fwOchko(env, wait, fwip, "otp", 1, secInfo(req, url)); return FW_404() }
       // KLIENT QO'NG'IROQ JURNALI: 120 yozuv/1 soat (mijoz so'roviga ≤30/ql, cheklovdan katta —
       // haqiqiy foydalanuvchiga hech qachon yetmaydi, spam'ni to'sadi)
-      if (url.pathname === "/api/clog" && fwLokal(fwip, "clog", 120, 3_600_000)) { fwOchko(env, wait, fwip, "clog"); return FW_404() }
+      if (url.pathname === "/api/clog" && fwLokal(fwip, "clog", 120, 3_600_000)) { fwOchko(env, wait, fwip, "clog", 1, secInfo(req, url)); return FW_404() }
     }
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS })
     // Hajm chegarasi — ulkan payload bilan abuse (upload bo'laklari ≤1.2MB, JSON ≤2MB)
     const clen = +(req.headers.get("content-length") || 0)
-    if (clen > 26_000_000) { if (fwip) fwOchko(env, wait, fwip, "flood", 3); return json({ error: "Hajm juda katta" }, 413) }
+    if (clen > 26_000_000) { if (fwip) fwOchko(env, wait, fwip, "flood", 3, secInfo(req, url)); return json({ error: "Hajm juda katta" }, 413) }
     // v98 JSON QAT'II CHEGARASI: JSON tanasi ≤2MB (avatar base64 max 600KB, eng katta JSON shu —
     // boshqa barcha JSON'lar ancha kichik). 26MB JSON parse CPU/FONDSIZ ishlatilishi oldin olinadi.
     const hct = (req.headers.get("content-type") || "").toLowerCase()
-    if (hct.includes("json") && clen > 2_000_000) { if (fwip) fwOchko(env, wait, fwip, "flood", 2); return json({ error: "Hajm juda katta" }, 413) }
+    if (hct.includes("json") && clen > 2_000_000) { if (fwip) fwOchko(env, wait, fwip, "flood", 2, secInfo(req, url)); return json({ error: "Hajm juda katta" }, 413) }
     const path = url.pathname.slice(4).replace(/\/+$/, "") || "/"
     let juid = 0 // xato-jurnali uchun kuzatuv (catch scope'ida uid ko'rinmaydi)
     try {
@@ -4111,7 +4476,7 @@ export default {
       // WebSocket
       if (path === "/ws") {
         const payload = await verifyJwt(url.searchParams.get("token") || "", env.JWT_SECRET)
-        if (!payload) { if (fwip) { if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404(); fwOchko(env, wait, fwip, "tok") } return json({ error: "Avtorizatsiya kerak" }, 401) }
+        if (!payload) { if (fwip) { if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404(); fwOchko(env, wait, fwip, "tok", 1, secInfo(req, url)) } return json({ error: "Avtorizatsiya kerak" }, 401) }
         // Yagona sessiya nazorati (WS uchun ham): logout/qayta kirish eski ulanishni o'chiradi
         // v104: bloklangan hisobning WS ulanishi ham darhol yopiladi
         const su = await db.one("SELECT sess, logout_at, token_exp, blocked FROM users WHERE id=?", [Number(payload.sub)])
@@ -4122,12 +4487,12 @@ export default {
         return stub.fetch(req)
       }
       const r = match(req.method, path)
-      if (!r) { if (fwip && !probeQ && fw4xx(env, wait, fwip)) return FW_404(); return FW_404() }
+      if (!r) { if (fwip && !probeQ && fw4xx(env, wait, fwip, secInfo(req, url))) return FW_404(); return FW_404() }
       let uid = 0
       if (!r!.open) {
         const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "")
         const payload = await verifyJwt(token, env.JWT_SECRET)
-        if (!payload) { if (fwip) { if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404(); fwOchko(env, wait, fwip, "tok") } fail("Avtorizatsiya kerak", 401) }
+        if (!payload) { if (fwip) { if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404(); fwOchko(env, wait, fwip, "tok", 1, secInfo(req, url)) } fail("Avtorizatsiya kerak", 401) }
         uid = Number(payload.sub)
         juid = uid
         // YAGONA FAOL SESSIYA (bir raqam — bitta faol qurilma): logout barcha tokenlarni
@@ -4145,7 +4510,7 @@ export default {
         if (fwip) {
           const de = FW_DATA.get(uid), dt = Date.now()
           if (!de || dt - de.t > 600_000) { if (FW_DATA.size > 10000) FW_DATA.clear(); FW_DATA.set(uid, { n: 1, t: dt }) }
-          else if (++de.n > 3000) { FW_DATA.delete(uid); fwLBlok(fwip, 12 * 3_600_000); fwOchko(env, wait, fwip, "data"); return FW_404() }
+          else if (++de.n > 3000) { FW_DATA.delete(uid); fwLBlok(fwip, 12 * 3_600_000); fwOchko(env, wait, fwip, "data", 1, secInfo(req, url)); return FW_404() }
         }
       }
       let b: any = {}
@@ -4153,7 +4518,7 @@ export default {
       if (["POST", "PATCH", "DELETE"].includes(req.method) && ct.includes("json")) b = await req.json().catch(() => ({}))
       const res = await r!.h({ env, db, uid, req, url, p: r!.p, b: b || {}, wait })
       // Skanerlash nazorati: 1 IP → 10 daqiqada 100+ xato (401/429 hisobga kirmaydi) → 30 daqiqa blok
-      if (fwip && !probeQ && res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 429 && fw4xx(env, wait, fwip)) return FW_404()
+      if (fwip && !probeQ && res.status >= 400 && res.status < 500 && res.status !== 401 && res.status !== 429 && fw4xx(env, wait, fwip, secInfo(req, url))) return FW_404()
       return res
     } catch (e: any) {
       if (e instanceof HttpError) {
