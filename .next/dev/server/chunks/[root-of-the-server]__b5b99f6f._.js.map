@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 40, "column": 0}, "map": {"version":3,"sources":["file:///home/z/my-project/src/lib/db.ts"],"sourcesContent":["import { PrismaClient } from '@prisma/client'\n\nconst globalForPrisma = globalThis as unknown as {\n  prisma: PrismaClient | undefined\n}\n\nexport const db =\n  globalForPrisma.prisma ??\n  new PrismaClient({\n    log: ['query'],\n  })\n\nif (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db"],"names":[],"mappings":";;;;AAAA;;AAEA,MAAM,kBAAkB;AAIjB,MAAM,KACX,gBAAgB,MAAM,IACtB,IAAI,sMAAY,CAAC;IACf,KAAK;QAAC;KAAQ;AAChB;AAEF,wCAA2C,gBAAgB,MAAM,GAAG"}},
+    {"offset": {"line": 57, "column": 0}, "map": {"version":3,"sources":["file:///home/z/my-project/src/app/api/topics/route.ts"],"sourcesContent":["import { db } from '@/lib/db'\n\nexport async function GET() {\n  const topics = await db.topic.findMany({\n    orderBy: { name: 'asc' },\n    select: { id: true, slug: true, name: true, emoji: true },\n  })\n  return Response.json(topics)\n}\n"],"names":[],"mappings":";;;;AAAA;;AAEO,eAAe;IACpB,MAAM,SAAS,MAAM,wHAAE,CAAC,KAAK,CAAC,QAAQ,CAAC;QACrC,SAAS;YAAE,MAAM;QAAM;QACvB,QAAQ;YAAE,IAAI;YAAM,MAAM;YAAM,MAAM;YAAM,OAAO;QAAK;IAC1D;IACA,OAAO,SAAS,IAAI,CAAC;AACvB"}}]
+}
