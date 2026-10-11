@@ -3410,26 +3410,36 @@ function u8Birlash(list: Uint8Array[]): Uint8Array {
   for (const b of list) { o.set(b, f); f += b.length }
   return o
 }
-async function edgeWS(url: string, cfg: string, ssml: string): Promise<Uint8Array> {
+async function edgeWS(url: string, cfg: string, ssml: string, dbg?: string[]): Promise<Uint8Array> {
   const maj = EJ_CHROMIUM.split(".")[0]
-  const r = await fetch(url, {
-    headers: {
-      upgrade: "websocket",
-      pragma: "no-cache",
-      "cache-control": "no-cache",
-      origin: "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold",
-      "accept-language": "en-US,en;q=0.9",
-      cookie: "muid=" + edgeHex32(true) + ";",
-      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + maj + ".0.0.0 Safari/537.36 Edg/" + maj + ".0.0.0",
-    },
-  } as any)
+  let r: Response
+  try {
+    r = await fetch(url, {
+      headers: {
+        upgrade: "websocket",
+        pragma: "no-cache",
+        "cache-control": "no-cache",
+        origin: "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold",
+        "accept-language": "en-US,en;q=0.9",
+        cookie: "muid=" + edgeHex32(true) + ";",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + maj + ".0.0.0 Safari/537.36 Edg/" + maj + ".0.0.0",
+      },
+    } as any)
+  } catch (e: any) {
+    dbg?.push("fetch-throw:" + String(e?.message || e).slice(0, 60))
+    throw e
+  }
   const ws: any = (r as any).webSocket
-  if (!ws) throw new Error("ws-yoq:" + r.status)
+  if (!ws) {
+    dbg?.push("ws-yoq:" + r.status)
+    throw new Error("ws-yoq:" + r.status)
+  }
+  dbg?.push("ws-ok:" + r.status)
   ws.accept()
   return await new Promise<Uint8Array>((res, rej) => {
     const bufs: Uint8Array[] = []
     let yakun = false
-    const taymer = setTimeout(() => { try { ws.close(1000, "taymer") } catch {}; if (!yakun) { yakun = true; rej(new Error("ws-taymer")) } }, 14_000)
+    const taymer = setTimeout(() => { try { ws.close(1000, "taymer") } catch {}; if (!yakun) { yakun = true; dbg?.push("taymer:bufs=" + bufs.length); rej(new Error("ws-taymer")) } }, 14_000)
     ws.onmessage = (ev: MessageEvent) => {
       if (typeof ev.data === "string") {
         if (ev.data.includes("Path:turn.end")) {
@@ -3446,16 +3456,16 @@ async function edgeWS(url: string, cfg: string, ssml: string): Promise<Uint8Arra
         if (head.includes("Path:audio") && !head.includes("audio.metadata")) bufs.push(new Uint8Array((ev.data as ArrayBuffer).slice(2 + hl)))
       } catch {}
     }
-    ws.onerror = () => { clearTimeout(taymer); if (!yakun) { yakun = true; rej(new Error("ws-xato")) } }
+    ws.onerror = () => { clearTimeout(taymer); dbg?.push("ws-xato"); if (!yakun) { yakun = true; rej(new Error("ws-xato")) } }
     ws.onclose = () => {
       clearTimeout(taymer)
-      if (!yakun) { yakun = true; if (bufs.length) res(u8Birlash(bufs)); else rej(new Error("ws-yopildi")) }
+      if (!yakun) { yakun = true; dbg?.push("yopildi:bufs=" + bufs.length); if (bufs.length) res(u8Birlash(bufs)); else rej(new Error("ws-yopildi")) }
     }
     ws.send(cfg)
     ws.send(ssml)
   })
 }
-async function edgeMP3(text: string, voice: string, alt: boolean): Promise<string> {
+async function edgeMP3(text: string, voice: string, alt: boolean, dbg?: string[]): Promise<string> {
   const esc = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   const cfg = "X-Timestamp:" + edgeSana() + "\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n" +
     '{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}\r\n'
@@ -3469,7 +3479,8 @@ async function edgeMP3(text: string, voice: string, alt: boolean): Promise<strin
   const url = alt
     ? "https://api.msedgeservices.com/tts/cognitiveservices/websocket/v1?" + q
     : "https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?" + q
-  const b = await edgeWS(url, cfg, ssml)
+  const b = await edgeWS(url, cfg, ssml, dbg)
+  dbg?.push("bayt:" + b.length)
   return b.length > 1000 ? abToB64(b) : ""
 }
 // Google translate_tts — boshqa tillar uchun (o'zbek Google'da YO'Q — tl=uz 400 qaytaradi)
@@ -3499,7 +3510,7 @@ async function ttsG(safe: string, tl: string): Promise<string> {
   TTS_KESH.set(h, { b: b64, t: Date.now() })
   return b64
 }
-async function ttsMP3(text: string, lang: string): Promise<string> {
+async function ttsMP3(text: string, lang: string, dbg?: string[]): Promise<string> {
   const tl = TR_LANGS[lang]?.tts || "en"
   const safe = text.replace(/\s+/g, " ").trim().slice(0, 600)
   if (!safe) return ""
@@ -3508,8 +3519,8 @@ async function ttsMP3(text: string, lang: string): Promise<string> {
   // TURKCHA OVOZ OLIB TASHLANDI (foydalanuvchi talabi). Hech biri bo'lmasa audio "" — matn baribir ko'rsatiladi.
   const h = (await sha256("uz|" + safe)).slice(0, 20)
   const hit = TTS_KESH.get(h)
-  if (hit && Date.now() - hit.t < 1_800_000) return hit.b
-  const urin = async (v: string, alt: boolean) => { try { return await edgeMP3(safe, v, alt) } catch { return "" } }
+  if (hit && Date.now() - hit.t < 1_800_000) { dbg?.push("kesh-hit"); return hit.b }
+  const urin = async (v: string, alt: boolean) => { try { return await edgeMP3(safe, v, alt, dbg) } catch { return "" } }
   const b64 = (await urin("uz-UZ-MadinaNeural", false)) || (await urin("uz-UZ-SardorNeural", false)) || (await urin("uz-UZ-MadinaNeural", true)) || (await urin("uz-UZ-SardorNeural", true)) || (await ttsG(safe, "uz"))
   if (b64) { if (TTS_KESH.size > 80) TTS_KESH.clear(); TTS_KESH.set(h, { b: b64, t: Date.now() }) }
   return b64
@@ -3541,7 +3552,7 @@ function arabLotin(t: string): string {
 }
 // v115.3: uyg'ur-arab transkripsiyasidan lotinga ko'chgan unlilarsiz matnni llama
 // bilan TUZATISH («aslam lykm bo 50 grm» -> «assalomu alaykum bu 50 gram»). Xato bo'lsa aslisi qaytadi.
-async function lotinTuzat(env: Env, text: string): Promise<string> {
+async function lotinTuzat(env: Env, text: string, dbg?: string[]): Promise<string> {
   try {
     if (!env.AI || !text) return text
     const r: any = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
@@ -3553,11 +3564,12 @@ async function lotinTuzat(env: Env, text: string): Promise<string> {
     })
     const t = String(r?.response || "").trim().replace(/^["'ʻ"]/, "").trim()
     const unli = (t.match(/[aeiouou']/gi) || []).length
+    dbg?.push("tuzat:" + (t && t !== text ? "ok" : "echo") + ":" + t.length)
     if (t && unli >= 3 && t.length >= Math.floor(text.length * 0.7) && t.length <= text.length * 3) return t
     return text
-  } catch { return text }
+  } catch { dbg?.push("tuzat:xato"); return text }
 }
-async function whisperMatn(env: Env, bytes: Uint8Array): Promise<string> {
+async function whisperMatn(env: Env, bytes: Uint8Array, dbg?: string[]): Promise<string> {
   if (!env.AI) return ""
   const urin = async (m: string, audio: unknown): Promise<string> => {
     try {
@@ -3569,11 +3581,14 @@ async function whisperMatn(env: Env, bytes: Uint8Array): Promise<string> {
   const arr: number[] | null = bytes.length <= 3_500_000 ? Array.from(bytes) : null
   const TURBO = "@cf/openai/whisper-large-v3-turbo", LEGACY = "@cf/openai/whisper"
   let natija = (await urin(TURBO, b64)) || (arr ? await urin(TURBO, arr) : "")
+  dbg?.push("w1:" + natija.length)
   if (!natija) natija = (await urin(LEGACY, b64)) || (arr ? await urin(LEGACY, arr) : "")
+  dbg?.push("w2:" + natija.length)
   if (natija && arabShubha(natija)) {
+    dbg?.push("arab-shubha")
     const t2 = (await urin(LEGACY, b64)) || (arr ? await urin(LEGACY, arr) : "")
-    if (t2 && !arabShubha(t2)) natija = t2
-    else natija = await lotinTuzat(env, arabLotin(natija))
+    if (t2 && !arabShubha(t2)) { dbg?.push("legacy-yaxshi"); natija = t2 }
+    else natija = await lotinTuzat(env, arabLotin(natija), dbg)
   }
   return natija.slice(0, 2000)
 }
@@ -3598,14 +3613,22 @@ async function apiTranslateSpeech(c: C) {
   try { bytes = b64ToU8(raw.slice(0, 7_000_000)) } catch { fail("Ovoz yozuvini o‘qib bo‘lmadi") }
   if (bytes.length < 900) fail("Ovoz juda qisqa — yana bir marta gapirib ko‘ring")
   const to = TR_LANGS[String(c.b.to || "")] ? String(c.b.to) : "uz"
-  const text = await whisperMatn(c.env, bytes)
+  const dbg: string[] = []
+  const text = await whisperMatn(c.env, bytes, dbg)
   if (!text) fail("Ovozni aniqlab bo‘lmadi — yaqinroq borib, aniqroq gapirib ko‘ring (yoki «Matn» bo‘limidan foydalaning)", 422)
   let r = await tarjimaKeshli(c, text, to)
   // v115.2: xuddi shu til (masalan o'zbek gapirdi, natija ham o'zbek) — OVOZ BARIBIR
   // O'QILADI (echo); 502 o'rniga to'liq natija qaytadi.
   if (!r) r = { t: text, from: "auto" }
-  const mp3 = await ttsMP3(r!.t, to)
-  return json({ ok: true, text, translated: r!.t, from: r!.from, to, audio: mp3 ? "data:audio/mpeg;base64," + mp3 : "" })
+  const mp3 = await ttsMP3(r!.t, to, dbg)
+  // dbg FAQAT so'rovda dbg:1 yuborgan DEV raqamga ko'rinadi (oddiy foydalanuvchiga yo'q)
+  let d: string[] | undefined
+  if (c.b.dbg === 1 && c.env.DEV_PHONES) {
+    const uu = await c.db.one("SELECT phone FROM users WHERE id=?", [c.uid]).catch(() => null)
+    const admins = listVar(c.env.DEV_PHONES).map((s) => (s.startsWith("+") ? s : "+" + s))
+    if (uu && admins.includes(String(uu.phone || ""))) d = dbg
+  }
+  return json({ ok: true, text, translated: r!.t, from: r!.from, to, audio: mp3 ? "data:audio/mpeg;base64," + mp3 : "", dbg: d })
 }
 
 // ========================= REYTING (v114) — kanallar / guruhlar / aktiv foydalanuvchilar =========================

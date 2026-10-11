@@ -46,32 +46,32 @@ async function main() {
 
   // 2) SINOV A — xitoycha -> o'zbekcha (FLAGMAN: Xitoydagi o'zbek)
   const zhB64 = 'data:audio/webm;base64,' + fs.readFileSync(path.join(MEDIA, 'zh_sinov.webm')).toString('base64')
-  r = await sorov(BASE + '/translate/speech', { method: 'POST', headers: AUTH, body: JSON.stringify({ audio: zhB64, to: 'uz' }) })
+  r = await sorov(BASE + '/translate/speech', { method: 'POST', headers: AUTH, body: JSON.stringify({ audio: zhB64, to: 'uz', dbg: 1 }) })
   const a = await r.json().catch(() => ({}))
   ok('A: Whisper xitoycha aniqladi', r.ok && !!(a.text || ''), r.status + ' ' + JSON.stringify(a).slice(0, 160))
   console.log('    aniqlandi:', (a.text || '').slice(0, 60))
-  console.log('    o‘zbekcha:', (a.translated || '').slice(0, 80))
+  console.log('    o‘zbekcha:', (a.translated || '').slice(0, 80)); if (a.dbg) console.log('    DBG-A:', JSON.stringify(a.dbg))
   const mp3A = a.audio ? Buffer.from(a.audio.split(',')[1], 'base64') : null
   ok('A: o‘zbek NEYRAL ovoz qaytdi (Madina/Sardor)', !!mp3A && mp3A.length > 3000, 'audio=' + (mp3A ? mp3A.length + 'B' : "YO'Q"))
   if (mp3A) { fs.writeFileSync('/tmp/live_uz_out.mp3', mp3A); console.log('    -> /tmp/live_uz_out.mp3 saqlandi') }
 
   // 3) SINOV B — o'zbekcha webm -> inglizcha
   const uzB64 = 'data:audio/webm;base64,' + fs.readFileSync(path.join(MEDIA, 'uz_sinov.webm')).toString('base64')
-  r = await sorov(BASE + '/translate/speech', { method: 'POST', headers: AUTH, body: JSON.stringify({ audio: uzB64, to: 'en' }) })
+  r = await sorov(BASE + '/translate/speech', { method: 'POST', headers: AUTH, body: JSON.stringify({ audio: uzB64, to: 'en', dbg: 1 }) })
   const b = await r.json().catch(() => ({}))
   ok('B: o‘zbekcha aniqlandi', r.ok && /(assalomu|sinov|tarjimon|ovoz|xitoy|ob-havo|yaxshi)/i.test(b.text || ''), r.status + ' ' + JSON.stringify(b).slice(0, 160))
   console.log('    aniqlandi:', (b.text || '').slice(0, 60))
-  console.log('    inglizcha:', (b.translated || '').slice(0, 80))
+  console.log('    inglizcha:', (b.translated || '').slice(0, 80)); if (b.dbg) console.log('    DBG-B:', JSON.stringify(b.dbg))
   const mp3B = b.audio ? Buffer.from(b.audio.split(',')[1], 'base64') : null
   ok('B: ingliz TTS ovozi', !!mp3B && mp3B.length > 3000, 'audio=' + (mp3B ? mp3B.length + 'B' : "YO'Q"))
 
   // 4) SINOV C — WAV (normalizatsiya) -> ruscha
   const wavB64 = 'data:audio/wav;base64,' + fs.readFileSync(path.join(MEDIA, 'uz_sinov.wav')).toString('base64')
-  r = await sorov(BASE + '/translate/speech', { method: 'POST', headers: AUTH, body: JSON.stringify({ audio: wavB64, to: 'ru' }) })
+  r = await sorov(BASE + '/translate/speech', { method: 'POST', headers: AUTH, body: JSON.stringify({ audio: wavB64, to: 'ru', dbg: 1 }) })
   const c = await r.json().catch(() => ({}))
   ok('C: WAV yo‘li ishladi', r.ok && !!(c.text || ''), r.status + ' ' + JSON.stringify(c).slice(0, 160))
   console.log('    aniqlandi:', (c.text || '').slice(0, 60))
-  console.log('    ruscha:', (c.translated || '').slice(0, 80))
+  console.log('    ruscha:', (c.translated || '').slice(0, 80)); if (c.dbg) console.log('    DBG-C:', JSON.stringify(c.dbg))
   const mp3C = c.audio ? Buffer.from(c.audio.split(',')[1], 'base64') : null
   ok('C: rus TTS ovozi', !!mp3C && mp3C.length > 3000, 'audio=' + (mp3C ? mp3C.length + 'B' : "YO'Q"))
 
