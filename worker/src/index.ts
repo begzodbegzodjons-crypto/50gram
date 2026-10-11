@@ -145,6 +145,12 @@ function fwSoat(m: Map<number, { n: number; t: number }>, uid: number, need: num
   return e.n > need
 }
 let FW_YANGI = 0
+// v108 STALE-FLAG POSBONI: himoya O'CHIQ holati izolyatda UZOQ qolmasin. Egapanel himoyani
+// yoqib qo'ygach, uzoq bo'sh turgan izolyat eski FW_OFF=true bilan uyg'onsa — birinchi
+// so'rovlar HIMoyasiz o'tib ketardi (SECURITY E2E'da kuzatildi: curl 200, INJ 401).
+// Yechim: FW_OFF=true ko'rinsa — har 5 sekundda KAMIDA BIR MARTA DO bilan sinxron tasdiqlash
+// (DO yagona ishonchli manba). Himoya YONIQ bo'lganda — 0 xarajat (bu yo'l umuman ishlamaydi).
+let FW_TASDIQ = 0
 // v106 HIMOYA-HOLATI (egapanel tugmasi): true = himoya qatlami VAQTINCHA O'CHIQ
 // (egasi o'zgartirish kiritayotganda — hujum-himoya hech narsani bloklamaydi, iz ham qolmaydi).
 // Manba: SEC DO cfg jadvali — har refresh'da (≤45s) fwQollash orqali yangilanadi. Boshlang'ich: YONIQ.
@@ -187,6 +193,7 @@ let FW_FYANGI = 0 // majburiy (bloklanganlar yo'li) refresh oxirgi vaqti
 function fwQollash(j: any) {
   // v106: himoya-holati ham shu yo'lakda tarqaladi (DO yagona manba → barcha izolyatlar ≤45s)
   FW_OFF = !!j.fwoff
+  FW_TASDIQ = Date.now() // v108: har refresh — DO bilan tasdiqlash hisoblanadi
   const nw = new Set<string>()
   for (const [ip2] of (j.blocks || []) as Array<[string, number]>) nw.add(String(ip2))
   const t2 = Date.now()
@@ -347,7 +354,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v108"
+const BUILD_V = "v109"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -5114,6 +5121,14 @@ export default {
     // so'rovda o'tib ketardi (xavfsizlik teshigi) va bloklar izolyatlar orasida notekis ishlar edi.
     if (env.SEC && FW_YANGI === 0) { try { await fwYangola(env) } catch {} }
     fwKeshYana(env, wait)
+    // v108 STALE-FLAG POSBONI: himoya O'CHIQ ko'rinsa — 5 sekunddan OSHSA DO bilan SINXRON
+    // tasdiqlash (uzoq bo'sh turgan izolyat eski "o'chiq" holat bilan uyg'onsa, SHU so'rovda
+    // to'g'irlanadi — aks holda birinchi so'rovlar himoyasiz o'tib ketardi: SECURITY E2E'da
+    // kuzatilgan holat. Himoya YONIQ bo'lganda bu yo'l umuman ishlamaydi — 0 xarajat).
+    if (fwip && FW_OFF && Date.now() - FW_TASDIQ > 5_000) {
+      FW_TASDIQ = Date.now()
+      try { await fwTekshir(env, fwip) } catch {}
+    }
     if (fwip && !FW_OFF) {
       // v106: himoya O'CHIQ bo'lsa bu butun blok O'TKAZIB YUBORILADI (egasi o'zgartirish
       // kiritayotganda curl/skript-sinovlar ham bloklanmaydi, iz ham qolmaydi).

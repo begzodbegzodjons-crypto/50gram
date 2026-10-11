@@ -20,10 +20,10 @@ const chatjs = readFileSync(join(ROOT, 'web/chat.js'), 'utf8')
 console.log('== v108 LOKAL TEKSHIRUV ==')
 
 // 1) VERSIYA QULFI — uch manba bir xil v108
-ok(/BUILD_V = "v108"/.test(idx), 'worker BUILD_V = v108')
-ok(/window\.__50BUILD = 'v108'/.test(core), 'core.js __50BUILD = v108')
-ok(/const V = '50gram-v108'/.test(sw), 'sw.js V = 50gram-v108')
-ok(!/50gram-v107/.test(sw) && !/BUILD_V = "v107"/.test(idx), 'eski qulflar qolmagan')
+ok(/BUILD_V = "v109"/.test(idx), 'worker BUILD_V = v109')
+ok(/window\.__50BUILD = 'v109'/.test(core), 'core.js __50BUILD = v109')
+ok(/const V = '50gram-v109'/.test(sw), 'sw.js V = 50gram-v109')
+ok(!/50gram-v108/.test(sw) && !/BUILD_V = "v108"/.test(idx), 'eski qulflar qolmagan')
 
 // 2) BROADCAST ASOSIY TUZATISH — ensureSchema olib tashlangan (35 so'rovlik byudjet-posboni)
 const bcast = idx.slice(idx.indexOf('async function panelBroadcast'), idx.indexOf('admLog(c, "hammaga_xabar"'))
@@ -71,6 +71,8 @@ ok(/if \(m\.deleted\) \{/.test(chatjs) && /list\.splice\(i, 1\)/.test(chatjs), '
 ok(/id="fwon"/.test(idx) && /id="fwof"/.test(idx), 'v107: ikkala himoya tugmasi joyida')
 ok(/function fwBos\(on\)\{/.test(idx), 'v107: fwBos ulanishi joyida')
 ok(/let FW_OFF = false/.test(idx) && /FW_OFF = !!j\.fwoff/.test(idx), 'FW_OFF mexanizmi o\u2018zgarmagan')
+ok(/let FW_TASDIQ = 0/.test(idx), 'v108: FW_TASDIQ stale-flag posboni bor')
+ok(/FW_OFF && Date\.now\(\) - FW_TASDIQ > 5_000\)/.test(idx), 'v108: FW_OFF=true bo\u2018lsa 5s\u2019da bir DO sinxron tasdiqlash (stale-flag tuzatishi)')
 ok(/CREATE TABLE IF NOT EXISTS cfg\(k TEXT PRIMARY KEY/.test(fw), 'SEC DO cfg (o\u2018zgarmagan)')
 ok(/ALTER TABLE chats ADD COLUMN blocked INT NOT NULL DEFAULT 0/.test(idx), 'chats.blocked (o\u2018zgarmagan)')
 ok(/CREATE TABLE IF NOT EXISTS adm_log \(/.test(idx), 'adm_log (o\u2018zgarmagan)')
