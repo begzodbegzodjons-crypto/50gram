@@ -357,7 +357,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v116"
+const BUILD_V = "v117"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -5499,6 +5499,20 @@ function fw4xx(env: Env, wait: (p: Promise<unknown>) => void, ip: string, info?:
 export default {
   async fetch(req: Request, env: Env, ctx?: { waitUntil: (p: Promise<unknown>) => void }): Promise<Response> {
     const url = new URL(req.url)
+    // v117 HTTPS-QO'RIQCHISI: foydalanuvchi brauzerga faqat "50gram.uz" yozsa — mobil
+    // brauzerlar (eski Chrome, Samsung Internet, UC, Mi) AVVAL http:// sinaydi. HTTP'da
+    // xavfsiz kontekst YO'Q: Service Worker, kamera/mikrofon, crypto.subtle (shifrlash)
+    // ishlamaydi — ilova oq ekran/"kirilmaydi" holatida qolardi. Demak HTTP so'rovni
+    // hech qachon javob bilan o'tkazmaymiz — darhol https:// ga yo'naltiramiz.
+    // GET/HEAD -> 301 (keshlanadi), qolgan metodlar -> 308 (metod+tana saqlanadi).
+    // Cloudflare zonasi "Always Use HTTPS" yoqilganda bu yo'l umuman ishlamaydi (edge
+    // oldin yo'naltiradi) — bu ZAXIRA qatlam: zon sozlamasi o'chsa ham ilova buzilmaydi,
+    // workers.dev manzilida ham bir xil qoida.
+    if (url.protocol === "http:") {
+      const loc = "https://" + url.host + url.pathname + url.search
+      const st = req.method === "GET" || req.method === "HEAD" ? 301 : 308
+      return new Response(null, { status: st, headers: { location: loc, "cache-control": "public, max-age=86400" } })
+    }
     // APK: majburiy yuklab olish (attachment) — ba'zi brauzerlar download atributiga
     // e'tibor bermaydi yoki faylni ochishga harakat qiladi; sarlavha buni hal qiladi
     if (url.pathname === "/50gram.apk") {

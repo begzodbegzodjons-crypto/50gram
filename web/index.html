@@ -4,6 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
 <title>50 Gram</title>
+<script>
+// v117: http:// dan kelayotgan mijozni ERTA (ilova ishga tushishidan OLDIN) https:// ga
+// yuborish — http'da SW/shifrlash/kamera ishlamaydi, oq ekran qolmasin. Zaxira qatlam:
+// worker ham 301 beradi (bu skript faqat HTML to'g'ridan-to'g'ri ochilganda zarur).
+// Sinov/dev muhitlari (localhost, file://, 127.0.0.1, .local) tegilmaydi.
+(function () {
+  try {
+    var h = location.hostname
+    if (location.protocol === 'http:' && !/^(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(h) && /\.local$/.test(h) === false) {
+      location.replace('https://' + h + location.pathname + location.search + location.hash)
+    }
+  } catch (e) {}
+})()
+</script>
 <meta name="description" content="50 Gram — tezkor va xavfsiz o‘zbek messenjeri: chatlar, kanallar, istoriyalar, qo‘ng‘iroqlar va lenta.">
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="https://50gram.uz/">

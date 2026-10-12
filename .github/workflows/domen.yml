@@ -171,7 +171,7 @@ jobs:
                   if show(f'route {pat}', r):
                       print(f'   {pat} -> {SKRIP} ulandi')
 
-          # ---------- HIMOYA (HTTP -> HTTPS avtomatik yo'naltirish) ----------
+          # ---------- HIMOYA (HTTP -> HTTPS yo'naltirish + ECH o'chirish) ----------
           def himoya(zid):
               st = (req('GET', f'/zones/{zid}').get('result') or {})
               print('ZONA_HOLATI:', st.get('status'))
@@ -179,15 +179,18 @@ jobs:
                   print('ZONA_ACTIVE_EMAS')
                   sys.exit(4)
               # Mavjud holat
-              for s in ('always_use_https', 'automatic_https_rewrites', 'ssl', 'min_tls_version'):
+              for s in ('always_use_https', 'automatic_https_rewrites', 'ssl', 'min_tls_version', 'ech'):
                   r = req('GET', f'/zones/{zid}/settings/{s}')
                   v = (r.get('result') or {}).get('value')
                   print(f'HOLAT {s}: {v}' if r.get('success') else f'HOLAT {s}: oqib bolmadi ({json.dumps(r.get("errors"), ensure_ascii=False)})')
-              # Yoqish
-              for s, v in (('always_use_https', 'on'), ('automatic_https_rewrites', 'on'), ('min_tls_version', '1.2')):
+              # Yoqish. ECH (Encrypted Client Hello) — O'CHIRILADI: HTTPS DNS yozuvida ech
+              # turibdi — ba'zi ISP DPI tizimlari ECH'li ulanishlarni RESET qiladi, shunda
+              # YANGI Chrome/Samsung telefonlarda sayt umuman ochilmaydi (ba'zi tarmoqlarda
+              # ishlaydi, ba'zilarida yo'q). ech=off bilan HTTPS yozuvidan ech olib tashlanadi.
+              for s, v in (('always_use_https', 'on'), ('automatic_https_rewrites', 'on'), ('min_tls_version', '1.2'), ('ech', 'off')):
                   r = req('PATCH', f'/zones/{zid}/settings/{s}', {'value': v})
                   if show(f'yoqish {s}={v}', r):
-                      print(f'   {s} = {v} — YOQILDI')
+                      print(f'   {s} = {v} — BAJARILDI')
 
           mode = MODE if MODE != 'hammasi' else 'hammasi'
           zid = None
@@ -209,6 +212,9 @@ jobs:
       - name: Sayt tekshiruvi (tekshir / hammasi)
         if: ${{ inputs.mode == 'tekshir' || inputs.mode == 'hammasi' }}
         run: |
+          echo "== http -> https yo'naltirish (v117)"
+          curl -sS -o /dev/null --max-time 25 -w "http://50gram.uz/ -> kod=%{http_code} joy=%{redirect_url}\n" http://50gram.uz/ || echo "HTTP ULANMADI"
+          curl -sS -o /dev/null --max-time 25 -w "http://www.50gram.uz/ -> kod=%{http_code} joy=%{redirect_url}\n" http://www.50gram.uz/ || echo "HTTP-WWW ULANMADI"
           for u in https://50gram.uz/ https://www.50gram.uz/; do
             echo "== $u"
             curl -sS -o /tmp/sahifa -D - --max-time 25 "$u" | head -8 || echo "ULANMADI"
