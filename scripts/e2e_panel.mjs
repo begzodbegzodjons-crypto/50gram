@@ -299,7 +299,9 @@ try {
   // 15) v118 KATTA RASM E'LON — JSON ≈4MB (eski 2MB chegarada 413 «Hajm juda katta» bo'lardi):
   //     3MB tasodifiy bayt → AES-GCM shifrlash → base64 → JSON >2MB → panel 12MB chegara → 200
   {
-    const plain = new Uint8Array(3 * 1024 * 1024); crypto.getRandomValues(plain)
+    // E'TIBOR: crypto.getRandomValues() bir chaqiruvda maks 65536 bayt — 3MB ni bo'lib to'ldiramiz
+    const plain = new Uint8Array(3 * 1024 * 1024)
+    for (let i = 0; i < plain.length; i += 65536) crypto.getRandomValues(plain.subarray(i, Math.min(plain.length, i + 65536)))
     const key = new Uint8Array(32); crypto.getRandomValues(key)
     const iv = new Uint8Array(12); crypto.getRandomValues(iv)
     const ck = await crypto.subtle.importKey('raw', key, 'AES-GCM', false, ['encrypt'])
