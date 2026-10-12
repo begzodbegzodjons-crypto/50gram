@@ -4380,13 +4380,17 @@ async function panelInbox(c: C) {
   }
   // --- RO'YXAT: javob kutilayotgan barcha murojaatlar (yangisi birinchi) ---
   // (xato jim yutilmaydi — 500 bilan ko'rinadi, tashxis oson bo'lsin)
+  // E'TIBOR: TiDB JOIN ON ichida subquery qo'llab-quvvatlamaydi (Error 1105 «ON condition
+  // doesn't support subqueries yet») — shuning uchun MAX(id) DERIVED TABLE orqali olinadi
+  // (/chatlar ro'yxatidagi «MAX(id) ... GROUP BY chat_id» ishlagan patterni bilan bir xil).
   const rows = await c.db.q(
     `SELECT c.id AS chat_id, u.id AS uid, u.phone, u.first_name, u.last_name, u.username, u.avatar_ver AS av, u.blocked AS bl, u.last_seen AS ls, u.created_at AS cr,
        m.body AS msg_body, m.kind AS msg_kind, m.created_at AS msg_at
      FROM chats c
      JOIN chat_members mu ON mu.chat_id=c.id AND mu.user_id<>${ADM_ID}
      JOIN users u ON u.id=mu.user_id
-     JOIN messages m ON m.id=(SELECT MAX(id) FROM messages WHERE chat_id=c.id AND deleted=0)
+     JOIN (SELECT chat_id, MAX(id) AS mid FROM messages WHERE deleted=0 GROUP BY chat_id) mm ON mm.chat_id=c.id
+     JOIN messages m ON m.id=mm.mid
      WHERE c.type='direct' AND m.sender_id=u.id AND m.sender_id<>${ADM_ID}
      ORDER BY m.created_at DESC LIMIT 200`,
   )
