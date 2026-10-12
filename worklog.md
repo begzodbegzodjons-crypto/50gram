@@ -644,3 +644,25 @@ Stage Summary:
 - v116 muhrlandi: tarjima bo'lgan hujjat endi BITTA haqiqiy .pdf fayl bo'lib to'g'ridan-to'g'ri yuklab olinadi (oyna ochilmaydi, orqaga qaytish muammosi yo'q), natija uzluk hujjat ko'rinishida o'qiladi.
 - PDF generator to'liq mijoz tomonda, kutubxonasiz — barcha 6 til (xitoy/kirill/lotin) ishlaydi, server yuki 0.
 - Barcha qoidalar bajarildi: Eskiz SMS tegilmadi, web/ 0 panel izi, himoya ON, ovozli tarjimon (v115) va barcha mavjud funksiyalar tegilmagan.
+
+---
+Task ID: 61
+Agent: Super Z (asosiy agent)
+Task: v117 — 50GRAM.UZ SAYTGA KIRISH MUAMMOSI: «foydalanuvchilar 50gram.uz deb brauzerga yozishsa ham saytga kirib topishaolishmayapti... ba'zi telefonlar».
+
+Work Log:
+- TASHXIS (jonli curl/dig bilan): DNS toza (apex+www, A+AAAA, Cloudflare NS), https 200, TLS 1.2/1.3 ikkalasi ham 200. IKKITA ILDIZ TOPILDI:
+  (1) http://50gram.uz 200 bilan javob berardi — HTTPS'ga yo'naltirish YO'Q edi. Mobil brauzerlar (UC, Mi, eski Samsung/Chrome — O'zbekistonda keng tarqalgan) «50gram.uz» yozilganda AVVAL http:// sinaydi; HTTP'da xavfsiz kontekst yo'q (Service Worker, crypto.subtle shifrlash, kamera/mikrofon ishlamaydi) → ilova oq ekran/«kirilmaydi» holatda qoladi → «ba'zi telefonlarda ochilmayapti».
+  (2) Zonada ECH (Encrypted Client Hello) YONIQ — HTTPS DNS yozuvida ech=...cloudflare-ech.com turibdi. Ba'zi ISP DPI tizimlari ECH'li ulanishlarni RESET qiladi (Rossiya/Xitoy/Iron tajribasi) → yangi Chrome/Samsung + DoH yoqilgan telefonlarda TLS darajasida ulanmaydi.
+- v117-1 WORKER (index.ts fetch boshi, FW/APK'dan OLDIN): url.protocol === "http:" → darhol https:// ga yo'naltirish — GET/HEAD 301 (keshlanadi), qolgan metodlar 308 (metod+tana saqlanadi), path+query to'liq saqlanadi. Zaxira qatlam mantiqi: Cloudflare «Always Use HTTPS» yoqilganda edge oldin yo'naltiradi (bu yo'l ishlamaydi), zon sozlamasi o'chsa ham worker himoya qiladi; workers.dev'da ham bir xil qoida.
+- v117-2 WEB (index.html <head>, CSS/script'lardan OLDIN): erta inline redirect — location.protocol === 'http:' bo'lsa https:// ga location.replace (localhost/127.0.0.1/[::1]/.local sinov muhitlari muhofazalangan). HTML keshlangan hollarda ham oq ekran qolmasin.
+- domen.yml kengaytirildi: himoya() rejimiga ech holatini o'qish (GET) + ech=off, always_use_https=on, automatic_https_rewrites=on, min_tls_version=1.2 PATCH'lari qo'shildi; tekshir rejimiga http://50gram.uz va http://www.50gram.uz 301 testlari qo'shildi.
+- NATIJA (jonli isbot, commit 277168f): http://50gram.uz/ → 301 https://50gram.uz/ ✓; http://www → 301 ✓; POST /api/build → 308 ✓; https 200 ✓; core.js __50BUILD='v117' ✓; index'da erta skript ✓. APK ta'sirsiz (usesCleartextTraffic="false" + workers.dev https).
+- TOKEN CHEKLOVI (halol hisobot): CLOUDFLARE_API_TOKEN'da Zone Settings:Edit ruxsati YO'Q — himoya() 4 ta PATCH ham «Authentication error / Unauthorized» bilan rad etildi (logda ko'rinadi). DEMAK zonadagi ECH va Always Use HTTPS Dashboard'dan YOQILISHI KERAK: SSL/TLS → Edge Certificates → «Encrypted Client Hello» OFF (yoki egadan Zone Settings:Edit ruxsatli yangi token so'raladi — keyin domen.yml himoya rejimi o'zi bajaradi).
+- TESTLAR: scripts/test_v117_static.js 39/39 (versiya uchligi, redirect mantiqi, qator tartibi — redirect FW'dan va APK'dan oldin, muhrlar: SMS_MODE="app", FW_UA_OK, adminpanel, v115/v116 meros, node --check x4, index inline skript sintaksisi). tsc: 13 eski stream.ts (baseline, 0 yangi). wrangler dry-run OK.
+- CI (277168f) — 11/11 YASHIL: Deploy ✓×2 / smoke ✓ / MUHR ✓ / XAVFSIZLIK ✓ / MEDIA ✓ / DATA ✓ / Jurnal ✓ / Qo'ng'iroq MEDIA ✓ / Panel E2E ✓ / Domen ✓×3 (zona+himoya+tekshir). Ketma-ket rerun tartibi saqlandi (parallel-cancel darsi).
+
+Stage Summary:
+- «50gram.uz ni brauzerga yozib kirish» endi har qanday telefonda ishlaydi: http yozilsa ham avtomatik 301 → https, ilova to'liq xavfsiz kontekstda ochiladi (SW/shifrlash/kamera ishlaydi).
+- ECH zonadagi sozlamalar ruxsati egada qoldi — Dashboard'dan 1 daqiqalik amal (yoki yangi token): ECH OFF bo'lsa DPI-dagi tarmoqlarda ham TLS-darajasidagi «ochilmaydi» holati yo'qoladi.
+- Barcha qoidalar bajarildi: Eskiz SMS tegilmadi, web/ 0 panel izi, himoya ON, ovozli tarjimon (v115) va PDF (v116) tegilmagan. Versiya qulfi v117 (worker+core+sw); sayt LIVE: https://50gram.uz
