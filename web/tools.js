@@ -1,7 +1,12 @@
 // ==========================================================================
-// 50 GRAM TOOLLAR (v115) — REYTING + TARJIMON
+// 50 GRAM TOOLLAR (v116) — REYTING + TARJIMON
 // Reyting: kanallar / guruhlar / aktiv foydalanuvchilar (7 kunlik faollik)
 // Tarjimon: matn, ovoz (Whisper AI -> tarjima -> TTS ovoz), PDF hujjat (6 til)
+// v116 PDF YUKLAB OLISH: «PDF sifatida saqlash» (oyna + chop etish — orqaga
+// qaytish yo'q edi) OLIB TASHLANDI. Endi tarjima UZLUK hujjat ko'rinishida
+// turadi va «PDF yuklab olish» tugmasi bitta HAQIQIY .pdf fayl yaratib,
+// to'g'ridan-to'g'ri yuklab beradi (canvas -> JPEG -> PDF, kutubxonasiz —
+// xitoy/kirill/lotin brauzer shrifti bilan chiziladi, server shart emas).
 // v115 OVOZ KUCHAYTIRILDI: AGC mikrofon + audio normalizatsiya (WAV) — shovqinli/
 //        sokin joyda ham ishlaydi; serverda haqiqiy o'zbek neyral ovozi (Edge TTS).
 // Bu fayl FAQAT QO'SHIMCHA — mavjud funksiyalarga tegmaydi (muhr qoidasi).
@@ -125,7 +130,7 @@
       '<label class="pdfdrop" id="trp-drop"><input type="file" id="trp-file" accept="application/pdf,.pdf" hidden><b>📄 PDF hujjatni tanlang</b><span>30 sahifagacha · matnli PDF</span></label>' +
       '<div id="trp-prog" class="hide"><div class="pbar"><i id="trp-bar"></i></div><div class="mut" id="trp-stat"></div></div>' +
       '<div id="trp-res" class="trp-res hide"></div>' +
-      '<div id="trp-ctl" class="hide"><button class="lnk" id="trp-copy">📋 Hammasini nusxalash</button><button class="lnk" id="trp-print">🖨 PDF sifatida saqlash</button><button class="lnk" id="trp-txt">⬇️ Matn (.txt)</button></div>'
+      '<div id="trp-ctl" class="hide"><button class="lnk" id="trp-copy">📋 Hammasini nusxalash</button><button class="lnk" id="trp-print">⬇️ PDF yuklab olish</button><button class="lnk" id="trp-txt">📄 Matn (.txt)</button></div>'
     trBind()
   }
 
@@ -335,9 +340,22 @@
       } catch (e) { tarjimalar.push('[' + (e.message || 'tarjima ishlamadi') + ']') }
     }
     bar.style.width = '100%'
-    // Chizish: har bo'lak — asl (xira) + tarjima
-    res.innerHTML = bulaklar.map((b, i) =>
-      '<div class="trp-blk"><div class="trp-orig">' + esc(b) + '</div><div class="trp-tr">' + esc(tarjimalar[i] || '—') + '</div></div>').join('')
+    // v116: tarjimani UZLUK hujjatga yig'ish — bo'lak-bo'lak asl+tarjima juftlari
+    // o'rniga yagona paragrafli hujjat. Paragraf chegaralari: tarjimon \n ni
+    // saqlasa — asl paragraflar bo'yicha; saqlamasa — gaplarga bo'lib guruhlaymiz.
+    const trParalar = []
+    for (const t of tarjimalar) {
+      for (let s of String(t || '').split('\n')) {
+        s = s.trim()
+        if (s) trParalar.push(s)
+      }
+    }
+    if (trParalar.length === 1 && trParalar[0].length > 700) {
+      const gaplar = trParalar[0].split(/(?<=[.!?…。！？])\s+/)
+      trParalar.length = 0
+      for (let i = 0; i < gaplar.length; i += 3) trParalar.push(gaplar.slice(i, i + 3).join(' '))
+    }
+    res.innerHTML = '<div class="trp-doc">' + trParalar.map((p) => '<p>' + esc(p) + '</p>').join('') + '</div>'
     res.classList.remove('hide')
     $('trp-ctl').classList.remove('hide')
     prog.classList.add('hide')
@@ -353,17 +371,162 @@
       a.click()
       setTimeout(() => URL.revokeObjectURL(a.href), 4000)
     }
-    $('trp-print').onclick = () => {
+    // v116: HAQIQIY PDF — bitta fayl, to'g'ridan-to'g'ri yuklab olish.
+    // (eski oyna + chop etish oqimi OLIB TASHLANDI — orqaga qaytish yo'q edi)
+    $('trp-print').onclick = async () => {
+      const btn = $('trp-print')
+      const eski = btn.textContent
+      btn.textContent = '⏳ PDF tayyorlanmoqda…'
       try {
-        const w = window.open('', '_blank')
-        if (!w) return toast('Pop-up bloklandi — .txt yuklab oling')
-        w.document.write('<html><head><title>50 Gram tarjima</title><meta charset="utf-8"><style>body{font:13px/1.7 -apple-system,Roboto,sans-serif;margin:40px}h1{font-size:18px}.o{color:#888;margin-bottom:4px}.t{margin-bottom:26px;border-left:3px solid #1E8E4D;padding-left:12px}@media print{button{display:none}}</style></head><body><h1>50 Gram — ' + tilN(trTo) + ' tarjimasi</h1>' +
-          bulaklar.map((b, i) => '<div class="o">' + esc(b) + '</div><div class="t">' + esc(tarjimalar[i] || '') + '</div>').join('') +
-          '<hr><small>50gram.uz Tarjimon</small></body></html>')
-        w.document.close()
-        setTimeout(() => { try { w.print() } catch {} }, 600)
-      } catch { toast('Chop etish ochilmadi — .txt yuklab oling') }
+        const blob = await pdfHujjat(trParalar, sahSon)
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = '50gram-tarjima-' + trTo + '.pdf'
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        setTimeout(() => URL.revokeObjectURL(a.href), 8000)
+        toast('✅ PDF yuklab olindi — ' + trParalar.length + ' paragraf')
+      } catch (e) {
+        toast('⚠️ PDF yaratilmadi: ' + (e.message || 'xato') + ' — .txt sinab koring')
+      }
+      btn.textContent = eski
     }
+  }
+
+  // v116: HAQIQIY PDF YARATISH — canvas(A4) → JPEG sahifalar → yig'ma PDF.
+  // Kutubxona KERAK EMAS: PDF tuzilishi qo'lda yig'iladi (DCTDecode rasm-sahifalar).
+  // Xitoy/kirill/lotin brauzer shrifti bilan chiziladi — server/so'rov shart emas.
+  async function pdfHujjat(paralar, sahSon) {
+    const PW = 1240, PH = 1754, MX = 100          // A4 @150dpi + hoshiya
+    const SH = '30px -apple-system,"Segoe UI",Roboto,"Noto Sans SC","Noto Sans",sans-serif'
+    const LH = 47, ORA = 17
+    const cnv = document.createElement('canvas')
+    cnv.width = PW; cnv.height = PH
+    const ctx = cnv.getContext('2d')
+    const UZUN = PW - MX * 2
+    const CJK = /[\u1100-\u11FF\u2E80-\uA4CF\uA960-\uA97F\uAC00-\uD7FF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF\u3000-\u303F\u3040-\u30FF]/
+    // Qatorlarga bo'lish: so'z (lotin) + bitta CJK belgisi — sindirish nuqtalari
+    const qatorBol = (matn) => {
+      const tok = []
+      let cur = ''
+      const flush = () => { if (cur) { tok.push(cur); cur = '' } }
+      for (const ch of matn) {
+        if (/\s/.test(ch)) { flush(); tok.push(' ') } else if (CJK.test(ch)) { flush(); tok.push(ch) } else cur += ch
+      }
+      flush()
+      const qatorlar = []
+      let q = ''
+      const sindir = (t) => {
+        // bitta token qatorga sig'masa — belgima-belgi sindirish (uzun URL va h.k.)
+        let s = t
+        let i = 0
+        while (i < s.length && ctx.measureText(q + s[i]).width <= UZUN) { q += s[i]; i++ }
+        qatorlar.push(q)
+        s = s.slice(i)
+        while (ctx.measureText(s).width > UZUN) {
+          let j = 1
+          while (j < s.length && ctx.measureText(s.slice(0, j + 1)).width <= UZUN) j++
+          qatorlar.push(s.slice(0, j))
+          s = s.slice(j)
+        }
+        q = s
+      }
+      for (const t of tok) {
+        if (t === ' ') { if (q) q += ' '; continue }
+        if (q && ctx.measureText(q + t).width > UZUN) {
+          if (ctx.measureText(t).width > UZUN) sindir(t)
+          else { qatorlar.push(q); q = t }
+        } else q += t
+      }
+      if (q.trim()) qatorlar.push(q.trim())
+      return qatorlar.length ? qatorlar : ['']
+    }
+    const sahifalar = []
+    let y = 0
+    const yangiSahifa = (birinchi) => {
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, PW, PH)
+      ctx.textAlign = 'left'
+      y = MX + 8
+      if (birinchi) {
+        ctx.fillStyle = '#1E8E4D'
+        ctx.font = '600 40px -apple-system,"Segoe UI",Roboto,sans-serif'
+        ctx.fillText('50 Gram tarjimasi', MX, y + 32)
+        y += 44
+        ctx.font = '26px -apple-system,"Segoe UI",Roboto,"Noto Sans SC",sans-serif'
+        ctx.fillStyle = '#6b7280'
+        const s = new Date()
+        const sana = s.getFullYear() + '.' + String(s.getMonth() + 1).padStart(2, '0') + '.' + String(s.getDate()).padStart(2, '0')
+        ctx.fillText(tilN(trTo) + ' · manba ' + sahSon + ' sahifa · ' + sana, MX, y + 28)
+        y += 42
+        ctx.strokeStyle = '#d7dce3'
+        ctx.lineWidth = 2
+        ctx.beginPath(); ctx.moveTo(MX, y); ctx.lineTo(PW - MX, y); ctx.stroke()
+        y += 40
+      }
+    }
+    const sahifaYop = () => {
+      ctx.fillStyle = '#9aa2af'
+      ctx.font = '22px -apple-system,Roboto,sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText(String(sahifalar.length + 1), PW / 2, PH - 46)
+      sahifalar.push(cnv.toDataURL('image/jpeg', 0.82))
+    }
+    yangiSahifa(true)
+    for (const p of paralar) {
+      ctx.font = SH
+      ctx.fillStyle = '#171c26'
+      const qatorlar = qatorBol(p)
+      for (const q of qatorlar) {
+        if (y + LH > PH - MX) { sahifaYop(); yangiSahifa(false) }
+        ctx.fillText(q, MX, y)
+        y += LH
+      }
+      y += ORA
+      if (sahifalar.length % 4 === 3) await new Promise((r) => setTimeout(r))
+    }
+    sahifaYop()
+    // JPEG → PDF yig'ish (katalog + sahifalar + rasm + kontent + xref) — qo'lda
+    const baytlar = []
+    for (const d of sahifalar) {
+      const b = atob(d.split(',')[1])
+      const u = new Uint8Array(b.length)
+      for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i)
+      baytlar.push(u)
+    }
+    const n = baytlar.length
+    const WB = 595.28, HB = 841.89
+    const enc = new TextEncoder()
+    const qismlar = [], xref = []
+    let ofset = 0
+    const yoz = (x) => { const b = typeof x === 'string' ? enc.encode(x) : x; qismlar.push(b); ofset += b.length }
+    const objBosh = (raqam) => { xref[raqam] = ofset; yoz(raqam + ' 0 obj\n') }
+    yoz(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34, 0x0A, 0x25, 0xE2, 0xE3, 0xCF, 0xD3, 0x0A]))
+    objBosh(1); yoz('<< /Type /Catalog /Pages 2 0 R >>\nendobj\n')
+    const kids = []
+    for (let i = 0; i < n; i++) kids.push((3 + i * 3) + ' 0 R')
+    objBosh(2); yoz('<< /Type /Pages /Kids [' + kids.join(' ') + '] /Count ' + n + ' >>\nendobj\n')
+    for (let i = 0; i < n; i++) {
+      const jpg = baytlar[i]
+      const pSah = 3 + i * 3, pRas = pSah + 1, pKont = pSah + 2
+      xref[pRas] = ofset
+      yoz(pRas + ' 0 obj\n<< /Type /XObject /Subtype /Image /Width ' + PW + ' /Height ' + PH + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + jpg.length + ' >>\nstream\n')
+      yoz(jpg)
+      yoz('\nendstream\nendobj\n')
+      const kont = 'q ' + WB + ' 0 0 ' + HB + ' 0 0 cm /Im0 Do Q'
+      xref[pKont] = ofset
+      yoz(pKont + ' 0 obj\n<< /Length ' + kont.length + ' >>\nstream\n' + kont + '\nendstream\nendobj\n')
+      objBosh(pSah); yoz('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + WB + ' ' + HB + '] /Resources << /ProcSet [/PDF /ImageC] /XObject << /Im0 ' + pRas + ' 0 R >> >> /Contents ' + pKont + ' 0 R >>\nendobj\n')
+    }
+    const INFO = 3 + n * 3
+    objBosh(INFO); yoz('<< /Title (50 Gram Translation) /Producer (50gram.uz) >>\nendobj\n')
+    const xrefPos = ofset
+    let xr = 'xref\n0 ' + (INFO + 1) + '\n0000000000 65535 f \n'
+    for (let i = 1; i <= INFO; i++) xr += String(xref[i] || 0).padStart(10, '0') + ' 00000 n \n'
+    xr += 'trailer\n<< /Size ' + (INFO + 1) + ' /Root 1 0 R /Info ' + INFO + ' 0 R >>\nstartxref\n' + xrefPos + '\n%%EOF'
+    yoz(xr)
+    return new Blob(qismlar, { type: 'application/pdf' })
   }
 
   // ------------------------- Hodisalarni bog'lash -------------------------

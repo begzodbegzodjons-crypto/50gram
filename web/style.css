@@ -1437,3 +1437,8 @@ body.dark .pdfdrop{background:rgba(255,255,255,.05)}
 .trmsg{padding:6px 2px}
 .trmsg .trt{font:16px/1.65 inherit;color:var(--matn);margin:10px 0 14px;white-space:pre-wrap;word-break:break-word}
 .trmsg .btn{width:100%}
+
+/* v116: PDF tarjima — uzluk hujjat korinishi (bolak-bolak juftlar orniga) */
+.trp-doc{padding:8px 16px 14px}
+.trp-doc p{font:15px/1.75 inherit;color:var(--matn);margin:0 0 12px;word-break:break-word}
+.trp-doc p:last-child{margin-bottom:4px}

@@ -1,0 +1,88 @@
+#!/usr/bin/env node
+// v116 STATIK TEKSHIRUV — PDF tarjima: uzluk hujjat + haqiqiy PDF yuklab olish. 0 xato = yashil.
+const fs = require('fs')
+const { execSync } = require('child_process')
+let ok = 0, bad = 0
+const T = (cond, name) => { if (cond) { ok++; console.log('  ✓ ' + name) } else { bad++; console.log('  ✗ ' + name) } }
+
+const read = (f) => fs.readFileSync('/home/z/my-project/' + f, 'utf8')
+const worker = read('worker/src/index.ts')
+const core = read('web/core.js')
+const sw = read('web/sw.js')
+const html = read('web/index.html')
+const tools = read('web/tools.js')
+const chat = read('web/chat.js')
+const css = read('web/style.css')
+
+console.log('— 1. VERSIYA UCHLIGI (v116) —')
+T(worker.includes('const BUILD_V = "v116"'), 'worker BUILD_V = v116')
+T(core.includes("window.__50BUILD = 'v116'"), 'core __50BUILD = v116')
+T(sw.includes("const V = '50gram-v116'"), 'sw V = 50gram-v116')
+
+console.log('— 2. WORKER: TARJIMON (v115 merosi tegilmagan) —')
+T(worker.includes('const TR_LANGS'), 'TR_LANGS tillar jadvali')
+T(worker.includes('async function tarjimaJuft'), 'tarjimaJuft (clients5→gtx→AI)')
+T(worker.includes('clients5.google.com/translate_a/t'), 'Google clients5 endpoint')
+T(worker.includes('translate.googleapis.com/translate_a/single'), 'Google gtx endpoint')
+T(worker.includes('@cf/meta/llama-3.3-70b-instruct-fp8-fast'), 'Workers AI model zanjiri (v115.6)')
+T(worker.includes('async function ttsMP3'), 'ttsMP3 (Google TTS)')
+T(worker.includes('async function whisperMatn'), 'whisperMatn (ASR)')
+T(worker.includes('async function apiTranslate'), 'apiTranslate handler')
+T(worker.includes('"POST", "/translate", apiTranslate'), '/translate rout')
+T(worker.includes('trTez(c.uid, 1, 60)'), 'matn tezlik-posboni 60/min')
+T(worker.includes('trTez(c.uid, 2, 10)'), 'ovoz tezlik-posboni 10/min')
+T(worker.includes('uz-UZ-MadinaNeural'), 'Edge TTS ozbek neyral ovozi (v115)')
+
+console.log('— 3. WEB: TABLAR + DOCK (tegilmagan) —')
+T(html.includes('id="t-rating"'), 't-rating tab')
+T(html.includes('id="t-translate"'), 't-translate tab')
+T(html.includes('data-t="t-rating"'), 'dock Reyting tugmasi')
+T(html.includes('data-t="t-translate"'), 'dock Tarjimon tugmasi')
+T(html.includes('<script src="tools.js"></script>'), 'tools.js ulangan')
+T((html.match(/data-t="t-/g) || []).length === 8, 'dock 8 tugma')
+
+console.log('— 4. WEB: TOOLS.JS — v116 PDF YUKLAB OLISH —')
+T(tools.includes('async function pdfHujjat'), 'pdfHujjat — haqiqiy PDF yaratish')
+T(tools.includes("a.download = '50gram-tarjima-' + trTo + '.pdf'"), 'PDF fayl nomi + yuklab olish')
+T(tools.includes("'<div class=\"trp-doc\">'"), 'uzluk hujjat korinishi (.trp-doc)')
+T(tools.includes('PDF yuklab olish'), 'tugma matni ozgardi')
+T(tools.includes('/Filter /DCTDecode'), 'PDF: JPEG rasm-sahifalar')
+T(tools.includes('startxref'), 'PDF: xref jadvali')
+T(tools.includes('%%EOF'), 'PDF: EOF belgisi')
+T(tools.includes('/MediaBox [0 0 '), 'PDF: A4 MediaBox')
+T(!tools.includes('window.open'), 'ESKI oyna oqimi OLIB TASHLANDI (window.open yoq)')
+T(!tools.includes('document.write'), 'document.write yoq')
+T(!tools.includes('.print('), 'chop etish oqimi yoq (window.print)')
+T(!tools.includes('trp-blk'), 'bolak-bolak .trp-blk korinishi olib tashlandi')
+T(tools.includes("split(/(?<=[.!?…。！？])\\s+/)"), 'gap-ga bolib guruhlash (\\n yoqolsa)')
+T(tools.includes('window.__trpToliq'), 'toliq matn (txt/nusxa) saqlangan')
+T(tools.includes("post('/translate'"), 'matn tarjima API tegilmagan')
+T(tools.includes("post('/translate/speech'"), 'ovoz tarjima API tegilmagan')
+T(tools.includes("import('./pdfjs/pdf.min.mjs')"), 'pdfjs dinamik yuklash tegilmagan')
+T(tools.includes("'audio/webm;codecs=opus'"), 'MediaRecorder WebView zanjiri tegilmagan')
+T(tools.includes('trOvozYubor'), 'ovoz yuborish mantiqi tegilmagan')
+T(tools.includes('window.ratOch') && tools.includes('window.trOch') && tools.includes('window.trMsg'), 'globallar joyida')
+
+console.log('— 5. WEB: BOSHQA FAYLLAR —')
+T(chat.includes("['trans', '🌐', 'Tarjima']"), 'chat kontekst-menyu «Tarjima»')
+T(chat.includes('window.trMsg && trMsg(m)'), 'chat menyu handleri')
+T(core.includes("if (id === 't-translate')"), 'tabGo tarjimon hook')
+T(sw.includes("'tools.js'"), 'sw SHELL tools.js')
+T(css.includes('.trp-doc p'), 'CSS: .trp-doc uslublari qoshildi')
+T(css.includes('.pdfdrop') && css.includes('.micbtn') && css.includes('.rat-rank'), 'CSS eski uslublar joyida')
+T(fs.existsSync('/home/z/my-project/web/pdfjs/pdf.min.mjs') && fs.existsSync('/home/z/my-project/web/pdfjs/pdf.worker.min.mjs'), 'pdfjs fayllari mavjud')
+
+console.log('— 6. MUHR — MUHOFAZALANGANLAR TEGILMAGAN —')
+T(!tools.includes('ADMIN_HTML') && !tools.includes('adminpanel'), 'tools.js panel izi 0')
+T(worker.includes('const FW_OFF') || worker.includes('let FW_OFF'), 'himoya FW_OFF saqlangan')
+T(chat.includes("'audio/webm;codecs=opus', 'audio/mp4'"), 'chat ovoz yozish tegilmagan')
+T(worker.includes('SMS_MODE = "app"') === false || read('worker/wrangler.toml').includes('SMS_MODE = "app"'), 'Eskiz SMS rejimi saqlangan')
+T(worker.includes('uz-UZ-MadinaNeural') && /uz: \{[^}]*tts: "uz"/.test(worker), 'turkcha ovoz qaytmagan (v115 muhri: tts=uz/Edge)')
+
+console.log('— 7. SINTAKSIS —')
+for (const f of ['web/tools.js', 'web/core.js', 'web/chat.js', 'web/sw.js', 'web/manage.js', 'web/social.js', 'web/rtc.js', 'web/p2p.js', 'web/storage.js']) {
+  try { execSync('node --check /home/z/my-project/' + f, { stdio: 'pipe' }); T(true, f + ' node --check') } catch (e) { T(false, f + ' sintaksis XATO') }
+}
+
+console.log('\n=== NATIJA: ' + ok + ' YASHIL, ' + bad + ' QIZIL ===')
+process.exit(bad ? 1 : 0)
