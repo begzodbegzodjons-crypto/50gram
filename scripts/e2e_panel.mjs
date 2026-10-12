@@ -23,7 +23,13 @@
  *      egasini chiqarish → 400 (posbon), TAGI BILAN O'CHIRISH → chat 404 (o'zi-tozalanadi)
  *  13) v106 HIMOYA TUGMASI: fwtoggle off → security.fwoff=1 → fwtoggle ON (qayta YOQILADI —
  *      himoya faol holatda qoladi), boshqaruv jurnali /panel/log yozuvlari
- *  BROADCAST real foydalanuvchilarga SINALMAYDI — faqat uid parametr bilan TEST hisobiga.
+ *  15) v118 KATTA RASM E'LON: 3MB rasm → JSON ≈4MB (eski 2MB chegarada 413 bo'lardi) → 12MB
+ *      panel chegarasi bilan 200 + sent=1 (R2'ga bitta nusxa, bayt-bayt deSHIFR emas — hajm isboti)
+ *  16) v118 KO'P SUHBAT BIR BATCHDA: 6 ta test foydalanuvchiga uids bilan — birinchi run
+ *      yangi suhbatlar (eski kodda 1062 Duplicate chats.PRIMARY → 500), qayta run new_chats=0
+ *  17) v118 MUROJAATLAR QUTISI: foydalanuvchi admin suhbatiga yozadi → /panel/inbox ro'yxatida
+ *      ko'rinadi → ?chat= tarixi → admin /panel/dm javobi → ro'yxatdan o'zi chiqadi → xabar yetadi
+ *  BROADCAST real foydalanuvchilarga SINALMAYDI — faqat uid/uids parametr bilan TEST hisoblariga.
  * Ishga tushirish: E2E_BASE=https://... node scripts/e2e_panel.mjs
  */
 import { readFileSync } from 'node:fs'
@@ -289,6 +295,70 @@ try {
   ok(lg.st === 200 && Array.isArray(lg.d.rows), 'v106 boshqaruv jurnali ko\u2018rinadi', 'rows=' + (lg.d.rows || []).length)
   ok((lg.d.rows || []).some((x) => x.act === 'himoya_yoqildi') && (lg.d.rows || []).some((x) => x.act === 'himoya_ochirildi'), 'v106 jurnalda himoya amallari yozilgan')
   ok((lg.d.rows || []).some((x) => x.act === 'chat_blok' || x.act === 'chat_ochirish' || x.act === 'chat_yomon_och'), 'v106 jurnalda kanal amallari yozilgan')
+
+  // 15) v118 KATTA RASM E'LON — JSON ≈4MB (eski 2MB chegarada 413 «Hajm juda katta» bo'lardi):
+  //     3MB tasodifiy bayt → AES-GCM shifrlash → base64 → JSON >2MB → panel 12MB chegara → 200
+  {
+    const plain = new Uint8Array(3 * 1024 * 1024); crypto.getRandomValues(plain)
+    const key = new Uint8Array(32); crypto.getRandomValues(key)
+    const iv = new Uint8Array(12); crypto.getRandomValues(iv)
+    const ck = await crypto.subtle.importKey('raw', key, 'AES-GCM', false, ['encrypt'])
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, ck, plain.buffer))
+    const sha = [...new Uint8Array(await crypto.subtle.digest('SHA-256', ct.buffer))].map((x) => x.toString(16).padStart(2, '0')).join('')
+    const bigimg = { b64: Buffer.from(ct).toString('base64'), key: Buffer.from(key).toString('base64'), iv: Buffer.from(iv).toString('base64'), sha, size: ct.length, mime: 'image/jpeg', name: 'v118-katta.jpg', fsize: plain.length }
+    const jsz = JSON.stringify({ body: 'v118 katta rasm e\u2018loni', uid: uidT, img: bigimg }).length
+    ok(jsz > 2_000_000, 'v118: test payload eski 2MB chegaradan KATTA (eski kodda 413 bo\u2018lardi)', 'json=' + (jsz / 1e6).toFixed(2) + 'MB')
+    const b3 = await j('/api/panel/broadcast', { method: 'POST', h: AT, body: { body: 'v118 katta rasm e\u2018loni', uid: uidT, img: bigimg } })
+    ok(b3.st === 200 && b3.d.ok && b3.d.sent === 1, 'v118 KATTA RASM (3MB) E\u2018LON YUBORILDI — 413 YO\u2018Q', JSON.stringify(b3.d).slice(0, 120))
+  }
+
+  // 16) v118 KO'P YANGI SUHBAT BIR BATCHDA — 1062 «Duplicate entry chats.PRIMARY» ildizi:
+  //     5 ta test foydalanuvchi (091-095) + uidT = 6 ta suhbat BIR so'rovda. Birinchi run'da
+  //     yangi suhbatlar yaratiladi (eski kodda newId() to'qnashuvi → 500 «Server xatosi»),
+  //     qayta run'da mavjud suhbatlar topiladi (new_chats=0 — dublikat yo'q, deterministik).
+  const U6 = [T]
+  for (const ph of ['998900000091', '998900000092', '998900000093', '998900000094', '998900000095']) {
+    const o1 = await j('/api/auth/otp', { method: 'POST', body: { phone: ph, force: 1 } })
+    if (o1.st !== 200 || !o1.d.dev_code) throw new Error('v118 test-user otp ' + ph + ' st=' + o1.st)
+    const v1 = await j('/api/auth/verify', { method: 'POST', body: { phone: '+' + ph, code: o1.d.dev_code } })
+    if (v1.st !== 200 || !v1.d.token) throw new Error('v118 test-user verify ' + ph + ' st=' + v1.st)
+    U6.push({ phone: ph, full: '+' + ph, uid: v1.d.user.id, tok: v1.d.token })
+  }
+  const uids = U6.map((u) => u.uid)
+  ok(new Set(uids).size === 6, 'v118: 6 ta test foydalanuvchi tayyor (090+091-095)', 'uids=' + uids.length)
+  const b4 = await j('/api/panel/broadcast', { method: 'POST', h: AT, body: { body: 'v118 ko\u2018p-suhbat e\u2018lon sinovi', uids } })
+  ok(b4.st === 200 && b4.d.ok && b4.d.sent >= 6, 'v118 6 TA SUHBATGA BIR BATCHDA YUBORILDI (1062 YO\u2018Q)', JSON.stringify(b4.d).slice(0, 140))
+  console.log('  v118 diag: new_chats=' + b4.d.new_chats + ' (birinchi run\u2019da >0 bo\u2018lishi kutiladi)')
+  const b5 = await j('/api/panel/broadcast', { method: 'POST', h: AT, body: { body: 'v118 qayta sinov', uids } })
+  ok(b5.st === 200 && b5.d.ok && b5.d.new_chats === 0, 'v118: qayta yuborish mavjud suhbatlarga (new_chats=0 — dublikat yo\u2018q)', 'new_chats=' + b5.d.new_chats)
+
+  // 17) v118 MUROJAATLAR QUTISI: foydalanuvchi «50gram admin» suhbatiga yozadi → /panel/inbox
+  //     ro'yxatida ko'rinadi → admin /panel/dm bilan javob beradi → ro'yxatdan O'ZI chiqadi
+  const inbAnon = await j('/api/panel/inbox')
+  ok(inbAnon.st === 401, 'v118: tokensiz /panel/inbox → 401', 'st=' + inbAnon.st)
+  const admChats2 = await j('/api/chats', { h: { authorization: 'Bearer ' + tokT } })
+  const admCh2 = (admChats2.d.chats || []).find((c) => c.type === 'direct' && c.peer && c.peer.id === 990000000001)
+  ok(!!admCh2, 'v118: test foydalanuvchining «50gram admin» suhbat topildi', admCh2 ? 'chat=' + admCh2.id : 'yo\u2018q')
+  if (admCh2) {
+    const mark = 'v118 murajaat ' + Date.now()
+    const sm = await j('/api/chats/' + admCh2.id + '/messages', { method: 'POST', h: { authorization: 'Bearer ' + tokT }, body: { kind: 'text', body: mark, client_id: 'v118-inb' } })
+    ok(sm.st === 200 || sm.st === 201, 'v118: foydalanuvchi admin suhbatiga murojaat yozdi', 'st=' + sm.st)
+    const inb1 = await j('/api/panel/inbox', { h: AT })
+    ok(inb1.st === 200 && Array.isArray(inb1.d.items), 'v118: /panel/inbox javob beradi', 'st=' + inb1.st + ' items=' + (inb1.d.items || []).length)
+    const mine = (inb1.d.items || []).find((x) => x.uid === uidT && String(x.body || '').includes(mark))
+    ok(!!mine, 'v118: yangi murojaat RO\u2018YXATDA (uid+matn+vaqt)', mine ? 'chat=' + mine.chat_id : 'topilmadi')
+    if (mine) {
+      const one = await j('/api/panel/inbox?chat=' + mine.chat_id, { h: AT })
+      ok(one.st === 200 && one.d.user && one.d.user.id === uidT && Array.isArray(one.d.messages), 'v118: bitta suhbat tarixi (?chat=ID)', 'msgs=' + (one.d.messages || []).length)
+      ok((one.d.messages || []).some((m) => !m.mine && String(m.body || '').includes(mark)), 'v118: tarixda foydalanuvchi xabari bor (mine=false)')
+      const rep = await j('/api/panel/dm', { method: 'POST', h: AT, body: { id: uidT, body: 'v118 admin javobi \u2014 rahmat!' } })
+      ok(rep.st === 200 && rep.d.ok, 'v118: admin javob berdi (/panel/dm \u2014 «50gram admin» nomidan)', JSON.stringify(rep.d).slice(0, 100))
+      const inb2 = await j('/api/panel/inbox', { h: AT })
+      ok(!(inb2.d.items || []).some((x) => x.uid === uidT), 'v118: javob berilgach murojaat ro\u2018yxatdan O\u2018ZI chiqdi')
+      const ms2 = await j('/api/chats/' + admCh2.id + '/messages?latest=10', { h: { authorization: 'Bearer ' + tokT } })
+      ok((ms2.d.messages || []).some((m) => m.sender_id === 990000000001 && String(m.body || '').includes('v118 admin javobi')), 'v118: javob FOYDALANUVCHIGA yetdi (chat tarixida ko\u2018rinadi)')
+    }
+  }
 
   // 14) YOPILISH: test foydalanuvchisini logout (iz qolmasin)
   try { await j('/api/auth/logout', { method: 'POST', h: { authorization: 'Bearer ' + tokT }, body: {} }) } catch {}

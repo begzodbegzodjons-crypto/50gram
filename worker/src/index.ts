@@ -357,7 +357,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v117"
+const BUILD_V = "v118"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -4048,16 +4048,29 @@ async function panelBroadcast(c: C) {
   if (!body && !img) fail("Xabar matni bo‘sh", 400)
   await admSysUser(c.db)
   // v108: uid — faqat bitta foydalanuvchiga sinov-yuborish (CI E2E va eganing tekshiruvi uchun)
+  // v118: uids — bir nechta aniq foydalanuvchi (E2E ko'p-suhbat sinovi + eganing tanlangan guruhga yuborishi)
   const onlyUid = Math.floor(+(c.b?.uid) || 0)
+  const onlyUids: number[] = Array.isArray(c.b?.uids)
+    ? [...new Set((c.b.uids as any[]).map((x) => Math.floor(+(x) || 0)).filter((x) => x && x !== ADM_ID))].slice(0, 50)
+    : []
   const t = now()
   // "barchasi" = bloklanganlar YO'Q + adminni o'zi bloklaganlar YO'Q (foydalanuvchi xohishi hurmat)
   const where = onlyUid
     ? `WHERE id=${onlyUid}`
-    : `WHERE id<>${ADM_ID} AND blocked=0 AND id NOT IN (SELECT user_id FROM blocks WHERE blocked_id=${ADM_ID})`
+    : onlyUids.length
+      ? `WHERE id IN (${onlyUids.join(",")})`
+      : `WHERE id<>${ADM_ID} AND blocked=0 AND id NOT IN (SELECT user_id FROM blocks WHERE blocked_id=${ADM_ID})`
   const total = Number((await c.db.one("SELECT COUNT(*) AS n FROM users " + where))?.n || 0)
   if (!total) fail("Yuborish uchun foydalanuvchi topilmadi", 400)
   const rows = await c.db.q("SELECT id FROM users " + where + " ORDER BY id LIMIT 2000")
   const targets = rows.map((r) => +r.id)
+  // v118 MUHIM TUZATISH («Server xatosi» ildizi): suhbat id'lari newId() bilan olinganda
+  // BIR BATCH ichida to'qnashardi — newId() = ms*1000+random(0..999), 400 ta yangi suhbat
+  // bitta-ikki ms ichida yaratiladi → bir xil id → «Duplicate entry for key chats.PRIMARY»
+  // → butun INSERT yiqiladi → 500 «Server xatosi» va E'LON HECH KIMGA YETMASDI (jonli
+  // err_jurnal: /panel/broadcast :: Error 1062 x5). Yechim — xabar id'lari bilan BIR XIL
+  // kafolatlangan sxema: t*1000+seq (seq butun so'rov bo'ylab oshib boradi → noyob).
+  let seq = 0
   // v108: rasm bir marta saqlanadi (barcha xabarlarga BITTA media_id — R2'da bitta nusxa)
   let meta: any = null, kind = "text"
   if (img) {
@@ -4074,29 +4087,78 @@ async function panelBroadcast(c: C) {
     const ex = await c.db.q(`SELECT id, direct_key FROM chats WHERE direct_key IN (${ph(keys)})`, keys)
     const have = new Map<string, number>(ex.map((r) => [String(r.direct_key), +r.id]))
     const chatIds: number[] = [], insChats: unknown[] = [], insMem: unknown[] = []
+    const okChat = new Set<number>()
     for (let j = 0; j < part.length; j++) {
       const chid = have.get(keys[j])
-      if (chid) { chatIds.push(chid); continue }
-      const nid = newId()
+      if (chid) { chatIds.push(chid); okChat.add(chid); continue }
+      const nid = t * 1000 + seq++
       chatIds.push(nid)
       insChats.push([nid, "direct", ADM_ID, 0, randomStr(10), keys[j], 2, t, t])
       insMem.push([nid, ADM_ID, "member", t], [nid, part[j], "member", t])
     }
     if (insChats.length) {
-      await c.db.run(
-        `INSERT INTO chats(id,type,owner_id,is_public,invite_hash,direct_key,member_count,last_msg_at,created_at) VALUES ${insChats.map(() => "(?,?,?,?,?,?,?,?,?)").join(",")}`,
-        insChats.flat(),
-      )
-      await c.db.run(
-        `INSERT INTO chat_members(chat_id,user_id,role,joined_at) VALUES ${insMem.map(() => "(?,?,?,?)").join(",")}`,
-        insMem.flat(),
-      )
-      newChats += insChats.length
+      try {
+        await c.db.run(
+          `INSERT INTO chats(id,type,owner_id,is_public,invite_hash,direct_key,member_count,last_msg_at,created_at) VALUES ${insChats.map(() => "(?,?,?,?,?,?,?,?,?)").join(",")}`,
+          insChats.flat(),
+        )
+        await c.db.run(
+          `INSERT INTO chat_members(chat_id,user_id,role,joined_at) VALUES ${insMem.map(() => "(?,?,?,?)").join(",")}`,
+          insMem.flat(),
+        )
+        for (const r of insChats as unknown[][]) okChat.add(+(r[0] as number))
+        newChats += insChats.length
+      } catch {
+        // v118: butun batch yiqilsa (transient/PK) — 50-lik bo'laklar bilan YANGI id (seq) bilan;
+        // bo'lak yiqilsa — har bir suhbat alohida. Yiqilgan suhbat egalari xabarsiz qoladi (okChat yo'q).
+        for (let k = 0; k < insChats.length; k += 50) {
+          const chunk = (insChats.slice(k, k + 50) as unknown[][]).map((r) => [t * 1000 + seq++, r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]])
+          try {
+            await c.db.run(
+              `INSERT INTO chats(id,type,owner_id,is_public,invite_hash,direct_key,member_count,last_msg_at,created_at) VALUES ${chunk.map(() => "(?,?,?,?,?,?,?,?,?)").join(",")}`,
+              chunk.flat(),
+            )
+            const mem2: unknown[] = []
+            for (const rr of chunk) {
+              const dk = String(rr[5]).split(":")
+              mem2.push([rr[0], ADM_ID, "member", t], [rr[0], dk[0] === String(ADM_ID) ? +dk[1] : +dk[0], "member", t])
+            }
+            await c.db.run(
+              `INSERT INTO chat_members(chat_id,user_id,role,joined_at) VALUES ${mem2.map(() => "(?,?,?,?)").join(",")}`,
+              mem2.flat(),
+            )
+            for (const rr of chunk) okChat.add(+(rr[0] as number))
+            newChats += chunk.length
+          } catch {
+            for (const rr of chunk) {
+              const dk = String(rr[5]).split(":")
+              const peer = dk[0] === String(ADM_ID) ? +dk[1] : +dk[0]
+              try {
+                await c.db.run(
+                  "INSERT INTO chats(id,type,owner_id,is_public,invite_hash,direct_key,member_count,last_msg_at,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                  [rr[0], rr[1], rr[2], rr[3], rr[4], rr[5], rr[6], rr[7], rr[8]],
+                )
+                await c.db.run(
+                  "INSERT INTO chat_members(chat_id,user_id,role,joined_at) VALUES(?,?,?,?),(?,?,?,?)",
+                  [rr[0], ADM_ID, "member", t, rr[0], peer, "member", t],
+                )
+                okChat.add(+(rr[0] as number))
+                newChats++
+              } catch {}
+            }
+          }
+        }
+      }
     }
     // xabar id'lari: t*1000+seq — ketma-ket noyob; PK to'qnashuvda — 50-lik bo'laklarda yangi id bilan
     const mrows: unknown[] = []
-    for (let j = 0; j < chatIds.length; j++)
-      mrows.push([t * 1000 + i + j, chatIds[j], ADM_ID, kind, body || null, meta ? JSON.stringify(meta) : null, t, t, t + 100 * 365 * DAY])
+    const mrowByChat = new Map<number, unknown[]>()
+    for (let j = 0; j < chatIds.length; j++) {
+      if (!okChat.has(chatIds[j])) continue
+      const row = [t * 1000 + seq++, chatIds[j], ADM_ID, kind, body || null, meta ? JSON.stringify(meta) : null, t, t, t + 100 * 365 * DAY]
+      mrows.push(row)
+      mrowByChat.set(chatIds[j], row)
+    }
     if (mrows.length) {
       try {
         await c.db.run(
@@ -4106,20 +4168,31 @@ async function panelBroadcast(c: C) {
       } catch {
         // v108: butun batch yiqilsa — 50-lik bo'laklar bilan (yangi id) qayta urinish;
         // bo'lak yiqilsa — xar biri alohida (shu bo'lak ichida ≤50 — byudjet posboni)
+        const fresh: Array<[number, number]> = []
         for (let k = 0; k < mrows.length; k += 50) {
           const chunk = (mrows.slice(k, k + 50) as unknown[][]).map((r) => [newId(), r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]])
+          let chunkOk = false
           try {
             await c.db.run(
               `INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES ${chunk.map(() => "(?,?,?,?,?,?,?,?,?)").join(",")}`,
               chunk.flat(),
             )
+            chunkOk = true
           } catch {
-            for (const r of chunk)
-              await c.db.run("INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)", [newId(), r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]]).catch(() => { failed++ })
+            for (const r of chunk) {
+              const nid = newId()
+              try {
+                await c.db.run("INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)", [nid, r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]])
+                fresh.push([nid, +(r[1] as number)])
+              } catch { failed++ }
+            }
           }
+          if (chunkOk) for (const r of chunk) fresh.push([+(r[0] as number), +(r[1] as number)])
         }
+        // v118: muvaffaqiyatli yozilgan xabar id'lari WS-bildirishnoma uchun yangilanadi
+        for (const [mid2, chid2] of fresh) { const rr = mrowByChat.get(chid2); if (rr) rr[0] = mid2 }
       }
-      await c.db.run(`UPDATE chats SET last_msg_at=? WHERE id IN (${ph(chatIds)})`, [t, ...chatIds])
+      await c.db.run(`UPDATE chats SET last_msg_at=? WHERE id IN (${ph(chatIds)})`, [t, ...chatIds]).catch(() => {})
       sent += mrows.length
       // v108: shu batchdagi onlayn qabul qiluvchilarga WS hodisa (chat DARHOL paydo bo'ladi)
       const onl = await c.db.q(`SELECT id FROM users WHERE id IN (${ph(part)}) AND last_seen>${t - 300_000}`).catch(() => [] as any[])
@@ -4127,7 +4200,9 @@ async function panelBroadcast(c: C) {
         const onlSet = new Set(onl.map((r) => +r.id))
         for (let j = 0; j < part.length && notified.length < 30; j++) {
           if (!onlSet.has(part[j])) continue
-          notified.push({ uid: part[j], chat: chatIds[j], msg: { id: Number((mrows[j] as unknown[])[0]), chat_id: chatIds[j], sender_id: ADM_ID, kind, body: body || null, meta: meta || {}, edited: 0, deleted: 0, created_at: t, updated_at: t } })
+          const mr = mrowByChat.get(chatIds[j])
+          if (!mr) continue
+          notified.push({ uid: part[j], chat: chatIds[j], msg: { id: Number(mr[0]), chat_id: chatIds[j], sender_id: ADM_ID, kind, body: body || null, meta: meta || {}, edited: 0, deleted: 0, created_at: t, updated_at: t } })
         }
       }
     }
@@ -4259,6 +4334,71 @@ async function panelDm(c: C) {
   admNotify(c, [{ uid: id, chat: chid, msg: { id: mid, chat_id: chid, sender_id: ADM_ID, kind: "text", body, meta: {}, edited: 0, deleted: 0, created_at: t, updated_at: t } }])
   await admLog(c, "alohida_xabar", "user:" + id, "ALOHIDA XABAR yuborildi: " + body.slice(0, 150))
   return json({ ok: true, id, chat_id: chid, now: t })
+}
+
+// =====================================================================
+// v118: MUROJAATLAR QUTISI (feedback) — foydalanuvchilar «50gram admin» suhbatiga
+// yozgan javoblari panelda O'QILADI va JAVOB BERILADI. Foydalanuvchi rivojlanish
+// uchun fikr-mulohazalari shu yerga keladi.
+//   • «Javob kutilyapti» = oxirgi xabar FOYDALANUVCHI tomonidan yozilgan direct-suhbat.
+//   • Admin javob bergach (panel/dm) oxirgi xabar adminniki bo'lib qoladi — suhbat
+//     ro'yxatdan O'ZI chiqib ketadi (qo'shimcha «o'qildi» holati saqlash SHART EMAS).
+//   • ?chat=ID — bitta suhbat tarixi (oxirgi 40 xabar) — panelda oynada ko'rsatiladi.
+// INDekslar: idx_messages_chat (chat_id, id) — MAX(id) per chat tez; chats kam (admin
+// suhbatlari = foydalanuvchilar soni bilan chegarali), LIMIT 200 — byudjet posboni.
+// =====================================================================
+async function panelInbox(c: C) {
+  await admAuth(c)
+  await ensureSchema(c.db)
+  const t = now()
+  const chatId = Math.floor(+(c.url.searchParams.get("chat") || 0) || 0)
+  if (chatId) {
+    // --- BITTA SUHBAT: qarshi tomondagi foydalanuvchi + oxirgi 40 xabar ---
+    const ch = await c.db.one(
+      `SELECT c.id, u.id AS uid, u.phone, u.first_name, u.last_name, u.username, u.avatar_ver, u.blocked, u.last_seen, u.created_at
+       FROM chats c
+       JOIN chat_members mu ON mu.chat_id=c.id AND mu.user_id<>${ADM_ID}
+       JOIN users u ON u.id=mu.user_id
+       WHERE c.id=? AND c.type='direct'
+         AND EXISTS(SELECT 1 FROM chat_members mo WHERE mo.chat_id=c.id AND mo.user_id=${ADM_ID})`,
+      [chatId],
+    ).catch(() => null)
+    if (!ch) fail("Suhbat topilmadi", 404)
+    const ms = await c.db.q(
+      "SELECT id, sender_id, kind, body, created_at FROM messages WHERE chat_id=? AND deleted=0 ORDER BY id DESC LIMIT 40",
+      [chatId],
+    ).catch(() => [] as any[])
+    return json({
+      chat: chatId, now: t,
+      user: {
+        id: +ch.uid, phone: ch.phone, name: ((ch.first_name || "") + " " + (ch.last_name || "")).trim(),
+        username: ch.username || "", av: +ch.avatar_ver || 0, bl: +ch.blocked === 1,
+        ls: +ch.last_seen || 0, cr: +ch.created_at || 0, cc: ccOf(ch.phone),
+      },
+      messages: ms.reverse().map((m) => ({ id: +m.id, mine: +m.sender_id === ADM_ID, kind: String(m.kind || "text"), body: m.body, created_at: +m.created_at || 0 })),
+    })
+  }
+  // --- RO'YXAT: javob kutilayotgan barcha murojaatlar (yangisi birinchi) ---
+  const rows = await c.db.q(
+    `SELECT c.id AS chat_id, u.id AS uid, u.phone, u.first_name, u.last_name, u.username, u.avatar_ver AS av, u.blocked AS bl, u.last_seen AS ls, u.created_at AS cr,
+       m.body AS msg_body, m.kind AS msg_kind, m.created_at AS msg_at
+     FROM chats c
+     JOIN chat_members mu ON mu.chat_id=c.id AND mu.user_id<>${ADM_ID}
+     JOIN users u ON u.id=mu.user_id
+     JOIN messages m ON m.id=(SELECT MAX(id) FROM messages WHERE chat_id=c.id AND deleted=0)
+     WHERE c.type='direct' AND m.sender_id=u.id AND m.sender_id<>${ADM_ID}
+     ORDER BY m.created_at DESC LIMIT 200`,
+  ).catch(() => [] as any[])
+  return json({
+    items: (rows as any[]).map((r) => ({
+      chat_id: +r.chat_id, uid: +r.uid, phone: r.phone,
+      name: ((r.first_name || "") + " " + (r.last_name || "")).trim(),
+      username: r.username || "", av: +r.av || 0, bl: +r.bl === 1, ls: +r.ls || 0, cr: +r.cr || 0,
+      cc: ccOf(r.phone),
+      kind: String(r.msg_kind || "text"), body: r.msg_body, msg_at: +r.msg_at || 0,
+    })),
+    total: rows.length, now: t,
+  })
 }
 
 // =====================================================================
@@ -4652,6 +4792,7 @@ tr:hover td{background:#171a1f}
   <div class="tabs">
     <button data-t="st" class="on">Statistika</button>
     <button data-t="us">Foydalanuvchilar</button>
+    <button data-t="in">Murojaatlar</button>
     <button data-t="ch">Kanallar</button>
     <button data-t="br">Xabar yuborish</button>
     <button data-t="sc">Xavfsizlik</button>
@@ -4667,6 +4808,11 @@ tr:hover td{background:#171a1f}
     <div id="ul"></div>
     <div class="pg"><button class="sec" id="pv">← Oldingi</button><span id="pgn">1 / 1</span><button class="sec" id="nx">Keyingi →</button></div>
   </section>
+  <section id="in" class="hidden">
+    <p class="note">Foydalanuvchilar <b>«50gram admin»</b> suhbatiga yozgan javoblari va murojaatlari shu yerda ko‘rinadi. «Javob berish» bosilsa — xabar foydalanuvchiga «50gram admin» nomidan yetadi va murojaat ro‘yxatdan o‘zi chiqib ketadi.</p>
+    <div class="note" id="inb"></div>
+    <div id="inl"></div>
+  </section>
   <section id="ch" class="hidden">
     <div class="bar2"><input id="cq" placeholder="Kanal yoki guruh nomi, @username"><button id="cqb">Qidirish</button><select id="cft"><option value="">Hammasi</option><option value="channel">Kanallar</option><option value="group">Guruhlar</option><option value="blocked">Bloklanganlar</option></select></div>
     <div class="note" id="cn"></div>
@@ -4674,7 +4820,7 @@ tr:hover td{background:#171a1f}
     <div class="pg"><button class="sec" id="cpv">← Oldingi</button><span id="cpgn">1 / 1</span><button class="sec" id="cnx">Keyingi →</button></div>
   </section>
   <section id="br" class="hidden">
-    <p class="note">E’lon <b>«50gram admin»</b> nomidan barcha faol foydalanuvchining xabar bo‘limiga yuboriladi (oddiy xabar ko‘rinishida; onlaynlar darhol, qolganlar ilova ochilganda ko‘radi). RASM qo‘shilsa — rasm va ostida izoh bilan bir martada hammaga yetadi.</p>
+    <p class="note">E’lon <b>«50gram admin»</b> nomidan barcha faol foydalanuvchining xabar bo‘limiga yuboriladi (oddiy xabar ko‘rinishida; onlaynlar darhol, qolganlar ilova ochilganda ko‘radi). RASM qo‘shilsa — rasm va ostida izoh bilan bir martada hammaga yetadi (8 MB gacha; katta rasmlar avtomatik siqiladi).</p>
     <textarea id="tx" maxlength="4096" placeholder="E’lon matni (rasm bilan yuborilsa — rasm ostidagi izoh)..."></textarea>
     <div class="bar2" style="margin-top:10px">
       <button id="bpick" class="sec">📷 Rasm biriktirish (ixtiyoriy)</button>
@@ -5106,6 +5252,72 @@ function loadSecurity(){
     $('alog').innerHTML=h||'<tr><td colspan="4" class="note">Hozircha amallar yo‘q</td></tr>'
   })
 }
+// v118: MUROJAATLAR BO'LIMI — foydalanuvchi javoblari o'qiladi va javob beriladi
+function inbPrev(m){
+  if(m.kind==='photo')return '📷 Rasm'+(m.body?' · '+m.body:'')
+  if(m.kind==='file')return '📁 Fayl'+(m.body?' · '+m.body:'')
+  if(m.kind==='voice')return '🎤 Ovozli xabar'
+  if(m.kind==='video')return '🎬 Video'+(m.body?' · '+m.body:'')
+  return esc(m.body||'')
+}
+function loadInbox(){
+  api('inbox').then(function(r){
+    if(authFail(r))return
+    var j=r.j;if(!j||!j.items)return
+    $('inb').textContent='Javob kutilyapti: '+j.items.length+' ta murojaat (oxirgi xabar foydalanuvchidan bo‘lgan suhbatlar)'
+    var h=''
+    for(var i=0;i<j.items.length;i++){var x=j.items[i]
+      h+='<div class="u">'
+        +'<img data-uid="'+x.uid+'" src="/api/avatar/u/'+x.uid+'?v='+x.av+'" alt="">'
+        +'<div class="in"><div class="nm">'+esc(x.name||'(ism yozilmagan)')+'</div>'
+        +'<div class="sub">'+esc(x.phone)+' · '+ccName(x.cc)+(x.username?' · @'+esc(x.username):'')+'</div>'
+        +'<div class="st">'+dt(x.msg_at)+' · '+inbPrev(x)+'</div></div>'
+        +'<div><button data-iro="'+x.chat_id+'">O‘qish</button> <button class="sec" data-jav="'+x.uid+'" data-chat="'+x.chat_id+'">Javob berish</button></div>'
+        +'</div>'
+    }
+    $('inl').innerHTML=h||'<p class="note">Hozircha murojaat yo‘q — hammasiga javob berilgan 👍</p>'
+    var ims=$('inl').querySelectorAll('img')
+    for(var i=0;i<ims.length;i++)ims[i].onerror=function(){this.style.visibility='hidden'}
+    var ro=$('inl').querySelectorAll('[data-iro]')
+    for(var i=0;i<ro.length;i++)ro[i].onclick=function(){inboxChat(+(this.getAttribute('data-iro')))}
+    var jb=$('inl').querySelectorAll('[data-jav]')
+    for(var i=0;i<jb.length;i++)jb[i].onclick=function(){inboxReply(+(this.getAttribute('data-jav')),+(this.getAttribute('data-chat')))}
+  })
+}
+function inboxReply(uid,chatId){
+  var v=prompt('Foydalanuvchiga javob («50gram admin» nomidan yuboriladi):')
+  if(v===null)return
+  v=v.trim()
+  if(!v){alert('Javob matni bo‘sh');return}
+  api('dm','POST',{id:uid,body:v}).then(function(r){
+    if(authFail(r))return
+    if(r.j&&r.j.ok){alert('✓ Javob yuborildi.');loadInbox();if(chatId)inboxChat(chatId)}
+    else alert((r.j&&r.j.error)||'Xatolik')
+  })
+}
+function inboxChat(chatId){
+  $('mdl').classList.remove('hidden');$('mc').classList.add('wide')
+  $('mc').innerHTML='<p class="note">Yuklanmoqda...</p>'
+  api('inbox?chat='+chatId).then(function(r){
+    if(authFail(r))return
+    var j=r.j
+    if(!j||!j.user){$('mc').innerHTML='<button class="xcl" onclick="document.getElementById(\'mdl\').classList.add(\'hidden\')">×</button><p class="note">'+esc((r.j&&r.j.error)||'Topilmadi')+'</p>';return}
+    var h='<button class="xcl" id="mx">×</button>'
+      +'<h4>'+esc(j.user.name||'(ism yozilmagan)')+'</h4>'
+      +'<div class="sub">ID '+j.user.id+' · '+esc(j.user.phone)+' · '+ccName(j.user.cc)+' · '+rel(j.user.ls)+'</div>'
+      +'<div style="max-height:52vh;overflow-y:auto;margin:10px 0">'
+    for(var i=0;i<j.messages.length;i++){var m=j.messages[i]
+      h+='<div class="mr" style="'+(m.mine?'opacity:.88;border-color:#1f3a5f':'')+'">'
+        +'<div class="mri"><div class="mrt">'+dt(m.created_at)+' · '+(m.mine?'50gram admin (siz)':'foydalanuvchi')+'</div>'
+        +'<div class="mrb">'+inbPrev(m)+'</div></div></div>'
+    }
+    h+='</div><div class="mrow2"><button id="mj">✉ Javob berish</button><button class="sec" id="mus">Foydalanuvchi oynasi</button></div>'
+    $('mc').innerHTML=h
+    $('mx').onclick=closeMdl
+    $('mj').onclick=function(){inboxReply(j.user.id,chatId)}
+    $('mus').onclick=function(){closeMdl();showUser(j.user.id)}
+  })
+}
 function doLogin(){
   var pw=$('pw').value
   if(!pw)return
@@ -5130,11 +5342,13 @@ function switchTab(t){
   for(var i=0;i<bs.length;i++)bs[i].className=(bs[i].getAttribute('data-t')===t)?'on':''
   $('st').classList.toggle('hidden',t!=='st')
   $('us').classList.toggle('hidden',t!=='us')
+  $('in').classList.toggle('hidden',t!=='in')
   $('ch').classList.toggle('hidden',t!=='ch')
   $('br').classList.toggle('hidden',t!=='br')
   $('sc').classList.toggle('hidden',t!=='sc')
   if(t==='st')loadStats()
   if(t==='ch')loadChats()
+  if(t==='in')loadInbox()
   if(t==='sc')loadSecurity()
 }
 $('qb').onclick=function(){loadUsers(1)}
@@ -5168,6 +5382,10 @@ $('bimgf').onchange=function(){
         var cx=cv.getContext('2d');cx.drawImage(img,0,0,w,h)
         bimg={file:f,name:f.name,mime:'image/jpeg',dataUrl:cv.toDataURL('image/jpeg',0.85)}
       }
+      // v118: juda katta rasmni shifrlashdan OLDIN ushlab turish — serverga 8MB dan
+      // katta shifrlangan rasm yuborilmaydi (base64 + GCM tag ≈ ×1.4). GIF siqilmaydi —
+      // eng ko'p shu yerdan oshadi.
+      if(bimg.dataUrl&&bimg.dataUrl.length>10600000){alert('Rasm juda katta — 8 MB dan kichik rasm tanlang (GIF o‘rniga JPG/PNG qo‘ying yoki GIF\'ni kichikroq qilib saqlang)');bimgClear();return}
       $('bimgn').textContent='✓ '+bimg.name
       $('bimgp').src=bimg.dataUrl;$('bimgp').classList.remove('hidden')
     }
@@ -5205,7 +5423,7 @@ $('sb').onclick=async function(){
     })
   }catch(e){b.disabled=false;$('bres').className='res err';$('bres').textContent='Rasm tayyorlanmadi: '+(e&&e.message||e)}
 }
-$('rf').onclick=function(){loadStats();if(cur==='us')loadUsers();if(cur==='ch')loadChats();if(cur==='sc')loadSecurity()}
+$('rf').onclick=function(){loadStats();if(cur==='us')loadUsers();if(cur==='in')loadInbox();if(cur==='ch')loadChats();if(cur==='sc')loadSecurity()}
 $('out').onclick=logout
 $('lb').onclick=doLogin
 $('pw').onkeydown=function(e){if(e.key==='Enter')doLogin()}
@@ -5241,6 +5459,8 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["GET", "/panel/security", panelSecurity, true],
   ["GET", "/panel/user", panelUser, true],
   ["POST", "/panel/dm", panelDm, true],
+  // v118: MUROJAATLAR QUTISI — foydalanuvchi javoblari o'qiladi/javob beriladi
+  ["GET", "/panel/inbox", panelInbox, true],
   // v106: KANAL/GURUH MODERATSIYASI + HIMOYA TUGMASI + BOSHQARUV JURNALI
   ["GET", "/panel/chats", panelChats, true],
   ["GET", "/panel/chat", panelChat, true],
@@ -5635,8 +5855,16 @@ export default {
     if (clen > 26_000_000) { if (fwip) fwOchko(env, wait, fwip, "flood", 3, secInfo(req, url)); return json({ error: "Hajm juda katta" }, 413) }
     // v98 JSON QAT'II CHEGARASI: JSON tanasi ≤2MB (avatar base64 max 600KB, eng katta JSON shu —
     // boshqa barcha JSON'lar ancha kichik). 26MB JSON parse CPU/FONDSIZ ishlatilishi oldin olinadi.
+    // v118 ISTISNO: /api/panel/* — admin rasmli e'loni (8MB gacha shifrlangan rasm → base64 ≈ 10.7MB
+    // + kalit/iv/sha) 2MB'ga sig'masdi → 413 «Hajm juda katta». Panel uchun 12MB; panel yo'llari
+    // admAuth + parol-brute posboni bilan qo'riqlanadi, shuning uchun 413'da flood-ochko HAM YO'Q
+    // (ego tasodifan katta GIF yuborib o'zini bloklab qo'ymasligi uchun).
     const hct = (req.headers.get("content-type") || "").toLowerCase()
-    if (hct.includes("json") && clen > 2_000_000) { if (fwip) fwOchko(env, wait, fwip, "flood", 2, secInfo(req, url)); return json({ error: "Hajm juda katta" }, 413) }
+    const panelJson = url.pathname.startsWith("/api/panel/")
+    if (hct.includes("json") && clen > (panelJson ? 12_000_000 : 2_000_000)) {
+      if (fwip && !panelJson) fwOchko(env, wait, fwip, "flood", 2, secInfo(req, url))
+      return json({ error: "Hajm juda katta" }, 413)
+    }
     const path = url.pathname.slice(4).replace(/\/+$/, "") || "/"
     let juid = 0 // xato-jurnali uchun kuzatuv (catch scope'ida uid ko'rinmaydi)
     try {

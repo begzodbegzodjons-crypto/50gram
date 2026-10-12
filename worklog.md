@@ -666,3 +666,34 @@ Stage Summary:
 - «50gram.uz ni brauzerga yozib kirish» endi har qanday telefonda ishlaydi: http yozilsa ham avtomatik 301 → https, ilova to'liq xavfsiz kontekstda ochiladi (SW/shifrlash/kamera ishlaydi).
 - ECH zonadagi sozlamalar ruxsati egada qoldi — Dashboard'dan 1 daqiqalik amal (yoki yangi token): ECH OFF bo'lsa DPI-dagi tarmoqlarda ham TLS-darajasidagi «ochilmaydi» holati yo'qoladi.
 - Barcha qoidalar bajarildi: Eskiz SMS tegilmadi, web/ 0 panel izi, himoya ON, ovozli tarjimon (v115) va PDF (v116) tegilmagan. Versiya qulfi v117 (worker+core+sw); sayt LIVE: https://50gram.uz
+
+---
+Task ID: 62
+Agent: Super Z (asosiy agent)
+Task: ECH tugmasi topilmadi + «Zone Settings:Edit ruxsatli tokenni qayerdan olaman» (skrinshot: Cloudflare SSL/TLS → Edge Certificates sahifasi, faqat yuqori qismi ko'rinib turgan).
+
+Work Log:
+- SKRINSHOT TAHLILI: foydalanuvchi to'g'ri sahifada (dash.cloudflare.com/.../50gram.uz/ssl/tls/edge-certificates) — lekin sahifa yuqorisidagi «Manage Edge Certificates» va ACM bloklari ko'rinib turibdi; ECH va qolgan tugmalar SHU SAHIFANING PASTIDA (scroll kerak).
+- domen.yml kengaytirildi (commit 6ddc497): ixtiyoriy CF_ZONE_TOKEN sekreti qo'shildi — req() ga tok parametri, himoya() rejimi CFZ token bilan ishlaydi; sekret yo'q bo'lsa eski CF bilan (hozirgidek). Asosiy deploy token HECH QACHON o'zgartirilmaydi (deploy.yml tegilmadi).
+- CI (6ddc497) — 11/11 YASHIL: Deploy ✓×2 / smoke ✓ / MUHR ✓ / XAVFSIZLIK ✓ / MEDIA (1 flaky, rerun'da PASS — v115'dagi bilan bir xil) ✓ / DATA ✓ / Jurnal ✓ / Qo'ng'iroq MEDIA ✓ / Panel ✓ / Domen tekshir ✓. Jonli: http→301→https ✓, https 200 ✓.
+
+Stage Summary:
+- CF_ZONE_TOKEN yo'li tayyor: foydalanuvchi token yaratib GitHub sekretiga qo'ysa — himoya dispatch o'zi ECH off + Always Use HTTPS + TLS 1.2 qiladi.
+- Birinchi (eng oson) yo'l: Edge Certificates sahifasini pastga surib «Encrypted Client Hello» tugmasini OFF qilish — token umuman kerak emas.
+
+---
+Task ID: 63
+Agent: Super Z (asosiy agent)
+Task: Jonli tekshiruv (foydalanuvchi: «tekshir») — TLS 1.2 ochilishi, http→https, hammasi joyida ekanini jonli ko'rsatish.
+
+Work Log:
+- JONLI CURL/DIG TASDIQ (2026-10-12 13:04 UTC): http://50gram.uz/ → 301 → https://50gram.uz/ ✓; http://www.50gram.uz/ → 301 ✓; POST http → 301 ✓; https://50gram.uz/ → 200 ✓; TLS 1.2 (--tls-max 1.2) → 200 ✓ (eski telefonlar); TLS 1.3 → 200 ✓ (yangi telefonlar).
+- POST endi 308 emas 301 qaytardi + 301 headerida cache-control YO'Q (worker javobida bo'lardi) → bu Cloudflare EDGE darajasidagi «Always Use HTTPS» YONIQligidan dalolat (foydalanuvchi panelda yoqqan) — DEMAK endi IKKI QATLAMLI himoya: EDGE (birinchi) + worker v117 (zaxira).
+- Versiyalar jonli: core.js __50BUILD='v117' ✓; sw.js 50gram-v117 ✓; index.html erta redirect skript bor ✓; /api/build 404 = FW_404 dizaynga muvofiq ✓; /50gram.apk 200 (763312 bayt) ✓.
+- CI: domen.yml tekshir rejimi dispatch (run 38253165038, commit 6ddc497) → success ✓ (run log API faqat 8 qator qaytardi — GitHub log arxivlash cheklovi, holis emas; local curl isbotlari to'liq).
+- ECH HOLATI: hali ham YONIQ (dig HTTPS: ech=...cloudflare-ech.com turibdi, apex+www) — foydalanuvchi hali o'chirmagan. Bu YAGONA qolgan IXTIYORIY qadam; asosiy tuzatish (http→https) allaqachon LIVE va katta aksariyat telefonlar uchun yetarli.
+
+Stage Summary:
+- Tekshiruv 10/10 YASHIL: sayt http ham https ham ochiladi, TLS 1.2+1.3 ochiq, v117 uchligi joyida, APK yetib boradi, CI success.
+- ECH hali yoniq — panel (SSL/TLS → Edge Certificates → pastga scroll) yoki CF_ZONE_TOKEN sekret + himoya dispatch orqali o'chirilishi mumkin; ixtiyoriy.
+- Hech narsa buzilmagan: SMS_MODE="app", panel izi 0, himoya ON — bu safar KOD O'ZGARTIRILMADI (faqat o'lchov + CI dispatch).
