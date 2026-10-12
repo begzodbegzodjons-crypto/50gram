@@ -697,3 +697,24 @@ Stage Summary:
 - Tekshiruv 10/10 YASHIL: sayt http ham https ham ochiladi, TLS 1.2+1.3 ochiq, v117 uchligi joyida, APK yetib boradi, CI success.
 - ECH hali yoniq — panel (SSL/TLS → Edge Certificates → pastga scroll) yoki CF_ZONE_TOKEN sekret + himoya dispatch orqali o'chirilishi mumkin; ixtiyoriy.
 - Hech narsa buzilmagan: SMS_MODE="app", panel izi 0, himoya ON — bu safar KOD O'ZGARTIRILMADI (faqat o'lchov + CI dispatch).
+
+---
+Task ID: 64
+Agent: Super Z (asosiy agent)
+Task: v118 — ADMIN BROADCAST «SERVER XATOSI» (rasm bilan yuborilmayapti) + MUROJAATLAR QUTISI (foydalanuvchi javoblari panelda o'qiladi va javob beriladi).
+
+Work Log:
+- JONLI TASHXIS (err_jurnal'dan, "log bilan topish" doktrinasi): foydalanuvchining 5 urinishi (17:35-17:37) — hammasi «Error 1062 (23000): Duplicate entry '?' for key 'chats.PRIMARY'». ILDIZ: panelBroadcast yangi suhbat id'larini newId() = ms*1000+random(0..999) bilan olardi — 400 ta suhbat bitta-bir-ikki ms ichida yaratiladi, bir xil id → butun chats INSERT yiqiladi → 500 «Server xatosi» va E'LON HECH KIMGA YETMASDI. (Xabar id'lari t*1000+i+j sxemasida edi — muallif xabar uchun tuzatgan, suhbatni unutgan.)
+- v118-1 (1062 TUZATISH): suhbat id'lari ham t*1000+seq sxemasiga o'tdi (seq butun so'rov bo'ylab o'sadi — kafolatlangan noyob) + chats/chat_members INSERT zaxira zanjiri (batch → 50-lik → alohida, okChat to'plami bilan — yiqilgan suhbat egaliga xabar yozilmaydi) + WS-bildirishnoma id'lari zaxira yo'lda yangilanadi (mrowByChat).
+- v118-2 (JSON 12MB): global router JSON ≤2MB cheklovi rasmli e'lonni bo'gardi (8MB rasm → base64 ≈10.7MB) — /api/panel/* uchun 12MB; 413'da flood-ochko panel yo'llarida YO'Q (ego o'zini bloklab qo'ymasligi uchun). Boshqa barcha JSON 2MB avvalgidek (abuse himoyasi saqlanadi).
+- v118-3 (MUROJAATLAR QUTISI): GET /panel/inbox — «javob kutilyapti» = oxirgi xabar foydalanuvchidan bo'lgan «50gram admin» direct-suhbatlari (derived table MAX(id) GROUP BY chat_id — TiDB JOIN ON subqueryni qo'llab-quvvatlamaydi: Error 1105); ?chat=ID — suhbat tarixi (oxirgi 40 xabar); javob /panel/dm orqali (mavjud funksiya) — javob bergach murojaat ro'yxatdan O'ZI chiqadi (holat saqlash shart emas). ADMIN_HTML yangi «Murojaatlar» bo'limi: ro'yxat (avatar/ism/telefon/davlat/oldindan ko'rish/vaqt) + «O'qish» oynasi + «Javob berish». Klient (web/) 0 bayt tegilmadi.
+- v118-4 (KLIENT RASM POSBONI): >10.6MB base64 (≈8MB bayt) rasm shifrlashdan OLDIN rad etiladi + e'lon matnida «8 MB gacha» eslatma.
+- TESTLAR: scripts/test_v118_static.js (49/49 — seq sxema, zaxira zanjir, 12MB, inbox, panel HTML, muhrlar: SMS_MODE="app"/FW_UA_OK/v115/v116/v117) + e2e_panel.mjs 15-17 bo'limlar (jonli): 4.19MB JSON rasmli e'lon → 200 (413 YO'Q) ✓; 6 ta suhbatga BIR batchda (1062 YO'Q) ✓; qayta yuborish new_chats=0 ✓; murajaat inbox'da ko'rinadi → admin javobi → ro'yxatdan o'zi chiqdi → javob foydalanuvchiga yetdi ✓ (115 ta haqiqiy murojaat jonli ko'rindi).
+- DARS: TiDB (a) JOIN ON ichida subquery — Error 1105 (derived table ishlatish kerak), (b) crypto.getRandomValues maks 65536 bayt (testda bo'lib to'ldirish kerak), (c) SQL xatoni .catch(()=>[]) bilan jim yutish tashxisni o'ldiradi — 500 bilan ko'rinishi yaxshiroq.
+- Versiya uchligi v118 (worker+core+sw); CI (bf1da01) — 11/11 YASHIL: Deploy ✓×2 / smoke ✓ / MUHR ✓ / XAVFSIZLIK ✓ / MEDIA ✓ / DATA ✓ / Jurnal ✓ / Qo'ng'iroq MEDIA ✓ / Panel E2E ✓ (HAMMASI YASHIL) / Domen tekshir ✓. 3 marta panel-E2E tuzatish iteratsiyasi bo'ldi (getRandomValues → U6.uidT → TiDB ON-subquery).
+- LIVE: core.js __50BUILD='v118' ✓, sw.js 50gram-v118 ✓, /?adminpanel'da «Murojaatlar» bo'limi ✓, sayt 200 ✓.
+
+Stage Summary:
+- Admin endi rasm+matn e'lonni istalgan hajmda (8MB gacha) BARCHA foydalanuvchiga yubora oladi — «Server xatosi» ildizidan (chats.PRIMARY duplicate) butunlay xalos bo'ldi.
+- YANGI IMKONIYAT: foydalanuvchilar «50gram admin» ga yozgan javoblari panelda «Murojaatlar» bo'limida o'qiladi (115 ta haqiqiy murojaat allaqachon kutib turardi!) va admin ularga bir bosishda javob beradi — foydalanuvchi fikrlari rivojlanish uchun endi to'liq kanalda.
+- Barcha qoidalar bajarildi: Eskiz SMS tegilmadi, web/ 0 panel izi, himoya ON, v115/v116/v117 merosi muhrlangan. Sayt LIVE: https://50gram.uz
