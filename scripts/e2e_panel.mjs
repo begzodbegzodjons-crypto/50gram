@@ -318,7 +318,7 @@ try {
   //     5 ta test foydalanuvchi (091-095) + uidT = 6 ta suhbat BIR so'rovda. Birinchi run'da
   //     yangi suhbatlar yaratiladi (eski kodda newId() to'qnashuvi → 500 «Server xatosi»),
   //     qayta run'da mavjud suhbatlar topiladi (new_chats=0 — dublikat yo'q, deterministik).
-  const U6 = [T]
+  const U6 = [{ phone: T.phone, full: T.full, uid: uidT, tok: tokT }] // MUHIM: T ga uidT qo'yiladi (aks holda undefined → filtrdan tushadi → 5 ta)
   for (const ph of ['998900000091', '998900000092', '998900000093', '998900000094', '998900000095']) {
     const o1 = await j('/api/auth/otp', { method: 'POST', body: { phone: ph, force: 1 } })
     if (o1.st !== 200 || !o1.d.dev_code) throw new Error('v118 test-user otp ' + ph + ' st=' + o1.st)

@@ -4362,12 +4362,12 @@ async function panelInbox(c: C) {
        WHERE c.id=? AND c.type='direct'
          AND EXISTS(SELECT 1 FROM chat_members mo WHERE mo.chat_id=c.id AND mo.user_id=${ADM_ID})`,
       [chatId],
-    ).catch(() => null)
+    )
     if (!ch) fail("Suhbat topilmadi", 404)
     const ms = await c.db.q(
       "SELECT id, sender_id, kind, body, created_at FROM messages WHERE chat_id=? AND deleted=0 ORDER BY id DESC LIMIT 40",
       [chatId],
-    ).catch(() => [] as any[])
+    )
     return json({
       chat: chatId, now: t,
       user: {
@@ -4379,6 +4379,7 @@ async function panelInbox(c: C) {
     })
   }
   // --- RO'YXAT: javob kutilayotgan barcha murojaatlar (yangisi birinchi) ---
+  // (xato jim yutilmaydi — 500 bilan ko'rinadi, tashxis oson bo'lsin)
   const rows = await c.db.q(
     `SELECT c.id AS chat_id, u.id AS uid, u.phone, u.first_name, u.last_name, u.username, u.avatar_ver AS av, u.blocked AS bl, u.last_seen AS ls, u.created_at AS cr,
        m.body AS msg_body, m.kind AS msg_kind, m.created_at AS msg_at
@@ -4388,7 +4389,7 @@ async function panelInbox(c: C) {
      JOIN messages m ON m.id=(SELECT MAX(id) FROM messages WHERE chat_id=c.id AND deleted=0)
      WHERE c.type='direct' AND m.sender_id=u.id AND m.sender_id<>${ADM_ID}
      ORDER BY m.created_at DESC LIMIT 200`,
-  ).catch(() => [] as any[])
+  )
   return json({
     items: (rows as any[]).map((r) => ({
       chat_id: +r.chat_id, uid: +r.uid, phone: r.phone,
