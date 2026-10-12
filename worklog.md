@@ -624,3 +624,23 @@ Stage Summary:
 - v115 muhrlandi: ovozli tarjimon endi «har qanday sharoitda» ishlaydi (AGC + normalizatsiya + 4×Whisper urinish + arab→lotin→llama tuzatish zanjiri) va o'zbekchani HAQIQIY NEYRAL OVOZ bilan o'qiydi (Edge TTS Madina/Sardor — Google'da o'zbek ovozi umuman yo'q).
 - Tarjima mustahkamligi: Google 429'da yangi Workers AI model zanjiri; bir-xil tilda echo; tashxis infrastrukturasi (tarjimon-test.yml + dbg) kelajakdagi tashxislar uchun qoldi.
 - Barcha qoidalar bajarildi: Eskiz SMS tegilmadi, web/ 0 panel izi, terminal himoya ON, mavjud funksiyalarga tegilmadi.
+
+---
+Task ID: 60
+Agent: Super Z (asosiy agent)
+Task: v116 — PDF TARJIMON YUKLAB OLISH BUZILGAN EDI: «PDF sifatida saqlash» bosilganda tarjima YANGI OYNADA ochilardi (orqaga qaytish yo'q, WebView'da qolib ketadi), PDF SAQLANMASDI, natija bo'lak-bo'lak (asl+tarjima juftlari) ko'rinar edi, tarjima bo'lgan hujjatni BITTA .pdf fayl qilib yuklab olish imkoniyati yo'q edi.
+
+Work Log:
+- ILDIZ: web/tools.js — trp-print tugmasi window.open + document.write + w.print() ishlatardi (Android'da chop etish/i choke yumshoq, orqaga tugmasi yo'q, fayl saqlanmaydi).
+- v116-1 (UZLUK HUJJAT): natija endi .trp-doc — yagona paragrafli hujjat ko'rinishi (bo'lak-bo'lak .trp-blk juftlari OLIB TASHLANDI). Paragraflar: tarjimon \n saqlasa asl chegaralar bo'yicha (clients5 endpoint \n ni SAQLAYDI — curl bilan tekshirildi), saqlamasa gaplarga bo'lib 3 tadan guruhlanadi.
+- v116-2 (HAQIQIY PDF): pdfHujjat() — canvas A4 (1240x1754 @150dpi, 100px hoshiya) → qatorga sindirish (so'z + CJK belgilar, uzun token belgima-belgi) → sahifalar JPEG q0.82 → PDF QO'LDA yig'iladi (jspdf/html2canvas KERAK EMAS, 0 bayt qo'shildi): katalog + pages + DCTDecode XObject + kontent oqimi + bayt-aniq xref + trailer. Sarlavha bloki («50 Gram tarjimasi» + til + manba sahifa + sana), sahifa raqamlari. Xitoy/kirill/lotin brauzer shrifti bilan chiziladi — server so'rovi shart emas.
+- v116-3 (TUGMA): «⬇️ PDF yuklab olish» — blob URL + a.download='50gram-tarjima-<til>.pdf', to'g'ridan-to'g'ri yuklab olish (oyna/print YO'Q). Xatoda toast + .txt zaxira. window.__trpToliq (nusxa/.txt eski oqimi) saqlangan.
+- TESTLAR: scripts/test_v116_static.js (62/62 — versiya uchligi, muhrlar: Eskiz SMS, panel izi 0, FW_OFF, Edge TTS tts=uz; window.open/document.write/.print( tools.js da YO'Qligi ham tekshiriladi) + scripts/e2e_v116_pdf.mjs (16/16 — Playwright: uzluk ko'rinish, blob yuklab olish hodisasi, %PDF-1.4 sarlavha, %%EOF, DCTDecode, xref ofsetlari BAYT-ANIQ (har obj ofsetida «N 0 obj» tekshiriladi), pdf.js yuklangan faylni QAYTA ochadi numPages>=1) + scripts/pdf_view_v116.mjs (xitoy+o'zbek aralash matn bilan 1-sahifa render PNG — CJK to'g'ri chiqadi, scripts/v116_pdf_sahifa1.png).
+- Worker 0 o'zgarish (faqat BUILD_V v115→v116); tsc baseline 13 stream.ts (yangi XATO YO'Q); wrangler dry-run OK (358.58 KiB). worker/node_modules bo'shligi npm install bilan tiklandi.
+- CI: push 8 workflow'ni parallel ishga tushirib 4tasini bekor qildi (concurrency zanjiri) — KETMA-KET rerun: smoke ✓ → XAVFSIZLIK ✓ → DATA ✓ → Jurnal ✓ → panel-check dispatch ✓ → domen dispatch ✓ — JAMI 11/11 YASHIL (commit f2518a4).
+- LIVE: 50gram.uz + workers.dev — tools.js 28144 bayt «v116» + pdfHujjat bor; sw.js V='50gram-v116'; core.js __50BUILD='v116'; style.css .trp-doc live.
+
+Stage Summary:
+- v116 muhrlandi: tarjima bo'lgan hujjat endi BITTA haqiqiy .pdf fayl bo'lib to'g'ridan-to'g'ri yuklab olinadi (oyna ochilmaydi, orqaga qaytish muammosi yo'q), natija uzluk hujjat ko'rinishida o'qiladi.
+- PDF generator to'liq mijoz tomonda, kutubxonasiz — barcha 6 til (xitoy/kirill/lotin) ishlaydi, server yuki 0.
+- Barcha qoidalar bajarildi: Eskiz SMS tegilmadi, web/ 0 panel izi, himoya ON, ovozli tarjimon (v115) va barcha mavjud funksiyalar tegilmagan.
