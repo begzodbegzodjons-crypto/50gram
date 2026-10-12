@@ -21,6 +21,9 @@ jobs:
         if: ${{ inputs.mode != 'tekshir' }}
         env:
           CF: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # IXTIYORIY: faqat Zone Settings:Edit ruxsatli alohida token (himoya rejimi uchun).
+          # Bo'lmasa asosiy CF ishlatiladi (hozirgidek).
+          CFZ: ${{ secrets.CF_ZONE_TOKEN }}
           ACC: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           MODE: ${{ inputs.mode }}
         run: |
@@ -29,17 +32,20 @@ jobs:
 
           API   = 'https://api.cloudflare.com/client/v4'
           CF    = os.environ['CF']
+          # ZONA-SOZLAMALARI TOKENI (ixtiyoriy): CF_ZONE_TOKEN sekreti qo'yilgan bolsa —
+          # himoya() rejimi shu token bilan ishlaydi (Zone Settings:Edit kerak).
+          CFZ   = os.environ.get('CFZ') or CF
           ACC   = os.environ['ACC']
           MODE  = (os.environ.get('MODE') or 'zona').strip()
           DOMEN = '50gram.uz'
           WWW   = 'www.50gram.uz'
           SKRIP = '50gram'
 
-          def req(method, path, body=None):
+          def req(method, path, body=None, tok=None):
               r = urllib.request.Request(
                   API + path, method=method,
                   data=json.dumps(body).encode() if body is not None else None,
-                  headers={'Authorization': 'Bearer ' + CF,
+                  headers={'Authorization': 'Bearer ' + (tok or CF),
                            'Content-Type': 'application/json'})
               try:
                   with urllib.request.urlopen(r, timeout=30) as resp:
@@ -172,15 +178,17 @@ jobs:
                       print(f'   {pat} -> {SKRIP} ulandi')
 
           # ---------- HIMOYA (HTTP -> HTTPS yo'naltirish + ECH o'chirish) ----------
+          # SHU REJIM uchun Zone Settings:Edit ruxsati SHART — CF_ZONE_TOKEN sekreti
+          # (alohida token, asosiy deploy tokenga tegmaydi) qo'yilgan bolsa shu ishlaydi.
           def himoya(zid):
-              st = (req('GET', f'/zones/{zid}').get('result') or {})
+              st = (req('GET', f'/zones/{zid}', tok=CFZ).get('result') or {})
               print('ZONA_HOLATI:', st.get('status'))
               if st.get('status') != 'active':
                   print('ZONA_ACTIVE_EMAS')
                   sys.exit(4)
               # Mavjud holat
               for s in ('always_use_https', 'automatic_https_rewrites', 'ssl', 'min_tls_version', 'ech'):
-                  r = req('GET', f'/zones/{zid}/settings/{s}')
+                  r = req('GET', f'/zones/{zid}/settings/{s}', tok=CFZ)
                   v = (r.get('result') or {}).get('value')
                   print(f'HOLAT {s}: {v}' if r.get('success') else f'HOLAT {s}: oqib bolmadi ({json.dumps(r.get("errors"), ensure_ascii=False)})')
               # Yoqish. ECH (Encrypted Client Hello) — O'CHIRILADI: HTTPS DNS yozuvida ech
@@ -188,7 +196,7 @@ jobs:
               # YANGI Chrome/Samsung telefonlarda sayt umuman ochilmaydi (ba'zi tarmoqlarda
               # ishlaydi, ba'zilarida yo'q). ech=off bilan HTTPS yozuvidan ech olib tashlanadi.
               for s, v in (('always_use_https', 'on'), ('automatic_https_rewrites', 'on'), ('min_tls_version', '1.2'), ('ech', 'off')):
-                  r = req('PATCH', f'/zones/{zid}/settings/{s}', {'value': v})
+                  r = req('PATCH', f'/zones/{zid}/settings/{s}', {'value': v}, tok=CFZ)
                   if show(f'yoqish {s}={v}', r):
                       print(f'   {s} = {v} — BAJARILDI')
 
