@@ -743,3 +743,23 @@ Stage Summary:
 - REYTING ILOVADAN TO'LIQ KETDI (tab/tugma/api/css) — kerakli funksiyalar (Tarjimon, TOP efir, Wallet) buzilmagan.
 - DOCK ENDI TELEGRAM/INSTAGRAM-USLUBIDA: oq tekis panel + SVG chiziq-ikonkalar + aksent faol holat; kulrang kulrang-blob dizayni yo'q; logotip va barcha funksiyalar o'zgarmagan.
 - Versiya: v119 (worker/core/sw sinxron). 11/11 CI yashil. Sayt LIVE: https://50gram.uz
+
+---
+Task ID: 66
+Agent: Super Z (asosiy agent)
+Task: v120 — workers.dev manzilini yashirish (50gram.uz ga yo'naltirish) + o'rgimchak to'ri kuchaytirish + media tezligi + barqarorlik. Foydalanuvchi: "shu silka hali ham ishlamoqda shuni bosganda 50gram.uz saytiga o'tib ketadigan qilib ishla ... manzil ko'rinmasin ... o'rgamchaklari to'rini kuchaytir qotib sekin chiqmasin xabarlar ovozli xabarlar dumaloq videolar tez ochilsin va yo'qolib qolmasligini ta'minla ... ishlash tezliklarini oshir barcha funksiyalar ishlasin va buzilmay bir hil ishlashini ta'minla"
+
+Work Log:
+- WORKERS.DEV-YASHIRUVCHI (fetch-darvozasi boshida, https-guard'dan OLDIN): har GET/HEAD so'rov *.workers.dev hostida → 301 https://50gram.uz+path+search (doimiy, 86400s kesh). WebSocket (Upgrade header) va POST/PATCH/DELETE O'TKAZIB YUBORILADI — eski mijoz/WS uzilib qolmasin, CI-POST ham ishlaydi. E2E dalil: smoke'da doimiy regressiya-qorovul qo'shildi — «GET redirect: OK (manzil 50gram.uz bo'lib chiqadi)» + «POST passthrough: OK» (jonli CI isboti).
+- CI ASOSLARI O'ZGARTIRILDI: barcha workflow E2E_BASE + skript-default'lar workers.dev → https://50gram.uz (24 havola, 12 workflow + 11 skript) — endi CI HAQIQIY foydalanuvchi-domenini tekshiradi (yanada ishonchli) va redirect bilan to'qnashmaydi.
+- O'RGIMCHAK TO'RI KUCHAYTIRILDI (M1 muhri SAQLANGAN — REPLICA_MIN=15/MAX=20 o'zgarmagan): ① cron 30→15 daqiqa (planReplicas nusxa-yig'ish va o'z-o'zini davolash 2x tez); ② sog'lomsiz fayl recheck 20→10 daqiqa; ③ p2pPeers LIMIT 8→12 — har fayl uchun 50% ko'p P2P manba. Durability allaqachon muhrli: xabarlar/fayllar 100-yillik expires + migratsiya-guard, gone-detektor darhol planReplicas, R2+D1 tenglashtirilgan tozalash + yetim-sweep.
+- TEZLIK: klient yuklab olish (getCipher) 2x→3x parallel bo'lak — rasm/ovozli xabar/dumaloq video birinchi ochilishi ~1.5x tez; YUKLASH ikkala yo'lda (upload + uploadEncrypted) 2x qoldi (mobil trafik/batareya muvozanati). Media chunk + avatar javoblarida allaqachon immutable cache bor (qayta ochilishlar brauzer-keshidan — 0 tarmoq).
+- VERSIYA UCHLIGI v120: worker BUILD_V + core __50BUILD + sw V.
+- SINOV: test_v120_static.js 91 satr YASHIL (v120 yangiliklari + v119 merosi: repair-pass/reedting-o'chirilgan/dock-SVG + muhrlar: M1/SMS_MODE/inbox/MadinaNeural); node --check OK; wrangler dry-run OK (373.53 KiB).
+- CI (fe3baea) — 11/11 YASHIL: Deploy ✓×2 / Smoke ✓ (yangi redirect-qorovul bilan) / MUHR ✓ / Qo'ng'iroq MEDIA ✓ / MEDIA ✓ / DATA ✓ / XAVFSIZLIK ✓ / Jurnal ✓ / Panel E2E ✓ / Domen tekshir ✓ (bekor qilinganlar qat'iy ketma-ket rerun). JONLI: «3-yo'qlik versiya qulfi: OK (v120)», «build: v120 OK», sw.js live = 50gram-v120, workers.dev → 301 https://50gram.uz/ (jonli curl), 50gram.uz → 200.
+
+Stage Summary:
+- workers.dev SILKA ENDI YASHIRIN: bossa darhol 50gram.uz bo'lib chiqadi (301 doimiy). Saytda/ilovada hech qanday iz qolmaydi; FORD (FW_404) va barcha funksiyalar o'zgarmagan.
+- O'RGIMCHAK TO'RI 2x TEZ DAVOLANADI (cron 15daq + recheck 10daq) va har faylga 12 P2P manba — «yo'qolib qolmasin» kafolati mustahkam (15-20 nusxa muhri + o'chmas tarix).
+- MEDIA TEZLIGI: yuklab olish 3x parallel + immutable cache — xabar/ovoz/dumaloq video tez ochiladi, qayta ochilishlar 0 tarmoq.
+- CI endi 50gram.uz ni tekshiradi (haqiqiy domenni). Versiya: v120 (worker/core/sw sinxron). 11/11 CI yashil. Sayt LIVE: https://50gram.uz
