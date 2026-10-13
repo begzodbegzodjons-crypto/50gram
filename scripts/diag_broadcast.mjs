@@ -1,12 +1,8 @@
-/* BROADCAST TASHXISI (egaga): admin broadcast'ning jonli holati —
- *   1) /panel/stats — foydalanuvchilar soni (yuborish doirasi)
- *   2) /panel/log  — adm_log: hammaga_xabar yozuvlari (sent/failed/new_chats)
- *   3) /panel/inbox — murojaatlar qutisi holati
- *   4) /api/jurnal — err_jurnal (server 500'lari — broadcast yo'lida yiqilishlar)
- * Lokal IP SEC firewall'da bloklangani uchun GitHub Actions runneridan o'qiladi.
- * Ishga tushirish: node scripts/diag_broadcast.mjs  [E2E_BASE=...]
- * E2E bilan bir xil himoya: GitHub runner IP'lari umumiy havzada — 404 bo'lsa
- * 4 martagacha 25s pauza bilan qayta urinamiz (jurnal_read.mjs bilan bir xil). */
+/* BROADCAST TASHXISI v2 (qisqa chiqish — GitHub log-arxiv kesuvi posboni):
+ *   1) adm_log — FAQAT broadcast amallari (hammaga_xabar/alohida_xabar), oxirgi 8
+ *   2) err_jurnal — FAQAT panel/broadcast + srv-manbali yozuvlar, oxirgi 12
+ *   3) inbox — faqat SANI
+ * Ishga tushirish: node scripts/diag_broadcast.mjs */
 const BASE = (process.env.E2E_BASE || 'https://50gram.begzodbegzodjons.workers.dev').replace(/\/$/, '')
 const PHONE = process.env.JURNAL_PHONE || '998900000005'
 const PANEL_PASS = process.env.PANEL_PASS || 'Balandtoglar1'
@@ -25,52 +21,38 @@ async function jreq(path, opt = {}, tries = 4) {
   }
   throw last
 }
+const ts = (ms) => new Date(+(ms || 0)).toISOString().slice(5, 16).replace('T', ' ')
 
 // ---- 1) PANEL LOGIN ----
 const lg = await jreq('/api/panel/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pass: PANEL_PASS }) })
-if (!lg.j || !lg.j.token) { console.error('PANEL LOGIN xato:', JSON.stringify(lg).slice(0, 200)); process.exit(1) }
+if (!lg.j || !lg.j.token) { console.error('PANEL LOGIN xato:', JSON.stringify(lg).slice(0, 150)); process.exit(1) }
 const AT = { authorization: 'Bearer ' + lg.j.token }
-console.log('panel login OK')
+console.log('login OK')
 
-// ---- 2) STATS ----
-try {
-  const st = await jreq('/api/panel/stats', { headers: AT })
-  console.log('=== FOYDALANUVCHILAR ===')
-  console.log('jami=' + st.j.total + ' blok=' + st.j.blocked + ' onlayn=' + st.j.online + ' a24=' + st.j.active24 + ' a7=' + st.j.active7)
-} catch (e) { console.log('stats xato: ' + e.message) }
-
-// ---- 3) ADM_LOG — broadcast amallari ----
+// ---- 2) ADM_LOG — broadcast amallari ----
 try {
   const pl = await jreq('/api/panel/log', { headers: AT })
-  const rows = pl.j.items || []
-  console.log('=== ADM_LOG (oxirgi ' + rows.length + ') ===')
-  for (const w of rows.slice(0, 40)) {
-    const t = new Date(+(w.ts || 0)).toISOString().slice(5, 16).replace('T', ' ')
-    console.log(`[${t}] ${w.act} | ${w.tgt} | ${String(w.note || '').slice(0, 160)}`)
-  }
+  const rows = (pl.j.items || []).filter((w) => /xabar|broadcast|elon/i.test(String(w.act) + ' ' + String(w.tgt) + ' ' + String(w.note)))
+  console.log('=== ADM_LOG broadcast (' + rows.length + ') ===')
+  for (const w of rows.slice(0, 8)) console.log(`[${ts(w.ts)}] ${w.act} | ${String(w.note || '').slice(0, 140)}`)
 } catch (e) { console.log('panel/log xato: ' + e.message) }
 
-// ---- 4) INBOX holati ----
+// ---- 3) INBOX soni ----
 try {
   const ib = await jreq('/api/panel/inbox', { headers: AT })
-  console.log('=== MUROJAATLAR === javob kutilyapti: ' + (ib.j.items || []).length)
-  for (const x of (ib.j.items || []).slice(0, 8)) console.log('  chat=' + x.chat_id + ' uid=' + x.uid + ' ' + (x.name || '') + ' :: ' + String(x.body || '').slice(0, 60))
+  console.log('=== MUROJAATLAR: ' + (ib.j.items || []).length + ' ta javob kutilyapti ===')
 } catch (e) { console.log('inbox xato: ' + e.message) }
 
-// ---- 5) err_jurnal — dev raqam bilan ----
+// ---- 4) err_jurnal — faqat srv + broadcast ----
 try {
   const otp = await jreq('/api/auth/otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: PHONE }) })
   const v = await jreq('/api/auth/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: '+' + PHONE, code: otp.j.dev_code }) })
   if (v.j && v.j.token) {
-    const j = await jreq('/api/jurnal?n=120', { headers: { authorization: 'Bearer ' + v.j.token } })
-    const rows = j.j.items || []
-    console.log('=== ERR_JURNAL (' + rows.length + ' yozuv) ===')
-    if (!rows.length) console.log('jurnal BO\'SH — serverda 500-yozuv yo\'q')
-    for (const w of rows) {
-      const t = new Date(+(w.ts || 0)).toISOString().slice(5, 16).replace('T', ' ')
-      console.log(`[${t}] ${w.src || '?'} ${w.path || ''} uid=${w.uid || 0} :: ${String(w.msg || '').slice(0, 300)}`)
-    }
+    const j = await jreq('/api/jurnal?n=300', { headers: { authorization: 'Bearer ' + v.j.token } })
+    const rows = (j.j.items || []).filter((w) => String(w.src || '') !== 'klient')
+    console.log('=== ERR_JURNAL srv (' + rows.length + ') ===')
+    for (const w of rows.slice(0, 12)) console.log(`[${ts(w.ts)}] ${w.src || '?'} ${w.path || ''} uid=${w.uid || 0} :: ${String(w.msg || '').slice(0, 220)}`)
     try { await fetch(BASE + '/api/auth/logout', { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': UA, authorization: 'Bearer ' + v.j.token }, body: '{}' }) } catch {}
-  } else console.log('dev-login xato — err_jurnal o\'tkazib yuborildi')
+  } else console.log('dev-login yopiq — jurnal o\'tkazildi')
 } catch (e) { console.log('jurnal xato: ' + e.message) }
-console.log('=== TASHXIS TUGADI ===')
+console.log('=== TUGADI ===')
