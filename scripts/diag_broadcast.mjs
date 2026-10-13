@@ -3,7 +3,7 @@
  *   2) err_jurnal — FAQAT panel/broadcast + srv-manbali yozuvlar, oxirgi 12
  *   3) inbox — faqat SANI
  * Ishga tushirish: node scripts/diag_broadcast.mjs */
-const BASE = (process.env.E2E_BASE || 'https://50gram.begzodbegzodjons.workers.dev').replace(/\/$/, '')
+const BASE = (process.env.E2E_BASE || 'https://50gram.uz').replace(/\/$/, '')
 const PHONE = process.env.JURNAL_PHONE || '998900000005'
 const PANEL_PASS = process.env.PANEL_PASS || 'Balandtoglar1'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

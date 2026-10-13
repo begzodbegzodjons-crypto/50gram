@@ -18,5 +18,5 @@ jobs:
           node-version: 20
       - name: err_jurnal + klient qo'ng'iroq jurnallarini o'qish
         env:
-          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+          E2E_BASE: https://50gram.uz
         run: node scripts/jurnal_read.mjs

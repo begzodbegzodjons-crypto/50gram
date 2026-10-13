@@ -4,7 +4,7 @@
  * Ishga tushirish: node scripts/jurnal_read.mjs  [E2E_BASE=https://...]
  * E2E bilan bir xil himoya: GitHub runner IP'lari UMUMIY havzada — firewall 404
  * («Not found») berishi mumkin → 4 martagacha 25s pauza bilan qayta urinamiz. */
-const BASE = (process.env.E2E_BASE || 'https://50gram.begzodbegzodjons.workers.dev').replace(/\/$/, '')
+const BASE = (process.env.E2E_BASE || 'https://50gram.uz').replace(/\/$/, '')
 const PHONE = process.env.JURNAL_PHONE || '998900000005' // DEV_PHONES egasi (audit raqami)
 const N = Math.min(300, +(process.env.JURNAL_N || 80))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

@@ -24,6 +24,6 @@ jobs:
         run: echo "E2E_BUILD_V=v$(sed -nE 's/^const BUILD_V = \"v([0-9]+)\".*/\1/p' worker/src/index.ts | head -1)" >> "$GITHUB_ENV"
       - name: Xavfsizlik E2E — trap/inj/ext/otp-pump/json-cap + fw/fix qutqaruv (jonli saytga qarshi)
         env:
-          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+          E2E_BASE: https://50gram.uz
           E2E_BUILD_V: ${{ env.E2E_BUILD_V }}
         run: node scripts/e2e_sec.mjs

@@ -3,7 +3,7 @@
 // HAR BIR qadamda holat: S.cur, inp qiymati, POST javobi, klik xatosi, sahifa jurnali.
 import { chromium } from 'playwright'
 
-const BASE = 'https://50gram.begzodbegzodjons.workers.dev'
+const BASE = 'https://50gram.uz'
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

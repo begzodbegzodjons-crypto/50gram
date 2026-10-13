@@ -28,5 +28,5 @@ jobs:
         run: sleep 90
       - name: MEDIA E2E — jonli saytga qarshi
         env:
-          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+          E2E_BASE: https://50gram.uz
         run: node scripts/e2e_call_media.mjs

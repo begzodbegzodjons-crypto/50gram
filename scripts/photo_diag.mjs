@@ -8,7 +8,7 @@
 import { chromium } from 'playwright'
 import { writeFileSync } from 'node:fs'
 
-const BASE = (process.env.E2E_BASE || 'https://50gram.begzodbegzodjons.workers.dev').replace(/\/$/, '')
+const BASE = (process.env.E2E_BASE || 'https://50gram.uz').replace(/\/$/, '')
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

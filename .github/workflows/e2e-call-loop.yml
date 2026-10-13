@@ -37,5 +37,5 @@ jobs:
         run: sleep 90
       - name: MUHR E2E — 3 ketma-ket qo'ng'iroq + invariantlar
         env:
-          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+          E2E_BASE: https://50gram.uz
         run: node scripts/e2e_call_loop.mjs

@@ -33,7 +33,7 @@
  * Ishga tushirish: E2E_BASE=https://... node scripts/e2e_panel.mjs
  */
 import { readFileSync } from 'node:fs'
-const BASE = (process.env.E2E_BASE || 'https://50gram.begzodbegzodjons.workers.dev').replace(/\/$/, '')
+const BASE = (process.env.E2E_BASE || 'https://50gram.uz').replace(/\/$/, '')
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 const PANEL_PASS = process.env.PANEL_PASS || 'Balandtoglar1'
 const T = { phone: '998900000090', full: '+998900000090' } // panel-test foydalanuvchisi (013-016 band — boshqalar tegilmaydi)

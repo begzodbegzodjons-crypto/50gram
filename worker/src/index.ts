@@ -357,7 +357,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v119"
+const BUILD_V = "v120"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -5730,6 +5730,15 @@ function fw4xx(env: Env, wait: (p: Promise<unknown>) => void, ip: string, info?:
 export default {
   async fetch(req: Request, env: Env, ctx?: { waitUntil: (p: Promise<unknown>) => void }): Promise<Response> {
     const url = new URL(req.url)
+    // v120 WORKERS.DEV-YASHIRUVCHI: foydalanuvchi talabi — «begzodbegzodjons.workers.dev
+    // silka ko'rinmasin, bossa 50gram.uz bo'lib chiqsin». Har qanday GET/HEAD so'rov
+    // workers.dev hostida DARHOL https://50gram.uz ga 301 (doimiy, keshlanadi) — manzil
+    // satri toza 50gram.uz bo'lib qoladi. WebSocket (Upgrade) va POST/PATCH/DELETE
+    // o'tkazib yuboriladi (eski ilova/WS-ulanish uzilib qolmasin — o'zi yangilanadi).
+    if (/\.workers\.dev$/.test(url.hostname) && (req.method === "GET" || req.method === "HEAD") && !req.headers.get("upgrade")) {
+      const loc = "https://50gram.uz" + url.pathname + url.search
+      return new Response(null, { status: 301, headers: { location: loc, "cache-control": "public, max-age=86400" } })
+    }
     // v117 HTTPS-QO'RIQCHISI: foydalanuvchi brauzerga faqat "50gram.uz" yozsa — mobil
     // brauzerlar (eski Chrome, Samsung Internet, UC, Mi) AVVAL http:// sinaydi. HTTP'da
     // xavfsiz kontekst YO'Q: Service Worker, kamera/mikrofon, crypto.subtle (shifrlash)

@@ -560,7 +560,8 @@ async function getCipher(id) {
   let meta = null
   try { meta = await api('/media/' + id) } catch {}
   if (meta) {
-    // OPTIMIZATSIYA: bo'laklar binary + 2 tasi parallel (teskari tartibda yig'iladi)
+    // OPTIMIZATSIYA: bo'laklar binary + 3 tasi parallel (v120: 2→3 — rasm/ovoz/dumaloq
+    // video birinchi ochilishi ~1.5x tez; teskari tartibda yig'iladi)
     const parts = new Array(meta.chunks), failed = []
     let got = 0, next = 0
     const wr = async () => {
@@ -572,7 +573,8 @@ async function getCipher(id) {
         if (u) { parts[i] = new Blob([u]); got++; if (onMediaProg) onMediaProg(id, got, meta.chunks) } else failed.push(i)
       }
     }
-    await Promise.all([wr(), wr()])
+    // v120: 3 x parallel (2 emas) — birinchi ochilish ~1.5x tez; xato-bo'laklar keyin 2 x da qayta uriniladi
+    await Promise.all([wr(), wr(), wr()])
     if (!failed.length && got === meta.chunks) {
       const blob = new Blob(parts, { type: 'application/octet-stream' })
       P2P.note(id, { sha: meta.sha, size: meta.size, mime: meta.mime })
@@ -1377,7 +1379,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v119'
+window.__50BUILD = 'v120'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return

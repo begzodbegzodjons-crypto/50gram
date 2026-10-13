@@ -25,7 +25,7 @@ jobs:
           npx playwright install-deps chromium >/dev/null || sudo npx playwright install-deps chromium
       - name: To'liq audit — jonli saytga qarshi
         env:
-          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+          E2E_BASE: https://50gram.uz
         run: node scripts/audit_full_app.mjs
       # JURNAL O'QISH (bir runner = bir IP): audit endi o'z IP'sini fw4xx bilan bloklamaydi
       # (probe-istisno) — shu IP'dan darhol err_jurnal o'qiladi: server 500'lari + klient
@@ -34,5 +34,5 @@ jobs:
         if: always()
         continue-on-error: true
         env:
-          E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
+          E2E_BASE: https://50gram.uz
         run: node scripts/jurnal_read.mjs

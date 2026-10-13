@@ -119,11 +119,11 @@ export function makeSpiderWeb(d: SpiderDeps) {
     const rows = media
       ? await c.db.q(
         `SELECT h.user_id FROM peer_have h JOIN users u ON u.id=h.user_id LEFT JOIN nodes n ON n.user_id=h.user_id
-         WHERE h.media_id=? AND h.chat_id=? AND h.user_id<>? AND u.last_seen>? ORDER BY COALESCE(n.score,0) DESC, u.last_seen DESC LIMIT 8`,
+         WHERE h.media_id=? AND h.chat_id=? AND h.user_id<>? AND u.last_seen>? ORDER BY COALESCE(n.score,0) DESC, u.last_seen DESC LIMIT 12`,
         [media, chatId, c.uid, since])
       : await c.db.q(
         `SELECT m.user_id FROM chat_members m JOIN users u ON u.id=m.user_id
-         WHERE m.chat_id=? AND m.status='active' AND m.user_id<>? AND u.last_seen>? ORDER BY u.last_seen DESC LIMIT 8`,
+         WHERE m.chat_id=? AND m.status='active' AND m.user_id<>? AND u.last_seen>? ORDER BY u.last_seen DESC LIMIT 12`,
         [chatId, c.uid, since])
     return json({ peers: rows.map((r: any) => r.user_id) })
   }
@@ -205,7 +205,9 @@ export function makeSpiderWeb(d: SpiderDeps) {
           await db.run("REPLACE INTO pin_jobs(media_id,user_id,chat_id,created_at) VALUES(?,?,?,?)", [m.id, x.user_id, m.chat_id, t])
       }
       const healthy = have >= REPLICA_MIN && strong >= 2
-      await db.run("UPDATE media SET replicas=?, next_check=? WHERE id=?", [have, t + (healthy ? 6 * 3600000 : 20 * 60000), m.id])
+      // v120: sog'lomsiz fayl 20→10 daqiqada qayta tekshiriladi — to'r o'z-o'zini 2x TEZ davolaydi
+      // (v120 «o'rgimchak to'ri kuchaytirildi» — REPLICA_MIN/MAX muhri M1 o'zgarmagan)
+      await db.run("UPDATE media SET replicas=?, next_check=? WHERE id=?", [have, t + (healthy ? 6 * 3600000 : 10 * 60000), m.id])
     }
     return list.length
   }

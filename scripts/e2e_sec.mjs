@@ -17,7 +17,7 @@
  * oxirida fw/fix bilan OZOD qiladi — shu sababli boshqa E2E'lardan KEYIN ketma-ket yuguradi.
  */
 import { readFileSync } from 'node:fs'
-const BASE = (process.env.E2E_BASE || 'https://50gram.begzodbegzodjons.workers.dev').replace(/\/$/, '')
+const BASE = (process.env.E2E_BASE || 'https://50gram.uz').replace(/\/$/, '')
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 // smoke (003/004), call (005/006), media (007/008), MUHR (009/010), data (011/012) — bu testniki:
 // ADMIN = 004 (DEV_PHONES a'zosi — fw/fix huquqi), USER = 013/014, BRUTE = 016 (xato-kodlar)

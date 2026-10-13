@@ -18,7 +18,7 @@ jobs:
           set -e
           sleep 90  # deploy tugashini kutish (npm ci + wrangler deploy ~1-2 daqiqa)
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-          BASE="https://50gram.begzodbegzodjons.workers.dev"
+          BASE="https://50gram.uz"
           TOK=""
           TOK2=""
           cleanup() {
@@ -136,3 +136,16 @@ jobs:
           P2=$(curl -s -A "$UA" -H "$AUTH2" "$BASE/api/calls/pending")
           echo "$P2" | grep -q "\"call_id\":$CID1" && { echo "FAIL ghost: pending qaytardi: $P2"; exit 1; }
           echo "call status + no-ghost: OK"
+      - name: v120 workers.dev -> 50gram.uz yo'naltirish (doimiy regressiya qorovuli)
+        run: |
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+          # 1) GET → 301 https://50gram.uz (manzil yashirinadi, path+search saqlanadi)
+          LOC=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -A "$UA" "https://50gram.begzodbegzodjons.workers.dev/?tekshir=v120")
+          echo "GET: $LOC"
+          echo "$LOC" | grep -q "^301 https://50gram\.uz/?tekshir=v120$" || { echo "FAIL yo'naltirish: $LOC"; exit 1; }
+          echo "GET redirect: OK (manzil 50gram.uz bo'lib chiqadi)"
+          # 2) POST yo'naltirilmaydi (eski mijozlar/WS uzilib qolmasin)
+          ST=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -A "$UA" -d '{"pass":"x-notogri"}' "https://50gram.begzodbegzodjons.workers.dev/api/panel/login")
+          echo "POST /api/panel/login: $ST (401 kutiladi — o'tdi demak yo'naltirilmagan)"
+          [ "$ST" = "401" ] || { echo "FAIL POST yo'naltirildi yoki boshqa xato: $ST"; exit 1; }
+          echo "POST passthrough: OK"

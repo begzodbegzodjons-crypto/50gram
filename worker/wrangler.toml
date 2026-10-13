@@ -32,7 +32,9 @@ new_sqlite_classes = ["SecFirewall"]
 # qo'ng'iroq signal navbati, o'lik qo'ng'iroq yozuvlari. XABARLAR/FAYLLAR/ISTORIYA
 # O'CHMAYDI (o'chmas tarix — cleanup() ichidagi izohga qarang, v71 hujjat-mosligi)
 [triggers]
-crons = ["*/30 * * * *"]
+# v120: 30→15 daqiqa — o'rgimchak to'ri planReplicas (nusxa-yig'ish) va tozalash 2x TEZ;
+# cleanup idempotent (qayta ishga xavfsiz), 698 foydalanuvchi yuki uchun yengil
+crons = ["*/15 * * * *"]
 
 # Workers AI: trend lentada tarjima uchun (subrequest limitiga kirmaydi)
 [ai]

@@ -13,7 +13,7 @@
  */
 import { chromium } from 'playwright'
 
-const BASE = (process.env.E2E_BASE || 'https://50gram.begzodbegzodjons.workers.dev').replace(/\/$/, '')
+const BASE = (process.env.E2E_BASE || 'https://50gram.uz').replace(/\/$/, '')
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 const A = { phone: '998900000005', full: '+998900000005' }
 const B = { phone: '998900000006', full: '+998900000006' }
