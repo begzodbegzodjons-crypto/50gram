@@ -1,6 +1,7 @@
 // ==========================================================================
-// 50 GRAM TOOLLAR (v116) — REYTING + TARJIMON
-// Reyting: kanallar / guruhlar / aktiv foydalanuvchilar (7 kunlik faollik)
+// 50 GRAM TOOLLAR (v119) — TARJIMON
+// (v119: REYTING foydalanuvchi talabi bilan TO'LIQ OLIB TASHLANDI — tab, dock
+//  tugmasi, /rating so'rovi va barcha CSS'lar. Tarjimon o'zgarishsiz qoldi.)
 // Tarjimon: matn, ovoz (Whisper AI -> tarjima -> TTS ovoz), PDF hujjat (6 til)
 // v116 PDF YUKLAB OLISH: «PDF sifatida saqlash» (oyna + chop etish — orqaga
 // qaytish yo'q edi) OLIB TASHLANDI. Endi tarjima UZLUK hujjat ko'rinishida
@@ -25,76 +26,6 @@
     { k: 'de', n: 'Deutsch', f: '🇩🇪' },
   ]
   const tilN = (k) => { const t = TILL.find((x) => x.k === k); return t ? t.f + ' ' + t.n : k }
-
-  // ------------------------- REYTING -------------------------
-  let ratTab = localStorage.getItem('g50rat') || 'users'
-  let ratYuk = {}
-  const MEDAL = ['🥇', '🥈', '🥉']
-  const qisqaSon = (n) => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.0', '') + 'M' : n >= 1000 ? (n / 1000).toFixed(1).replace('.0', '') + 'K' : String(n || 0)
-
-  function ratRow(i, x, tab) {
-    const orn = MEDAL[i] || '<span class="rnk">' + (i + 1) + '</span>'
-    if (tab === 'users') {
-      const nm = ((x.first_name || '') + ' ' + (x.last_name || '')).trim() || 'Foydalanuvchi'
-      const lv = x.earned >= 30000 ? '🥇' : x.earned >= 10000 ? '🥈' : x.earned >= 2000 ? '🥉' : x.earned >= 500 ? '⭐' : '🌱'
-      return '<div class="item rat-it">' +
-        '<div class="rat-rank">' + orn + '</div>' +
-        avHTML({ id: x.id, first_name: x.first_name, last_name: x.last_name, avatar_ver: x.avatar_ver }, 44, { noStory: true }) +
-        '<div class="mid"><div class="t1"><b>' + esc(nm) + '</b> <span class="lv">' + lv + '</span></div>' +
-        '<div class="t2">' + (x.username ? '@' + esc(x.username) + ' · ' : '') + 'Martaba ' + qisqaSon(x.earned) + '</div></div>' +
-        '<div class="rat-score"><b>' + qisqaSon(x.n) + '</b><span>xabar</span></div></div>'
-    }
-    const ty = tab === 'channels'
-    return '<div class="item rat-it">' +
-      '<div class="rat-rank">' + orn + '</div>' +
-      avHTML({ id: x.id, title: x.title, avatar_ver: x.avatar_ver }, 44, { chat: true, noStory: true }) +
-      '<div class="mid"><div class="t1"><b>' + esc(x.title || '(nom yozilmagan)') + '</b></div>' +
-      '<div class="t2">' + (x.username ? '@' + esc(x.username) + ' · ' : '') + qisqaSon(x.member_count) + ' ' + (ty ? 'obunachi' : 'a‘zo') + '</div></div>' +
-      '<div class="rat-score"><b>' + qisqaSon(x.n7) + '</b><span>7 kun</span></div></div>'
-  }
-
-  async function ratYukla(force) {
-    const box = $('ratlist')
-    if (!box) return
-    // keshda bo‘lsa darhol chizamiz + har doim fonda yangilaymiz (stale-while-revalidate)
-    if (ratYuk[ratTab] && !force) ratChiz(ratYuk[ratTab])
-    if (!ratYuk[ratTab] && !force) box.innerHTML = '<div class="mut" style="padding:28px;text-align:center">⏳ Yuklanmoqda…</div>'
-    try {
-      const r = await api('/rating?tab=' + ratTab)
-      ratYuk[ratTab] = r
-      ratChiz(r)
-    } catch (e) {
-      if (!ratYuk[ratTab]) box.innerHTML = '<div class="mut" style="padding:28px;text-align:center">⚠️ ' + esc(e.message || 'Yuklanmadi') + '</div>'
-    }
-  }
-  function ratChiz(r) {
-    const box = $('ratlist')
-    if (!box) return
-    const list = r.list || []
-    if (!list.length) { box.innerHTML = '<div class="mut" style="padding:28px;text-align:center">Hozircha ma’lumot yo‘q — faollik oshgani sari reyting to‘ladi 🌱</div>'; return }
-    let h = ''
-    if (r.me && r.me.n) h += '<div class="rat-me">Siz: <b>#' + r.me.rank + '</b> · ' + r.me.n + ' xabar (7 kun)</div>'
-    h += list.map((x, i) => ratRow(i, x, r.tab)).join('')
-    box.innerHTML = h
-  }
-  window.ratOch = () => {
-    // segmentlar + yangilash tugmasi — bir marta bog'lanadi
-    const seg = $('ratseg')
-    if (seg && !seg.dataset.bogla) {
-      seg.dataset.bogla = '1'
-      qsa('#ratseg div').forEach((d) => {
-        d.onclick = () => {
-          ratTab = d.dataset.r
-          localStorage.setItem('g50rat', ratTab)
-          ratYukla(false)
-        }
-      })
-      const rf = $('b-ratref')
-      if (rf) rf.onclick = () => ratYukla(true)
-    }
-    qsa('#ratseg div').forEach((d) => d.classList.toggle('on', d.dataset.r === ratTab))
-    ratYukla(false)
-  }
 
   // ------------------------- TARJIMON -------------------------
   let trTo = localStorage.getItem('g50tr') || 'uz'

@@ -357,7 +357,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v118"
+const BUILD_V = "v119"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -3656,68 +3656,10 @@ async function apiTranslateSpeech(c: C) {
   return json({ ok: true, text, translated: r!.t, from: r!.from, to, audio: mp3 ? "data:audio/mpeg;base64," + mp3 : "", dbg: d })
 }
 
-// ========================= REYTING (v114) — kanallar / guruhlar / aktiv foydalanuvchilar =========================
-// Foydalanuvchi talabi: «reytinglar kanallar gruppalar va aktiv foydalanuvchi reytingi».
-// Ma'lumot manbai: mavjud jadvallar (messages faolligi, chats member_count, wallets.earned
-// martaba) — YANGI JADVAL YO'Q, migratsiya KERAK EMAS. 2 daqiqalik xotira-kesh — TiDB himoyasi.
-const RAT_KESH = new Map<string, { j: any; t: number }>()
-async function apiRating(c: C) {
-  const tab = String(c.url.searchParams.get("tab") || "users")
-  if (!["users", "channels", "groups"].includes(tab)) fail("Noto‘g‘ri bo‘lim")
-  const hafta = now() - 7 * DAY
-  let j: any = RAT_KESH.get(tab)
-  if (!j || Date.now() - j.t > 120_000) {
-    let list: any[] = []
-    if (tab === "users") {
-      const rows = await c.db.q(
-        "SELECT m.sender_id AS id, COUNT(*) AS n, u.first_name, u.last_name, u.username, u.avatar_ver, COALESCE(w.earned,0) AS earned " +
-        "FROM messages m JOIN users u ON u.id=m.sender_id LEFT JOIN wallets w ON w.user_id=m.sender_id " +
-        "WHERE m.deleted=0 AND m.created_at>=? AND m.sender_id>0 AND u.blocked=0 " +
-        "GROUP BY m.sender_id ORDER BY n DESC LIMIT 50", [hafta]).catch(() => [])
-      list = (rows || []).map((r: any) => ({
-        id: Number(r.id), n: Number(r.n), earned: Number(r.earned || 0),
-        first_name: r.first_name || "", last_name: r.last_name || "", username: r.username || "", avatar_ver: Number(r.avatar_ver || 0),
-      }))
-    } else if (tab === "channels") {
-      const rows = await c.db.q(
-        "SELECT c.id, c.title, c.username, c.avatar_ver, c.member_count, c.last_msg_at, " +
-        "(SELECT COUNT(*) FROM messages m WHERE m.chat_id=c.id AND m.deleted=0 AND m.created_at>=?) AS n7 " +
-        "FROM chats c WHERE c.type='channel' AND c.is_public=1 AND c.blocked=0 " +
-        "ORDER BY c.member_count DESC LIMIT 50", [hafta]).catch(() => [])
-      list = (rows || []).map((r: any) => ({
-        id: Number(r.id), title: r.title || "", username: r.username || "", avatar_ver: Number(r.avatar_ver || 0),
-        member_count: Number(r.member_count || 0), n7: Number(r.n7 || 0), last_msg_at: Number(r.last_msg_at || 0),
-      }))
-    } else {
-      const rows = await c.db.q(
-        "SELECT c.id, c.title, c.username, c.avatar_ver, c.member_count, c.last_msg_at, " +
-        "(SELECT COUNT(*) FROM messages m WHERE m.chat_id=c.id AND m.deleted=0 AND m.created_at>=?) AS n7 " +
-        "FROM chats c WHERE c.type='group' AND c.is_public=1 AND c.blocked=0 " +
-        "ORDER BY n7 DESC, c.member_count DESC LIMIT 50", [hafta]).catch(() => [])
-      list = (rows || []).map((r: any) => ({
-        id: Number(r.id), title: r.title || "", username: r.username || "", avatar_ver: Number(r.avatar_ver || 0),
-        member_count: Number(r.member_count || 0), n7: Number(r.n7 || 0), last_msg_at: Number(r.last_msg_at || 0),
-      }))
-    }
-    j = { list, t: Date.now() }
-    if (RAT_KESH.size > 8) RAT_KESH.clear()
-    RAT_KESH.set(tab, j)
-  }
-  // Mening o'rnim (faqat users tab): mavqeni hisoblash — 2 yengil so'rov
-  let me: any = null
-  if (tab === "users") {
-    try {
-      const mine = await c.db.one("SELECT COUNT(*) AS n FROM messages WHERE deleted=0 AND created_at>=? AND sender_id=?", [hafta, c.uid])
-      const n = Number(mine?.n || 0)
-      if (n > 0) {
-        const hi = await c.db.one("SELECT COUNT(*) AS c FROM (SELECT sender_id FROM messages WHERE deleted=0 AND created_at>=? AND sender_id>0 AND sender_id<>? GROUP BY sender_id HAVING COUNT(*) > ?) x", [hafta, c.uid, n])
-        me = { n, rank: Number(hi?.c || 0) + 1 }
-      }
-    } catch {}
-  }
-  return json({ ok: true, tab, list: j.list, me })
-}
-
+// ========================= REYTING (v114) — O'CHIRILDI (v119) =========================
+// Foydalanuvchi talabi: «reyting funksiyasini olib tashla umuman kerak emas».
+// apiRating + RAT_KESH + /rating yo'li to'liq olib tashlandi (web'da tab/dock tugmasi ham yo'q).
+// Eslatma: /lives/top (Task 41 TOP efir) — bu ALOHIDA funksiya, jonli efirlar bilan ishlaydi — QOLADI.
 // ------------------------- Kanal postlari izohlari -------------------------
 async function msgCommentsAllowed(c: C, mid: number) {
   await ensureSchema(c.db)
@@ -4081,6 +4023,12 @@ async function panelBroadcast(c: C) {
   const CS = 400
   let newChats = 0, sent = 0, failed = 0
   const notified: Array<{ uid: number; chat: number; msg: any }> = []
+  // v119 KAFOLAT: har foydalanuvchi uchun xabar HAQIQATAN yozilganini belgilaymiz —
+  // quyi batch-yozuvlar jim yiqilsa ham (transient TiDB/PK), repair-pass aynan shu ro'yxat
+  // bo'yicha yetmaganlarni bittama-bitta tiklaydi («ba'zilariga yetmadi» ildizi).
+  const sentUids = new Set<number>()
+  const uidByChat = new Map<number, number>()
+  const markSent = (chid: number) => { const u = uidByChat.get(chid); if (u) sentUids.add(u) }
   for (let i = 0; i < targets.length; i += CS) {
     const part = targets.slice(i, i + CS)
     const keys = part.map((uid) => (uid < ADM_ID ? uid + ":" + ADM_ID : ADM_ID + ":" + uid))
@@ -4153,6 +4101,7 @@ async function panelBroadcast(c: C) {
     // xabar id'lari: t*1000+seq — ketma-ket noyob; PK to'qnashuvda — 50-lik bo'laklarda yangi id bilan
     const mrows: unknown[] = []
     const mrowByChat = new Map<number, unknown[]>()
+    for (let j = 0; j < chatIds.length; j++) uidByChat.set(chatIds[j], part[j])
     for (let j = 0; j < chatIds.length; j++) {
       if (!okChat.has(chatIds[j])) continue
       const row = [t * 1000 + seq++, chatIds[j], ADM_ID, kind, body || null, meta ? JSON.stringify(meta) : null, t, t, t + 100 * 365 * DAY]
@@ -4165,6 +4114,7 @@ async function panelBroadcast(c: C) {
           `INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES ${mrows.map(() => "(?,?,?,?,?,?,?,?,?)").join(",")}`,
           mrows.flat(),
         )
+        for (const r of mrows) markSent(+(r[1] as number))
       } catch {
         // v108: butun batch yiqilsa — 50-lik bo'laklar bilan (yangi id) qayta urinish;
         // bo'lak yiqilsa — xar biri alohida (shu bo'lak ichida ≤50 — byudjet posboni)
@@ -4190,7 +4140,7 @@ async function panelBroadcast(c: C) {
           if (chunkOk) for (const r of chunk) fresh.push([+(r[0] as number), +(r[1] as number)])
         }
         // v118: muvaffaqiyatli yozilgan xabar id'lari WS-bildirishnoma uchun yangilanadi
-        for (const [mid2, chid2] of fresh) { const rr = mrowByChat.get(chid2); if (rr) rr[0] = mid2 }
+        for (const [mid2, chid2] of fresh) { const rr = mrowByChat.get(chid2); if (rr) rr[0] = mid2; markSent(chid2) }
       }
       await c.db.run(`UPDATE chats SET last_msg_at=? WHERE id IN (${ph(chatIds)})`, [t, ...chatIds]).catch(() => {})
       sent += mrows.length
@@ -4207,10 +4157,67 @@ async function panelBroadcast(c: C) {
       }
     }
   }
+  // ================= v119 KAFOLATLI YETKAZISH — REPAIR-PASS =================
+  // Foydalanuvchi shikoyati: «barchaga xabar yozganda BA'ZILARIGA yetmadi». Ildizi:
+  // batch-INSERT'lardan biri jim yiqilsa (TiDB transient/PK/txn-hajm) — o'sha foydalanuvchilar
+  // suhbatsiz/xabarsiz qolardi. Endi: yetmagan HAR BIR foydalanuvchi uchun aynan panelDm yo'li
+  // (proven) bilan bittama-bitta: suhbat topiladi/yaratiladi (newId + qayta-urinish),
+  // chat_members INSERT IGNORE bilan KAFOLATLANADI (eski yiqilishlarda a'zoligi yo'qolgan
+  // suhbatlar ham tuzatiladi — ro'yxatda ko'rinmay qolgan «50gram admin»lar qaytadi),
+  // xabar 3 martagacha yangi newId() bilan yoziladi. Bu o'tish sekin emas: oddiy holatda
+  // missed=0 → pass UMUMAN ishga tushmaydi.
+  let repaired = 0
+  const missed = targets.filter((u) => !sentUids.has(u))
+  for (const uid of missed.slice(0, 800)) {
+    try {
+      const key = uid < ADM_ID ? uid + ":" + ADM_ID : ADM_ID + ":" + uid
+      let chid = Number((await c.db.one("SELECT id FROM chats WHERE direct_key=?", [key]).catch(() => null))?.id || 0)
+      if (!chid) {
+        for (let a = 0; a < 2 && !chid; a++) {
+          const cand = newId()
+          try {
+            await c.db.run(
+              "INSERT INTO chats(id,type,owner_id,is_public,invite_hash,direct_key,member_count,last_msg_at,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+              [cand, "direct", ADM_ID, 0, randomStr(10), key, 2, t, t],
+            )
+            await c.db.run(
+              "INSERT INTO chat_members(chat_id,user_id,role,joined_at) VALUES(?,?,?,?),(?,?,?,?)",
+              [cand, ADM_ID, "member", t, cand, uid, "member", t],
+            )
+            chid = cand
+            newChats++
+          } catch {}
+        }
+        if (!chid) continue
+      } else {
+        // suhbat bor — a'zolik kafolati (eski batch-yiqilish chat_members'ni yarim qoldirgan bo'lishi mumkin)
+        await c.db.run(
+          "INSERT IGNORE INTO chat_members(chat_id,user_id,role,joined_at) VALUES(?,?,?,?),(?,?,?,?)",
+          [chid, ADM_ID, "member", t, chid, uid, "member", t],
+        ).catch(() => {})
+      }
+      let mid = 0
+      for (let a = 0; a < 3 && !mid; a++) {
+        const cand = newId()
+        try {
+          await c.db.run(
+            "INSERT INTO messages(id,chat_id,sender_id,kind,body,meta,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            [cand, chid, ADM_ID, kind, body || null, meta ? JSON.stringify(meta) : null, t, t, t + 100 * 365 * DAY],
+          )
+          mid = cand
+        } catch {}
+      }
+      if (!mid) continue
+      repaired++
+      sentUids.add(uid)
+      await c.db.run("UPDATE chats SET last_msg_at=? WHERE id=?", [t, chid]).catch(() => {})
+    } catch {}
+  }
+  const failedFinal = targets.length - sentUids.size
   if (notified.length) admNotify(c, notified)
   const what = kind === "photo" ? "RASM+E'LON" : "E'LON"
-  await admLog(c, "hammaga_xabar", "barcha", `${what} yuborildi (${sent} foydalanuvchiga, ${newChats} yangi suhbat${failed ? ", " + failed + " YETMADI" : ""}): ` + (body || "[rasm]").slice(0, 120))
-  return json({ ok: true, sent, failed, new_chats: newChats, total, online: notified.length, now: t })
+  await admLog(c, "hammaga_xabar", "barcha", `${what} yuborildi (${sent} foydalanuvchiga, ${newChats} yangi suhbat${repaired ? ", " + repaired + " TA'TIKLANGAN tiklandi" : ""}${failedFinal ? ", " + failedFinal + " YETMADI" : ""}): ` + (body || "[rasm]").slice(0, 120))
+  return json({ ok: true, sent, failed: failedFinal, new_chats: newChats, repaired, total, online: notified.length, now: t })
 }
 
 // ---- v105: XAVFSIZLIK BO'LIMI — egada hujumlar haqida TO'LIQ ma'lumot oynasi ----
@@ -5423,7 +5430,7 @@ $('sb').onclick=async function(){
     api('broadcast','POST',payload).then(function(r){
       b.disabled=false
       if(authFail(r))return
-      if(r.j&&r.j.ok){$('bres').textContent='✓ Yuborildi: '+r.j.sent+' foydalanuvchiga ('+r.j.new_chats+' yangi suhbat'+(r.j.online?', '+r.j.online+' onlayniga darhol yetdi':'')+(r.j.failed?', '+r.j.failed+' YETMADI':'')+').';$('tx').value='';$('cnt').textContent='0 / 4096';bimgClear()}
+      if(r.j&&r.j.ok){$('bres').textContent='✓ Yuborildi: '+r.j.sent+' foydalanuvchiga ('+r.j.new_chats+' yangi suhbat'+(r.j.online?', '+r.j.online+' onlayniga darhol yetdi':'')+(r.j.repaired?', '+r.j.repaired+' ta’tiklangan qayta yuborildi':'')+(r.j.failed?', '+r.j.failed+' YETMADI':'')+').';$('tx').value='';$('cnt').textContent='0 / 4096';bimgClear()}
       else{$('bres').className='res err';$('bres').textContent=(r.j&&r.j.error)||'Xatolik'}
     })
   }catch(e){b.disabled=false;$('bres').className='res err';$('bres').textContent='Rasm tayyorlanmadi: '+(e&&e.message||e)}
@@ -5571,10 +5578,9 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/lives/:id/end", endLive],
   ["GET", "/wallet", getWallet],
   ["POST", "/wallet/daily", dailyBonus],
-  // v114 TARJIMON + REYTING
+  // v114 TARJIMON (v119: REYTING foydalanuvchi talabi bilan OLIB TASHLANDI — /rating yo'q)
   ["POST", "/translate", apiTranslate],
   ["POST", "/translate/speech", apiTranslateSpeech],
-  ["GET", "/rating", apiRating],
   ["GET", "/messages/:id/comments", listMsgComments],
   ["POST", "/messages/:id/comments", addMsgComment],
   ["DELETE", "/messages/:id/comments/:cid", delMsgComment],
@@ -5828,10 +5834,15 @@ export default {
       // 30 kun blok. Oddiy foydalanuvchi (sayt/app) hech qachon shu to'siqqa urilmaydi.
       const fua = req.headers.get("user-agent") || ""
       if (!FW_UA_OK.test(fua)) { fwLBlok(fwip, 30 * DAY); fwOchko(env, wait, fwip, "ext", 1, secInfo(req, url)); return FW_404() }
-      // Toshqin: 1 IP → 10s ichida 80+ so'rov = darhol lokal blok + doimiy ochko
+      // Toshqin: 1 IP → 10s ichida 400+ so'rov = darhol lokal blok + doimiy ochko.
+      // v119: 80→400 — MOBIL CGNAT posboni: bitta tashqi IP orqada YUZLARGA halol foydalanuvchi
+      // bo'ladi (O'zbekiston operatorlari); broadcast/efir ochilishlarida bir IP'da bir necha
+      // foydalanuvchi app'ni bir vaqtda ochganda 80 chegara HALOL foydalanuvchiga FW_404
+      // («Xatolik 404» + xabar yetmadi) berardi. 400/10s = 40 so'rov/s — inson-UI bunga
+      // yaqinlasholmaydi, skaner/bot baribir bir necha soniyada urilib qoladi.
       const rt = FW_RATE.get(fwip), tn = Date.now()
       if (!rt || tn - rt.t > 10_000) { if (FW_RATE.size > 5000) FW_RATE.clear(); FW_RATE.set(fwip, { n: 1, t: tn }) }
-      else if (++rt.n > 80) { fwLBlok(fwip, 15 * 60_000); fwOchko(env, wait, fwip, "flood", 2, secInfo(req, url)); return FW_404() }
+      else if (++rt.n > 400) { fwLBlok(fwip, 15 * 60_000); fwOchko(env, wait, fwip, "flood", 2, secInfo(req, url)); return FW_404() }
       // Tizim ildiziga/admin yo'llariga RUXSATGIZ kirishga urinish — DARHOL 30 kun blok
       if (FW_TRAP.test(url.pathname)) { fwLBlok(fwip, 30 * DAY); fwOchko(env, wait, fwip, "root", 1, secInfo(req, url)); return FW_404() }
       // v98: fayl-kengaytma datchiklari (backdoor/arxiv/qolib qoldiq qidiruvchilari) — trap kabi
