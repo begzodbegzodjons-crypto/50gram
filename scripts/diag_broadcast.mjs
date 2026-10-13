@@ -22,6 +22,9 @@ async function jreq(path, opt = {}, tries = 4) {
   throw last
 }
 const ts = (ms) => new Date(+(ms || 0)).toISOString().slice(5, 16).replace('T', ' ')
+const OUT = []
+const say = (l) => { OUT.push(l); console.log(l) }
+process.on('exit', () => { try { require('fs') } catch {} })
 
 // ---- 1) PANEL LOGIN ----
 const lg = await jreq('/api/panel/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pass: PANEL_PASS }) })
@@ -33,14 +36,14 @@ console.log('login OK')
 try {
   const pl = await jreq('/api/panel/log', { headers: AT })
   const rows = (pl.j.items || []).filter((w) => /xabar|broadcast|elon/i.test(String(w.act) + ' ' + String(w.tgt) + ' ' + String(w.note)))
-  console.log('=== ADM_LOG broadcast (' + rows.length + ') ===')
-  for (const w of rows.slice(0, 8)) console.log(`[${ts(w.ts)}] ${w.act} | ${String(w.note || '').slice(0, 140)}`)
+  say('=== ADM_LOG broadcast (' + rows.length + ') ===')
+  for (const w of rows.slice(0, 8)) say(`[${ts(w.ts)}] ${w.act} | ${String(w.note || '').slice(0, 140)}`)
 } catch (e) { console.log('panel/log xato: ' + e.message) }
 
 // ---- 3) INBOX soni ----
 try {
   const ib = await jreq('/api/panel/inbox', { headers: AT })
-  console.log('=== MUROJAATLAR: ' + (ib.j.items || []).length + ' ta javob kutilyapti ===')
+  say('=== MUROJAATLAR: ' + (ib.j.items || []).length + ' ta javob kutilyapti ===')
 } catch (e) { console.log('inbox xato: ' + e.message) }
 
 // ---- 4) err_jurnal — faqat srv + broadcast ----
@@ -50,9 +53,10 @@ try {
   if (v.j && v.j.token) {
     const j = await jreq('/api/jurnal?n=300', { headers: { authorization: 'Bearer ' + v.j.token } })
     const rows = (j.j.items || []).filter((w) => String(w.src || '') !== 'klient')
-    console.log('=== ERR_JURNAL srv (' + rows.length + ') ===')
-    for (const w of rows.slice(0, 12)) console.log(`[${ts(w.ts)}] ${w.src || '?'} ${w.path || ''} uid=${w.uid || 0} :: ${String(w.msg || '').slice(0, 220)}`)
+    say('=== ERR_JURNAL srv (' + rows.length + ') ===')
+    for (const w of rows.slice(0, 12)) say(`[${ts(w.ts)}] ${w.src || '?'} ${w.path || ''} uid=${w.uid || 0} :: ${String(w.msg || '').slice(0, 220)}`)
     try { await fetch(BASE + '/api/auth/logout', { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': UA, authorization: 'Bearer ' + v.j.token }, body: '{}' }) } catch {}
   } else console.log('dev-login yopiq — jurnal o\'tkazildi')
 } catch (e) { console.log('jurnal xato: ' + e.message) }
-console.log('=== TUGADI ===')
+say('=== TUGADI ===')
+try { const fs = await import('fs'); fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY || '/tmp/sum.md', '<pre>\n' + OUT.join('\n') + '\n</pre>\n') } catch {}

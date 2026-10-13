@@ -17,3 +17,6 @@ jobs:
         env:
           E2E_BASE: https://50gram.begzodbegzodjons.workers.dev
         run: node scripts/diag_broadcast.mjs
+      - name: Natija (step summary)
+        if: always()
+        run: cat /tmp/sum.md 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
