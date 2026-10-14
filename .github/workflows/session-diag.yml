@@ -1,0 +1,56 @@
+name: Sessiya tashxisi v123 (vaqtinchalik)
+on:
+  workflow_dispatch:
+concurrency:
+  group: testlar-zanjiri
+  cancel-in-progress: false
+jobs:
+  sess:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: v123 URUSH-SIMULYATSIYASI (ikki klient ketma-ket kiradi — eski token ruxsati isboti)
+        run: |
+          set -e
+          BASE="https://50gram.uz"
+          UA="Mozilla/5.0 (Linux; Android 13) Chrome/124.0 Mobile Safari/537.36"
+          PH="998900000003"
+          echo "=== 1-KLIENT (APK roli): kirish ==="
+          OA=$(curl -s -A "$UA" -H 'content-type: application/json' -X POST "$BASE/api/auth/otp" -d "{\"phone\":\"$PH\"}")
+          echo "otp1: $(echo "$OA" | head -c 80)"
+          CA=$(echo "$OA" | python3 -c "import sys,json;print(json.load(sys.stdin)['dev_code'])")
+          TA=$(curl -s -A "$UA" -H 'content-type: application/json' -X POST "$BASE/api/auth/verify" -d "{\"phone\":\"+998900000003\",\"code\":\"$CA\"}" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+          echo "tokenA: ${TA:0:25}..."
+          echo "--- 21s kutish (OTP cooldown) ---"
+          sleep 21
+          echo "=== 2-KLIENT (brauzer roli): kirish — sessiya AYLANADI ==="
+          OB=$(curl -s -A "$UA" -H 'content-type: application/json' -X POST "$BASE/api/auth/otp" -d "{\"phone\":\"$PH\"}")
+          CB=$(echo "$OB" | python3 -c "import sys,json;print(json.load(sys.stdin)['dev_code'])")
+          TB=$(curl -s -A "$UA" -H 'content-type: application/json' -X POST "$BASE/api/auth/verify" -d "{\"phone\":\"+998900000003\",\"code\":\"$CB\"}" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+          echo "tokenB: ${TB:0:25}..."
+          echo "=== ISBOT 1: 2-klient kirdi — 1-klient (eski) tokeni HALI ISHLAYDI (5 daq ruxsat) ==="
+          S1=$(curl -s -o /dev/null -w '%{http_code}' -A "$UA" -H "authorization: Bearer $TA" "$BASE/api/me")
+          echo "1-klient /api/me: $S1 (200 kutiladi — v123 ruxsati; bu 401 edi = «Qaytadan kiring» urushi)"
+          [ "$S1" = "200" ] || { echo "FAIL ruxsat"; exit 1; }
+          echo "  ✓ RUXSAT ISHLAYDI — foydalanuvchi qayta kirganda ikkinchi klient uni OLMAYDI"
+          echo "=== ISBOT 2: yangi tokeni tabiiy ishlaydi ==="
+          S2=$(curl -s -o /dev/null -w '%{http_code}' -A "$UA" -H "authorization: Bearer $TB" "$BASE/api/me")
+          echo "2-klient /api/me: $S2 (200 kutiladi)"
+          [ "$S2" = "200" ] || { echo "FAIL yangi sessiya"; exit 1; }
+          echo "  ✓ YANGI SESSIYA TURADI"
+          echo "=== ISBOT 3: WS yo'li ham ruxsatni tan oladi (426=auth OK, 401=auth YO'Q) ==="
+          W1=$(curl -s -o /dev/null -w '%{http_code}' -A "$UA" "$BASE/api/ws?token=$TA")
+          W2=$(curl -s -o /dev/null -w '%{http_code}' -A "$UA" "$BASE/api/ws?token=$TB")
+          echo "WS eski token: $W1 | WS yangi token: $W2 (ikkalasi 426 kutiladi)"
+          [ "$W1" = "426" ] && [ "$W2" = "426" ] || { echo "FAIL WS ruxsat"; exit 1; }
+          echo "  ✓ WS RUXSATI HAM ISHLAYDI"
+          echo "=== ISBOT 4: buzilgan token baribir 401 (xavfsizlik nazorati) ==="
+          S3=$(curl -s -o /dev/null -w '%{http_code}' -A "$UA" -H "authorization: Bearer ${TA}x" "$BASE/api/me")
+          echo "Buzilgan token: $S3 (401 kutiladi)"
+          [ "$S3" = "401" ] || { echo "FAIL xavfsizlik"; exit 1; }
+          echo "  ✓ XAVFSIZLIK SAQLANGAN"
+          echo "=== ISBOT 5: versiya uchligi ==="
+          echo "build: $(curl -s -A "$UA" "$BASE/api/build" | head -c 40)"
+          echo "core: $(curl -s -A "$UA" "$BASE/core.js" | grep -o "__50BUILD = '[^']*'" | head -1)"
+          echo "sw: $(curl -s -A "$UA" "$BASE/sw.js" | grep -o "50gram-v[0-9]*" | head -1)"
+          echo "=== V123 JONLI ISBOT: 5/5 YASHIL ==="
