@@ -44,8 +44,8 @@ console.log('/api/build: ' + JSON.stringify(build.j).slice(0, 100))
 
 console.log('════ 2) PANEL: stats + security ════')
 const pl = await jget('/api/panel/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pass: process.env.ADMIN_PASS }) })
-if (pl.j?.t) {
-  const H = { authorization: 'Bearer ' + pl.j.t }
+if (pl.j?.token || pl.j?.t) {
+  const H = { authorization: 'Bearer ' + (pl.j.token || pl.j.t) }
   const st = await jget('/api/panel/stats', { headers: H })
   const s = st.j || {}
   console.log(`total=${s.total} online(5m)=${s.online} active24=${s.active24} blocked=${s.blocked}`)
