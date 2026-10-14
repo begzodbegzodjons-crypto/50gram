@@ -360,7 +360,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v126"
+const BUILD_V = "v127"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -4028,8 +4028,10 @@ async function admAuth(c: C, need?: string) {
   const aid = Math.floor(+(p.aid) || 0)
   if (aid > 0) {
     const a = await c.db.one("SELECT id, username, role, disabled FROM panel_admins WHERE id=?", [aid]).catch(() => null)
-    if (!a || +a.disabled === 1) fail("Ruxsat yo‘q", 401)
-    c.adm = { aid: +a.id, un: String(a.username || "?"), rl: String(a.role || "moderator") }
+    // v127: PANEL FAQAT EGASI — boshqa roldagi (eski admin) token DARHOL o‘ladi.
+    // Egasi ko‘rsatmasi: «dasturni boshqaruvchisi faqat men o‘zim».
+    if (!a || +a.disabled === 1 || String(a.role || "") !== "egasi") fail("Ruxsat yo‘q", 401)
+    c.adm = { aid: +a.id, un: String(a.username || "?"), rl: String(a.role || "egasi") }
   } else {
     c.adm = { aid: 0, un: "egasi", rl: "egasi" }
   }
@@ -4111,19 +4113,17 @@ async function panelLogin(c: C) {
   await ensureSchema(c.db)
   await panelBootstrap(c.db)
   let aid = 0, rl = "egasi", un = "egasi"
-  if (uname && uname !== "egasi") {
-    const row = await c.db.one("SELECT id, pass_hash, role, disabled, totp_secret FROM panel_admins WHERE username=?", [uname]).catch(() => null)
-    if (!row || +row.disabled === 1 || !(await pbVerify(pass, String(row.pass_hash || "")))) return badTry()
-    if (row.totp_secret && !(await totpCheck(String(row.totp_secret), totp))) fail("Bir martalik kod (TOTP) noto‘g‘ri", 401)
-    aid = +row.id; rl = String(row.role || "moderator"); un = String(row.username)
-  } else {
-    const want = str(c.env.ADMIN_PASS || "Balandtoglar1", 64)
-    if ((await sha256("g50adm:" + pass)) !== (await sha256("g50adm:" + want))) return badTry()
-    const er = await c.db.one("SELECT id, totp_secret, disabled FROM panel_admins WHERE username='egasi'").catch(() => null)
-    if (er && +er.disabled === 1) return badTry()
-    if (er?.totp_secret && !(await totpCheck(String(er.totp_secret), totp))) fail("Bir martalik kod (TOTP) noto‘g‘ri", 401)
-    if (er) aid = +er.id
-  }
+  // v127: PANEL FAQAT EGASI — boshqa admin loginlari BUTUNLAY yopildi (egasi ko‘rsatmasi:
+  // «dasturni boshqaruvchisi faqat men o‘zim — boshqa admin qo‘shish niyatim yo‘q»).
+  // Eski admin hisoblari DB‘da qolsa ham KIRMAYDI; noto‘g‘ri urinish brute-posboniga
+  // yoziladi (12/1soat → 24soat IP-blok). {pass} ESKI formati o‘zgarmagan (CI mos).
+  if (uname && uname !== "egasi") return badTry()
+  const want = str(c.env.ADMIN_PASS || "Balandtoglar1", 64)
+  if ((await sha256("g50adm:" + pass)) !== (await sha256("g50adm:" + want))) return badTry()
+  const er = await c.db.one("SELECT id, totp_secret, disabled FROM panel_admins WHERE username='egasi'").catch(() => null)
+  if (er && +er.disabled === 1) return badTry()
+  if (er?.totp_secret && !(await totpCheck(String(er.totp_secret), totp))) fail("Bir martalik kod (TOTP) noto‘g‘ri", 401)
+  if (er) aid = +er.id
   c.adm = { aid, un, rl }
   if (aid) await c.db.run("UPDATE panel_admins SET last_login_at=?, last_login_ip=? WHERE id=?", [now(), fwIp(c.req).slice(0, 62), aid]).catch(() => {})
   await admLog(c, "panel_kirish", "panel", "Panelga kirildi" + (un === "egasi" ? " (EGASI)" : " (admin: " + un + ")"))
@@ -4821,20 +4821,13 @@ async function panelAdmins(c: C) {
     roles: PANEL_ROLES, now: now(),
   })
 }
-async function panelAdminsAdd(c: C) {
+async function panelAdminsAdd(c: C): Promise<Response> {
   await admAuth(c, "admins")
   await ensureSchema(c.db)
-  const un = str(c.b.u, 32).replace(/^@/, "").replace(/[^a-zA-Z0-9_]/g, "").toLowerCase()
-  const pw = str(c.b.p, 64)
-  const role = String(c.b.role || "moderator")
-  const name = str(c.b.name, 60)
-  if (!un || un === "egasi" || !/^[a-z0-9_]{3,32}$/.test(un)) fail("Login: 3-32 belgi, harf/raqam/_", 400)
-  if (pw.length < 8) fail("Parol kamida 8 belgi", 400)
-  if (!PANEL_ROLES[role] || role === "egasi") fail("Rol noto‘g‘ri", 400)
-  if (await c.db.one("SELECT id FROM panel_admins WHERE username=?", [un]).catch(() => null)) fail("Bu login band", 400)
-  await c.db.run("INSERT INTO panel_admins(username, pass_hash, role, name, created_at) VALUES(?,?,?,?,?)", [un, await pbHash(pw), role, name, now()])
-  await admLog(c, "admin_qoshish", "admin:" + un, "YANGI ADMIN yaratildi: " + un + " (rol: " + role + (name ? ", " + name : "") + ")")
-  return json({ ok: true, un, role })
+  // v127: BOSHQA ADMIN QO‘SHISH BUTUNLAY YO‘Q — panel faqat dastur egasiga tegishli.
+  // Barcha boshqaruv egada; guruh/kanal adminlari panelga kirmaydi (o‘z chatini
+  // ilova ichidan boshqaradi — gk_log nazorati). Eski ko‘p-admin tizimi yopildi.
+  return fail("Boshqa admin qo‘shish o‘chirilgan — panel faqat dastur egasiga tegishli (v127)", 403)
 }
 async function panelAdminsSet(c: C) {
   await admAuth(c, "admins")
@@ -5663,7 +5656,6 @@ tr:hover td{background:#171a1f}
     <button data-t="tk">Chiptalar</button>
     <button data-t="br">Xabar yuborish</button>
     <button data-t="sz">Sozlamalar</button>
-    <button data-t="ad">Adminlar</button>
     <button data-t="sc">Xavfsizlik</button>
   </div>
   <section id="st">
@@ -5724,14 +5716,11 @@ tr:hover td{background:#171a1f}
     <p class="note">Umumiy dastur sozlamalari. O‘zgartirish jurnali <b>Xavfsizlik</b> bo‘limida ko‘rinadi.</p>
     <div id="szl"></div>
   </section>
-  <!-- v126: ADMINLAR (1-modul, faqat egasi) -->
+  <!-- v127: ADMINLAR BO'LIMI YO'Q — panel FAQAT EGASI (boshqa admin tizimi butunlay
+       o'chirilgan: egasi «barchasini o'zim bajaraman»). Guruh/kanal adminlari panelga
+       KIRMAYDI — o'z chatini ilova ichidan boshqaradi, harakati gk_log'da ko'rinadi. -->
   <section id="ad" class="hidden">
-    <p class="note">Rollar: <b>egasi</b> — hamma narsa; <b>bosh_admin</b> — egasidan keyingi; <b>moderator</b> — blok/moderatsiya; <b>support</b> — murojaat/chipta; <b>moliya</b> — to‘lov/premium. Har amal audit-logga yoziladi. Egasi paroli server sozlamasida — o‘zgartirish uchun dasturchi bilan bog‘laning.</p>
-    <h3>Yangi admin qo‘shish</h3>
-    <div class="bar2"><input id="adu" placeholder="Login (3-32)" style="max-width:160px"><input id="adp" type="password" placeholder="Parol (8+)" style="max-width:170px"><select id="adr"><option value="moderator">Moderator</option><option value="support">Support</option><option value="bosh_admin">Bosh admin</option><option value="moliya">Moliya</option></select><input id="adn" placeholder="Ism" style="max-width:140px"><button id="adadd">Qo‘shish</button></div>
-    <div class="res" id="adres"></div>
-    <h3>Adminlar ro‘yxati</h3>
-    <div id="adl"></div>
+    <p class="note">🔒 Bu panel FAQAT dastur egasiga tegishli. Boshqa admin qo‘shish imkoni butunlay o‘chirilgan (v127) — barcha boshqaruv egada, guruh/kanal adminlari esa o‘z chatini ilova ichidan boshqaradi.</p>
   </section>
   <section id="us" class="hidden">
     <div class="bar2"><input id="q" placeholder="Ism, telefon yoki @username"><button id="qb">Qidirish</button></div>
@@ -6340,11 +6329,10 @@ function showApp(){
     var m=r.j;if(!m||!m.rl)return
     PERM=m.perms||[];IS_EGASI=!!m.egasi
     $('whoami').innerHTML='<b>'+esc(m.un)+'</b> · '+esc(m.name)
-    var NEED={rp:'reports',an:'analitika',md:'media',mn:'payments',tk:'tickets',sz:'settings',ad:'admins'}
+    var NEED={rp:'reports',an:'analitika',md:'media',mn:'payments',tk:'tickets',sz:'settings'}
     var bs=document.querySelectorAll('.tabs button')
     for(var i=0;i<bs.length;i++){var t2=bs[i].getAttribute('data-t')
       if(NEED[t2]&&!IS_EGASI&&PERM.indexOf(NEED[t2])<0)bs[i].style.display='none'}
-    if(IS_EGASI){var a=document.querySelector('.tabs button[data-t=ad]');if(a)a.style.display=''}
   })
   loadStats()
 }
@@ -6367,7 +6355,6 @@ function switchTab(t){
   if(t==='mn')loadMoliya()
   if(t==='tk')loadTickets()
   if(t==='sz')loadSoz()
-  if(t==='ad')loadAdmins()
 }
 // ============ v126 YANGI BO'LIMLAR ============
 function loadReports(){
@@ -6498,36 +6485,7 @@ function loadSoz(){
         else alert((r.j&&r.j.error)||'Xatolik')})}
   })
 }
-function loadAdmins(){
-  api('admins').then(function(r){
-    if(authFail(r))return
-    var j=r.j;if(!j||!j.items)return
-    var h='';for(var i=0;i<j.items.length;i++){var x=j.items[i]
-      var isE=x.role==='egasi'
-      h+='<div class="u"><div class="in">'
-        +'<div class="nm">'+esc(x.un)+' <span class="tag" style="background:'+(isE?'#2b6cff':'#23262d')+'">'+esc(j.roles[x.role]||x.role)+'</span>'+(x.off?'<span class="tag">O‘CHIRILGAN</span>':'')+(x.mfa?'<span class="tag" style="background:#1f3a2a">MFA ✓</span>':'')+(x.name?' · '+esc(x.name):'')+'</div>'
-        +'<div class="st">Yaratilgan: '+dt(x.cr)+' · Oxirgi kirish: '+(x.ll?dt(x.ll)+' ('+esc(x.ip||'?')+')':'hech qachon')+'</div></div>'
-        +(isE?'<span class="act">EGASI</span>':'<div>'
-          +'<select data-adrole="'+x.id+'"><option value="moderator"'+(x.role==='moderator'?' selected':'')+'>Moderator</option><option value="support"'+(x.role==='support'?' selected':'')+'>Support</option><option value="bosh_admin"'+(x.role==='bosh_admin'?' selected':'')+'>Bosh admin</option><option value="moliya"'+(x.role==='moliya'?' selected':'')+'>Moliya</option></select> '
-          +(x.off?'<button class="sec" data-adon="'+x.id+'">Yoqish</button>':'<button class="warn" data-adof="'+x.id+'">O‘chirish</button> ')
-          +'<button class="sec" data-adpw="'+x.id+'">Parol</button> <button class="warn" data-addel="'+x.id+'">O‘CHIRISH</button></div>')
-        +'</div>'
-    }
-    $('adl').innerHTML=h||'<p class="note">Admin yo‘q</p>'
-    var bind=function(attr,fn){var els=$('adl').querySelectorAll('[data-'+attr+']');for(var i=0;i<els.length;i++)els[i].onclick=fn}
-    bind('adrole',null)
-    var rs=$('adl').querySelectorAll('[data-adrole]')
-    for(var i=0;i<rs.length;i++)rs[i].onchange=function(){
-      api('admins/set','POST',{id:+(this.getAttribute('data-adrole')),role:this.value}).then(function(r){if(authFail(r))return;if(r.j&&r.j.ok)loadAdmins();else alert((r.j&&r.j.error)||'Xatolik')})}
-    bind('adof',function(){var id=+(this.getAttribute('data-adof'));if(!confirm('Bu admin VAQTINCHA o‘chiriladi (kirish yopiladi). Davom etamizmi?'))return
-      api('admins/set','POST',{id:id,off:true}).then(function(r){if(authFail(r))return;loadAdmins()})})
-    bind('adon',function(){var id=+(this.getAttribute('data-adon'));api('admins/set','POST',{id:id,off:false}).then(function(r){if(authFail(r))return;loadAdmins()})})
-    bind('adpw',function(){var id=+(this.getAttribute('data-adpw'));var v=prompt('Yangi parol (kamida 8 belgi):');if(!v)return
-      api('admins/set','POST',{id:id,p:v}).then(function(r){if(authFail(r))return;alert(r.j&&r.j.ok?'✓ Parol yangilandi':(r.j&&r.j.error)||'Xatolik')})})
-    bind('addel',function(){var id=+(this.getAttribute('data-addel'));if(!confirm('Admin BUTUNLAY O‘CHIRILADI (tokeni ham o‘ladi). Davom etamizmi?'))return
-      api('admins/del','POST',{id:id}).then(function(r){if(authFail(r))return;if(r.j&&r.j.ok)loadAdmins();else alert((r.j&&r.j.error)||'Xatolik')})})
-  })
-}
+// v127: loadAdmins O'CHIRILDI — panel faqat egasi, boshqa admin boshqaruvi yo'q
 // 12-modul: MFA boshqaruv oynasi (Xavfsizlik bo'limida)
 function loadMfa(){
   api('mfa').then(function(r){
@@ -6580,12 +6538,6 @@ $('tkadd').onclick=function(){
   var s=$('tks').value.trim();if(!s){alert('Mavzu yozing');return}
   api('tickets/add','POST',{uid:Math.floor(+($('tkuid').value||0)||0),subject:s,prio:$('tkp').value}).then(function(r){if(authFail(r))return
     if(r.j&&r.j.ok){$('tks').value='';loadTickets()}else alert((r.j&&r.j.error)||'Xatolik')})}
-$('adadd').onclick=function(){
-  var u=$('adu').value.trim(),p=$('adp').value
-  if(!u||p.length<8){alert('Login va parol (8+) yozing');return}
-  api('admins/add','POST',{u:u,p:p,role:$('adr').value,name:$('adn').value.trim()}).then(function(r){if(authFail(r))return
-    $('adres').className='res';$('adres').textContent=r.j&&r.j.ok?'✓ Admin qo‘shildi':((r.j&&r.j.error)||'Xatolik')
-    if(r.j&&r.j.ok){$('adu').value='';$('adp').value='';$('adn').value='';loadAdmins()}})}
 $('pv').onclick=function(){if(page>1)loadUsers(page-1)}
 $('nx').onclick=function(){if(page<pages)loadUsers(page+1)}
 $('cqb').onclick=function(){loadChats(1)}
@@ -6656,7 +6608,7 @@ $('sb').onclick=async function(){
     })
   }catch(e){b.disabled=false;$('bres').className='res err';$('bres').textContent='Rasm tayyorlanmadi: '+(e&&e.message||e)}
 }
-$('rf').onclick=function(){loadStats();if(cur==='us')loadUsers();if(cur==='in')loadInbox();if(cur==='ch')loadChats();if(cur==='sc'){loadSecurity();loadMfa()};if(cur==='rp')loadReports();if(cur==='an')loadAnalitika();if(cur==='md')loadMedia();if(cur==='mn')loadMoliya();if(cur==='tk')loadTickets();if(cur==='sz')loadSoz();if(cur==='ad')loadAdmins()}
+$('rf').onclick=function(){loadStats();if(cur==='us')loadUsers();if(cur==='in')loadInbox();if(cur==='ch')loadChats();if(cur==='sc'){loadSecurity();loadMfa()};if(cur==='rp')loadReports();if(cur==='an')loadAnalitika();if(cur==='md')loadMedia();if(cur==='mn')loadMoliya();if(cur==='tk')loadTickets();if(cur==='sz')loadSoz()}
 $('out').onclick=logout
 $('lb').onclick=doLogin
 $('pw').onkeydown=function(e){if(e.key==='Enter')doLogin()}

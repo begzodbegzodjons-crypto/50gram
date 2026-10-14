@@ -325,6 +325,16 @@ function applyAcc(i) {
   localStorage.setItem('g50_acc', i)
 }
 const LVL_COLORS = [['#d3f9d8','#40c057'],['#a5d8ff','#4dabf7'],['#ffc078','#ff922b'],['#e9ecef','#868e96'],['#ffe066','#f59f00'],['#d0bfff','#7048e8'],['#96f2d7','#0ca678'],['#fcc2d7','#e64980']]
+// v127: AKKAUNT ICHIDA AVTOMATIK BOSHQARUV — kanal/guruppa ochgan HAR foydalanuvchi
+// o‘zi ochgan chatining egasi-admin (server: chat_members role='owner'). Ushbu bo‘lim
+// akkauntda AVTOMATIK paydo bo‘ladi — kanal/guruh yaratilganda o‘zi ko‘rinadi:
+// to‘liq admin funksiyalar (a’zolar, so‘rovlar, tahrir, statistika, ruxsatlar, havola).
+function myAdminRows() {
+  const own = [...S.chats.values()].filter((c) => c.type !== 'direct' && c.joined !== false && (c.role === 'owner' || c.role === 'admin'))
+    .sort((x, y) => ((x.role === 'owner' ? 0 : 1) - (y.role === 'owner' ? 0 : 1)) || ((y.member_count || 0) - (x.member_count || 0)))
+  if (!own.length) return ''
+  return '<div class="sec">👑 Mening boshqaruvim</div>' + rowsHTML(own.map((c) => row('adm-' + c.id, c.type === 'channel' ? '📢' : '👥', esc(c.title), (c.member_count || 0) + ' ' + (c.type === 'channel' ? 'obunachi' : 'a‘zo') + ' · boshqarish')))
+}
 async function renderMe() {
   const u = S.me
   if (!u) return
@@ -338,6 +348,7 @@ async function renderMe() {
   </div>
   <div class="sec">Tezkor amallar</div>
   ${rowsHTML([row('story', '➕', 'Istoriya joylash', '24 soatda ko‘rinadi'), row('live', '🔴', 'Jonli efir boshlash', 'Tomoshabinlar sovg‘a bilan ball beradi'), row('saved', '🔖', 'Saqlangan xabarlar'), row('share', '🔗', 'Profilni ulashish')])}
+  ${myAdminRows()}
   <div class="sec">Sozlamalar</div>
   ${rowsHTML([
     prow('acc', '👤', '#2E7BFF', '#7C5CFF', 'Akkaunt', 'Profil, ism, username, bio'),
@@ -367,6 +378,8 @@ $('melist').addEventListener('click', async (e) => {
   if (e.target.closest('.bigav') && S.me && S.me.avatar_ver) { e.stopPropagation(); return viewPhoto(avSrc(S.me, false), uname(S.me), S.me.username ? '@' + S.me.username : esc(S.me.phone || '')) }
   const it = e.target.closest('[data-a],[data-pg]'); if (!it) return
   const a = it.dataset.a || it.dataset.pg
+  // v127: «Mening boshqaruvim» — o‘z kanal/guruhining to‘liq admin panelini ochadi
+  if (a && a.startsWith('adm-')) { const id = +a.slice(4); if (S.chats.get(id)) return openChatInfo(id) }
   if (a === 'acc') pgAccount()
   if (a === 'notif') pgNotifications()
   if (a === 'priv') pgPrivacy()

@@ -900,3 +900,20 @@ Stage Summary:
 - Panel: 50gram.uz/?adminpanel — egasi {pass} bilan, adminlar login+parol(+TOTP) bilan. web/ papkada iz YO'Q (0 bayt).
 - Keyingi bosqich (2-bosqich): klient "Shikoyat" tugmasi, premium belgilari klientda, Payme/Click/Uzum webhook, NSFW-avtoskaner, MFA QR-kod, backup eksport tugmasi.
 - Residual: panel126-diag.yml vaqtinchalik (keyin o'chiriladi); TOTP QR rasmsiz (matn kalit — 2-bosqichda QR); media_black yuklash-nazorati 2-bosqichda ulanadi.
+
+---
+Task ID: 73
+Agent: Super Z (asosiy agent)
+Task: v127 — «PANEL FAQAT EGASI + akkaunt ichida avtomatik boshqaruv». Foydalanuvchi: "kanal va gruppa ochgan har bir foydalanuvchi o'zi ochgan kanali va gruppasiga admin — dasturni boshqaruvchisi faqat men o'zim, boshqa dasturga umuman admin qo'shish niyatim yo'q, barchasini o'zim bajaraman — har bir foydalanuvchi kanal gruppa ochsa o'zi admin funksiyalarini akkauntini ichida avtomatik boshqarish funksiyasini ber"
+
+Work Log:
+- v127-1 PANEL FAQAT EGASI (worker): panelLogin — boshqa admin loginlari BUTUNLAY yopildi (uname!='egasi' → badTry, brute-posbon hisoblanadi: 12/1soat → 24soat IP-blok); admAuth — roli 'egasi' bo'lmagan panel-token DARHOL 401 (eski admin tokenlari bir zumda o'ladi); panelAdminsAdd — DOIM 403 «Boshqa admin qo'shish o'chirilgan» (DB'ga yangi admin yozish mumkin emas — INSERT yo'q); Panel UI — «Adminlar» tab O'CHIRILGAN, loadAdmins/adadd toza olib tashlandi (qoldiq-referens 0), section #ad — egasi eslatmasi. Egasi {pass} logini va TOTP/MFA O'ZGARMAGAN (egasi+CI oqimi mos). panelAdmins Set/Del egada qoldi (eski qatorlarni tozalash uchun).
+- v127-2 AKKAUNT ICHIDA AVTOMATIK BOSHQARUV (klient): server allaqachon yaratuvchini role='owner' qilar edi (INSERT chat_members ... 'owner') — endi klient «Men» ekranida «👑 Mening boshqaruvim» bo'limi AVTOMATIK paydo bo'ladi (myAdminRows: role owner/admin chatlar, egasi birinchi, a'zo soni bilan; hech narsa yaratmagan foydalanuvchida umuman ko'rinmaydi — yaratilganda o'zi chiqadi). Bosilsa openChatInfo — to'liq admin funksiyalar (a'zolar, qo'shilish so'rovlari, tahrir, e'lon, statistika, turi, ruxsatlar, sozlamalar, havola-yangilash, tozalash). Guruh/kanal adminlarining harakati baribir gk_log'ga yoziladi (panel nazorati saqlangan).
+- VERSIYA UCHLIGI: BUILD_V="v127" / __50BUILD='v127' / V='50gram-v127' — sinxron. SCHEMA_V=126 qoldi (yangi migratsiya YO'Q — 0 bayt sxema o'zgarishi, subrequest-byudjet xavfsiz).
+- SINOV: scripts/test_v127_static.js 54/54 YASHIL (owner-only login/admAuth/403/tab-yo'q + myAdminRows + versiya uchligi + v126/v125/v124/v123/v122 muhrlari + node --check ×10); tsc 14 = BAZAVIY (0 yangi — panelAdminsAdd Promise<Response>); wrangler dry-run OK.
+
+Stage Summary:
+- Panel endi FAQAT EGANING — boshqa admin qo'shish imkoni kod darajasida YO'Q (403), eski admin tokenlari darhol o'ladi, «Adminlar» bo'limi olib tashlandi.
+- Kanal/guruppa ochgan HAR foydalanuvchi o'z chatining to'liq admini — akkaunti ichida «Mening boshqaruvim» AVTOMATIK.
+- Barcha boshqa funksiyalar tegilmagan: SMS_MODE/TURN/v122-301-yo'q/v123/v124/v125/v126 muhrlari saqlangan (statik testlar isbotlaydi).
+- Versiya: v127 (worker/core/sw sinxron). Sayt: https://50gram.uz
