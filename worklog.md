@@ -871,3 +871,32 @@ Stage Summary:
 - «Avtorizatsiya kerak» serverda UMUMIY EMAS (jonli isbot): login-oqimi 2 domenda ham toza. Qolgan holatlar qurilma-local: eski o'lik token bilan bir marta boot-401 → kirish → tuzaladi; yoki eganing o'z ikkinchi qurilmasi faol bo'lsa 409 ekranida «Bu mening raqamim» (bir marta) kerak.
 - Foydalanuvchilarga: 50gram.uz/50gram.apk dan yangi versiyani o'rnatishlarini ayting (eski ustiga o'rnatiladi, chatlar/tokenlar saqlanadi), keyin BIR MARTA kirsalar yetarli.
 - Residual: session-diag.yml/kick-diag.yml/login-diag.yml vaqtinchalik tashxislar (keyin o'chirladi); scripts/build_vc13.sh repoda — kelgusi APK-buildlar uchun tayyor (Android SDK'siz ham build ishlaydi).
+
+---
+Task ID: 72
+Agent: Super Z (asosiy agent)
+Task: v126 «BOSHQARUV MARKAZI» — foydalanuvchi: "juda ham a'lo ishlamoqda ... keyinchalik dastur kodlari o'zgarib ketmasdan qimirlamaydigan qilib muxrlab mahkam qilib ishlab ... ximoyani kuchaytir faqat biz dastur egalari dasturni o'zgartirishimiz mumkin ... 50gram.uz messenjeri uchun admin panel loyihalab ber" (14 modul spec + haker-himoyasi)
+
+Work Log:
+- DIZAYN: 14 modulli spec (rollar/dashboard/foydalanuvchilar/guruh-kanallar/gk-nazorat/moderatsiya/media/shikoyatlar/analitika/to'lovlar/support/xavfsizlik/sozlamalar/loglar) mavjud maxfiy panel (v104-106) USTIGA qurildi — web/ papkaga 0 bayt (panel worker xotirasidan, /?adminpanel, iz yo'q).
+- 1-MODUL ROLLAR: panel_admins jadvali (PBKDF2-SHA256 60k parollar), 5 rol: egasi/bosh_admin/moderator/support/moliya + ROLE_PERMS matritsasi (permOk). admAuth(c, ruxsat?) — token'da aid bo'lsa DB'dan tirikligi tekshiriladi (o'chirilgan adminning tokeni DARHOL o'ladi); eski adm:1 tokenlar egasi sifatida (12s o'tish davri). Egasi paroli env.ADMIN_PASS master — DB'ga bog'lanmaydi (qulflanish YO'Q). Brute-posbon saqlangan (12/1soat → 24soat IP-blok).
+- 12-MODUL MFA: TOTP (RFC 6238) WebCrypto HMAC-SHA1 + b32 enc/dec, ±30s posboni. setup→kod→on→off to'liq davra jonli isbotlandi (script TOTP'ni o'zi hisoblab Google Authenticator o'rnini bajaradi).
+- TIZIM DARVOZALARI (13-modul): app_settings + setGet (izolyat-kesh 30s — oddiy oqim 0 xarajat): tex_xizmat (503, confirm=TEXXIZMAT), blokirovka (503, confirm=FAVQULODDA), registratsiya-yopiq (authOtp'da yangi raqamga 403), max_msg_len (sendMessage), panel_ip (admAuth+login IP-oq ro'yxat).
+- 3-MODUL FOYDALANUVCHILAR: premium/verified/muted_until/shadow/status ustunlari; panelUserStatus, majburiy-logout (v124 force-semantikasi: sess+devs tozalanadi), username berish/bo'shatish (bandlik tekshiruvi), yumshoq o'chirish/tiklash (status=deleted+blocked, tiklash mumkin), admin izohlari (adm_notes), JSON eksport (attachment). JIM DARVOZA: muted foydalanuvchi xabar/media POST'da 403, o'qish ODDIY (middleware, 1 SELECT ustun qo'shildi).
+- 8-MODUL SHIKOYATLAR: reports jadvali (yangi|jarayonda|yechildi|rad), /report (auth'li foydalanuvchi, 10/soat posbon, o'ziga-shikoyat 400), /panel/reports + set (maqsad-nomlari bilan: user/chat/msg), dashboard'da eng-ko'p-shikoyat-qilinganlar.
+- 5-MODUL GK-NAZORAT: gk_log jadvali — guruh/kanal ADMINlarining harakati (memberAction kick/ban/admin, addMembers, patchChat sozlamalar) kim/qachon/nima bilan yoziladi (egasi o'zi qilsa yozilmaydi); /panel/gklog.
+- YANGI BO'LIMLAR: dash (DAU/WAU/MAU + tex holat banneri), analitika (14 kunlik o'sish/xabarlar, D1/D7/D30 saqlanish, regionlar, xatolar), media (statistika + media_black SHA-256 qora ro'yxat), moliya (payments + premium qo'lda), chiptalar (tickets), sozlamalar (xavflilarda ikki-darajali tasdiq), adminlar (CRUD, faqat egasi).
+- AUDIT: adm_log +actor +ip ustunlari — har amal KIM/IP bilan; panelLog aktor qaytaradi; cleanup retensiya (gk_log 90kun, yopilgan shikoyatlar 180kun).
+- UI: 13 bo'lim tab, login'ga login+TOTP maydonlari, rol-gating (perms bo'yicha tab yashirish), foydalanuvchi modalida boshqaruv-amallari bloki, MFA oynasi (kalit ko'rsatish + kod tasdiqlash).
+- ILDIZ MUAMMO (jonli smoke'da topildi): «FAIL otp: Server xatosi» — bepul-reja 50-SUBREQUEST byudjeti; 22 yangi sxema-bayonot eski «hammasini qayta urinish» ensureSchema bilan sovuq izolyatda 57 so'rov yeyib, haqiqiy so'rovga joy qolmasdi. YECHIM (v126-2): schema_ver belgi-jadvali (migratsiya yakunida yoziladi → keyingi izolyatlar 1 probe) + information_schema probe (COLUMNS+STATISTICS) bilan FAQAT yetishmayotgan bayonotlar + yarim-qolgan migratsiya o'z-o'zidan to'planadi (bad=0 bo'lsa belgi). Kelgusi deploylar ham faqat o'z bayonotlarini bajaradi.
+- VERSIYA UCHLIGI: BUILD_V="v126" / __50BUILD='v126' / V='50gram-v126' — sinxron. SMS_MODE/TURN/v122-301-muhri/v123/v124/v125 MUHRLARI TEGILMAGAN (test_v126_static.js tasdiqlaydi).
+- SINOV: scripts/test_v126_static.js 68/68 YASHIL; tsc 14 = BAZAVIY (0 yangi); wrangler dry-run OK.
+- CI (09ecf24) — 9/9 YASHIL qat'iy ketma-ket rerun: Deploy ✓ / CF Deploy ✓ / Smoke ✓ (byudjet-tuzatishdan keyin) / MUHR ✓ / XAVFSIZLIK ✓ / DATA ✓ / MEDIA ✓ / Qo'ng'iroq-MEDIA ✓ / Jurnal ✓.
+- JONLI ISBOT (panel-check E2E: yashil — eski {pass} login mos; panel126_diag.mjs 41/41): eski login 200 ✓; me egasi+perms ✓; dash total=737 ✓; MFA to'liq davra (setup→kod→on→kod'siz-login-401→kod-bilan-login-200→off) ✓; admin CRUD (qo'shish→login→moderator 403-Adminlarga→o'chirish→kira-olmaydi) ✓; sozlamalar posbonlari (tex_xizmat tasdiqsiz 400, noma'lum kalit 400) ✓; 6 yangi bo'lim 200 ✓; /report + panelda ko'rish + yechildi ✓; o'ziga-shikoyat 400 ✓; audit aktor=egasi ✓.
+
+Stage Summary:
+- 50gram.uz endi TO'LIQ boshqaruv markaziga ega: ko'p-admin rollar (PBKDF2), MFA/TOTP, shikoyatlar, tizim-sozlamalari (tex-xizmat/favqulodda/registratsiya darvozalari), moliya/chipta/media qora-ro'yxat, guruh-adminlari nazorat-jurnali — hamma amal AKTOR+IP audit bilan.
+- XAKER-HIMOYA kuchaytirildi: sxema-byudjet-qorovuli (50-subrequest), xavfli-amallar tasdiq-so'zi bilan, disabled-admin tokeni darhol o'ladi, IP-oq ro'yxat (panel), o'ziga-shikoyat posboni. Mavjud 7-qatlam firewall + v125 zombi-muhrlar o'zgarmagan.
+- Panel: 50gram.uz/?adminpanel — egasi {pass} bilan, adminlar login+parol(+TOTP) bilan. web/ papkada iz YO'Q (0 bayt).
+- Keyingi bosqich (2-bosqich): klient "Shikoyat" tugmasi, premium belgilari klientda, Payme/Click/Uzum webhook, NSFW-avtoskaner, MFA QR-kod, backup eksport tugmasi.
+- Residual: panel126-diag.yml vaqtinchalik (keyin o'chiriladi); TOTP QR rasmsiz (matn kalit — 2-bosqichda QR); media_black yuklash-nazorati 2-bosqichda ulanadi.
