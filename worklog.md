@@ -917,3 +917,7 @@ Stage Summary:
 - Kanal/guruppa ochgan HAR foydalanuvchi o'z chatining to'liq admini — akkaunti ichida «Mening boshqaruvim» AVTOMATIK.
 - Barcha boshqa funksiyalar tegilmagan: SMS_MODE/TURN/v122-301-yo'q/v123/v124/v125/v126 muhrlari saqlangan (statik testlar isbotlaydi).
 - Versiya: v127 (worker/core/sw sinxron). Sayt: https://50gram.uz
+- CI (v127 kodi, e5a4ef7) — 9/9 YASHIL qat'iy ketma-ket rerun: Deploy ✓ / CF Deploy ✓ / Smoke ✓ / MUHR (3 ketma-ket) ✓ / Qo'ng'iroq-MEDIA ✓ / MEDIA ✓ / XAVFSIZLIK ✓ / DATA ✓ / Jurnal ✓.
+- Tashxis push (ac95591) zanjiri — 10/10 YASHIL (+ Panel v127 tashxis).
+- JONLI ISBOT (panel127_diag.mjs, run 38570489835, 11/11): egasi {pass} login 200 (rl=egasi) ✓; me egasi=true perms=[*] ✓; BOSHQA ADMIN QO'SHISH → 403 «Boshqa admin qo'shish o'chirilgan — panel faqat dastur egasiga tegishli (v127)» ✓ (ASOSIY ISBOT); begona admin logini → 401 ✓; dash 200 (total=739) ✓; admins ro'yxati — barcha faol satrlar egasi ✓; jonli versiya v127 ✓. Sandbox'dan: core.js __50BUILD='v127' ✓, sw.js 50gram-v127 ✓, workers.dev 200 redirect:[] (v122 muhri) ✓; /api/build|login «Not found» = ma'lum SEC-DO sandbox bloki (CI'dan yashil).
+- Dizayn-izoh: 14 modul spektdan 1-modul soddalashtirildi — ko'p-admin rollar (bosh_admin/moderator/support/moliya) KODDAN yopildi; rol-infrastruktura (PANEL_ROLES/permOk) kelajak uchun saqlangan lekin faqat 'egasi' roli ishlaydi. 2-bosqich quyilari o'zgarmagan.
