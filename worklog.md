@@ -763,3 +763,22 @@ Stage Summary:
 - O'RGIMCHAK TO'RI 2x TEZ DAVOLANADI (cron 15daq + recheck 10daq) va har faylga 12 P2P manba — «yo'qolib qolmasin» kafolati mustahkam (15-20 nusxa muhri + o'chmas tarix).
 - MEDIA TEZLIGI: yuklab olish 3x parallel + immutable cache — xabar/ovoz/dumaloq video tez ochiladi, qayta ochilishlar 0 tarmoq.
 - CI endi 50gram.uz ni tekshiradi (haqiqiy domenni). Versiya: v120 (worker/core/sw sinxron). 11/11 CI yashil. Sayt LIVE: https://50gram.uz
+
+---
+Task ID: 67
+Agent: Super Z (asosiy agent)
+Task: v121 — SHOSHILINCH: APK ochilganda brauzerga o'tib ketishi (700+ foydalanuvchi ta'sir ko'rgan). Foydalanuvchi: "apk dasturni ochsam brauzerga o'tib ketmoqda apkni ilovani ochganda ilovada ishlamay brauzerga o'tib ketmoqda ... ilova ishlasin brauzerga o'tib ketmaydigan qilib ishla tez tuzat"
+
+Work Log:
+- ILDIZ SABAB (aniqlandi): v120 workers.dev-yashiruvchi (301) + APK'da IKKITA eski fakt to'qnashdi — ① MainActivity URL = https://50gram.begzodbegzodjons.workers.dev/ (APK 2024-yildan beri shu manzilni yuklaydi), ② shouldOverrideUrlLoading HOST ga teng bo'lmagan domenni ACTION_VIEW bilan TASHQI BRAUZERGA otadi. v120 301: workers.dev → 50gram.uz → WebView redirect'ni brauzerga uzatdi → ilova ochilishi bilan brauzer ochilardi (600-700+ o'rnatilgan versionCode 12 APK'larda).
+- v121-1 WORKER TUZATISH (APK-ISTISNOSI): workers.dev 301 shartiga `!/50gramapp/i.test(req.headers.get("user-agent") || "")` qo'shildi — APK WebView UA imzosi (50GramApp) kelganda kontent TO'G'RIDAN-TO'G'RI workers.dev'da beriladi (redirect yo'q → brauzerga otish yo'q). Brauzerlar avvalgidek 301 → 50gram.uz (yashiruvchi funksiyasi TO'LIQ SAQLANDI — smoke'da doimiy qorovul yashil).
+- v121-2 APK MANBALARI (navbatdagi build uchun tayyor, hozirgi APK qayta qurilmadi — shart emas): MainActivity URL=50gram.uz + HOST/HOST2 (ikkala domen WebView ichida ochiladi), UA 50GramApp/3.3, versionCode 13 / versionName 3.3, KeepAliveService API_BASE=50gram.uz/api. Android SDK bu muhitda yo'q (APK tarixan tashqarida qurilgan — 763312 bayt muhri) — worker-tuzatish 700+ mavjud APK'ni YANGILASHSIZ tuzatadi.
+- JONLI ISBOT (deploy'dan keyin, curl): APK-UA workers.dev → 200 (redirect YO'Q) ✓; brauzer-UA workers.dev → 301 https://50gram.uz/ ✓; 50gram.uz → 200 ✓; core.js live __50BUILD='v121' ✓; sw.js live 50gram-v121 ✓. /api/build sandbox'dan "Not found" = ma'lum SEC-DO sandbox bloki (CI runner'dan yashil).
+- SINOV: scripts/test_v121_static.js 53/53 YASHIL (APK-istisnos guard ICHIDA, versiya uchligi v121, APK manbalari, v120 M1/M2 muhrlari, v119 repair-pass/reyting-yo'q/dock-SVG, SMS_MODE="app"/FW_UA_OK/ADM_ID/inbox/12MB/MadinaNeural/v117-https-qo'riqchi/PDF/TOP-efir, node --check ×10); tsc 14 xato = BAZAVIY (stash-sinov bilan isbotlandi — 0 yangi); wrangler dry-run OK (373.59 KiB).
+- CI (7411f2b) — 11/11 YASHIL: Deploy ✓×2 / Smoke ✓ / MUHR (3 ketma-ket) ✓ / Qo'ng'iroq MEDIA ✓ / MEDIA ✓ / XAVFSIZLIK ✓ / DATA ✓ / Jurnal ✓ (bekor qilinganlar qat'iy ketma-ket rerun) / Panel E2E ✓ (dispatch) / Domen tekshir ✓ (dispatch). Foydalanuvchi talabi bajarildi: Eskiz SMS 0 bayt tegilmadi; TURN bepul holatda (openrelay, xarid YO'Q).
+
+Stage Summary:
+- 700+ O'RNATILGAN APK ENDI ISHLAYDI: ilova ochiladi → ilova ICHIDA ishlaydi → brauzerga otmaydi. Foydalanuvchilarga aytish: "hech narsa o'rnatmang — ilovani yopib qayta oching, o'zi tuzatildi" (server-tuzatish, ~1 daqiqada hammaga yetdi).
+- v120 workers.dev-yashiruvchi brauzerlar uchun o'zgarmagan (301 → 50gram.uz).
+- Navbatdagi APK build'iga manbalar tayyor (50gram.uz asosiy, versionCode 13) — Android SDK'li muhitda quriladi.
+- Versiya: v121 (worker/core/sw sinxron). 11/11 CI yashil. Sayt LIVE: https://50gram.uz
