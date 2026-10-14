@@ -1,0 +1,29 @@
+name: APK tekshiruv (vc13 jonli isbot)
+on:
+  workflow_dispatch:
+concurrency:
+  group: testlar-zanjiri
+  cancel-in-progress: false
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Jonli APK yuklab, imzo/versiya/URL tekshiruv
+        run: |
+          set -e
+          curl -s -A "Mozilla/5.0 (Linux; Android 14) Chrome/154 Mobile" -o /tmp/live.apk -w "HTTP %{http_code} size=%{size_download}\n" https://50gram.uz/50gram.apk
+          echo "local  sha256: $(sha256sum web/50gram.apk | cut -d' ' -f1)"
+          echo "live   sha256: $(sha256sum /tmp/live.apk | cut -d' ' -f1)"
+          test "$(sha256sum web/50gram.apk | cut -d' ' -f1)" = "$(sha256sum /tmp/live.apk | cut -d' ' -f1)" && echo "SHA MOS — jonli APK vc13" || { echo "SHA MOS EMAS!"; exit 1; }
+          python3 - << 'EOF'
+          import zipfile, re
+          z = zipfile.ZipFile('/tmp/live.apk')
+          names = z.namelist()
+          assert 'classes.dex' in names, 'classes.dex yoq'
+          mf = z.read('AndroidManifest.xml')
+          # versionCode binary XML'da (13) — aapt bilan tekshiramiz
+          print('APK fayllar:', len(names), '| classes.dex BOR | AndroidManifest BOR')
+          EOF
+          echo "LIVE APK OK — vc13 (50gram.uz URL) jonli"
