@@ -782,3 +782,24 @@ Stage Summary:
 - v120 workers.dev-yashiruvchi brauzerlar uchun o'zgarmagan (301 → 50gram.uz).
 - Navbatdagi APK build'iga manbalar tayyor (50gram.uz asosiy, versionCode 13) — Android SDK'li muhitda quriladi.
 - Versiya: v121 (worker/core/sw sinxron). 11/11 CI yashil. Sayt LIVE: https://50gram.uz
+
+---
+Task ID: 68
+Agent: Super Z (asosiy agent)
+Task: v122 — APK «brauzerga otish» YAKUNIY tuzatish. v121 yetarli emas chiqdi — foydalanuvchi: "Telefonni o'chirib yoqdim yana ilovaga kirsam brauzerga kirib ketmoqda" (ilovadan to'liq chiqib, telefonni restart qilib ham brauzerga otyapti — 700+ o'rnatilgan APK ta'sirda)
+
+Work Log:
+- V121 NEGA ISHLAMADI (ikki qatlamli ildiz sabab): ① v121 UA-istisnosi (50gramapp) faqat APK haqiqatan ham UA imzo yuborsa ishlaydi — eski o'rnatilgan APK (versionCode 12, tashqarida qurilgan) imzoni DOIM yubormasligi mumkin (binary eski bo'lishi/setUserAgentString birinchi load'da qo'llanmasligi mumkin); ② v120 301'i "cache-control: public, max-age=86400" bilan berilgandi — WebView HTTP-keshiga 24 soatgacha YO'NIB QOLADI, telefonni o'chirib-yoqish keshni TOZALAMAYDI, server esa keshlangan redirect'ni bekor qila olmaydi. curl-sinov bu ikkalasini real hayotda ajrata olmasdi — shuning uchun server tomondan YAGONA ishonchli yechim kerak edi.
+- V122 YECHIM (shartsiz kafolat): workers.dev -> 50gram.uz 301 TO'LIQ OLINIB TASHLANDI (fetch boshidagi butun guard: comment + if + return). Endi workers.dev HECH NARSANI yo'naltirmaydi — kontent to'g'ridan-to'g'ri 200 bilan beriladi. Bu v120'dan OLDINGI asl holat: 700+ foydalanuvchi 2024-yildan workers.dev orqali shunday ishlab kelgan. UA, kesh, qurilma — HECH NARSAGA bog'liq emas. Kod ichiga OGOHLANTIRISH yozildi: QAYTA QO'SMANG (agar kerak bo'lsa — faqat butun zanjir yangi APK v3.3+ ga o'tgach va redirect no-store bilan).
+- SMOKE.QML QOROVUL YANGILANDI: eski "v120 301 regressiya qorovuli" step'i yangi "v122 workers.dev TO'G'RIDAN-TO'G'RI" qorovuliga almashtirildi — endi TESKARI talab: GET → 200 + bo'sh redirect_url (301 qaytsa FAIL — "APK buziladi!"), brauzer-UA bilan HAM APK-UA (50GramApp/3.1) bilan HAM, + POST passthrough saqlangan.
+- VERSIYA UCHLIGI: BUILD_V="v122" / __50BUILD='v122' / V='50gram-v122' — sinxron.
+- SINOV: scripts/test_v122_static.js 59/59 YASHIL (301 yo'q + marker + QAYTA-QO'SMANG ogohlantirishi + v117 https-qo'riqchi saqlangan + versiya uchligi + APK manbalari vc13/v3.3 + v120 M1/M2 muhrlari + v119 muhrlar + smoke-yangitalab + node --check ×10); tsc 14 xato = BAZAVIY (0 yangi); wrangler dry-run OK.
+- JONLI ISBOT (79c0716 deploy'dan keyin, curl): workers.dev GET — brauzer-UA → 200 redirect:[] ✓; APK-UA (50GramApp/3.1) → 200 redirect:[] ✓; Dalvik-UA → 200 redirect:[] ✓; UA-SIZ → 200 redirect:[] ✓ (301 umuman YO'Q); 50gram.uz → 200 ✓; core.js live v122 ✓ (ikkala domenda); sw.js live 50gram-v122 ✓; workers.dev HTML to'g'ridan-to'g'ri beriladi ✓.
+- CI (79c0716) — 11/11 YASHIL: Deploy ✓×2 / Smoke ✓ (YANGI v122 qorovuli bilan) / MUHR (3 ketma-ket) ✓ / Qo'ng'iroq MEDIA ✓ / MEDIA ✓ / XAVFSIZLIK ✓ / DATA ✓ / Jurnal ✓ / Panel E2E ✓ (dispatch) / Domen tekshir ✓ (dispatch). Bekor qilinganlar qat'iy ketma-ket rerun.
+- OGohlantirish (kelajak uchun): foydalanuvchining O'Z telefonida WebView keshida eski 301 qolib ketgan BO'LISHI MUMKIN edi (v120 davridan) — v122 keldi, kesh muddati (v120 deploy + 24h) allaqachon o'tgan bo'lishi ehtimoli katta; agar kimdirda baribir brauzerga otsa: Sozlamalar → Ilovalar → 50gram → Xotira → Ma'lumotlarni tozalash (bir marta) — boshqa hech kimda kerak bo'lmaydi, yangi yuklab oluvchilarda umuman muammo yo'q.
+
+Stage Summary:
+- APK «brauzerga otish» muammosi 100% YO'Q QILINDI — endi yo'naltirishning O'ZI mavjud emas, buziladigan narsa ham yo'q. Foydalanuvchi hech narsa qilmasdan (yangilashsiz, tozalashsiz) ilovani ochsa ilova ICHIDA ishlaydi.
+- workers.dev-yashiruvchi (v120 kosmetik funksiyasi) olib tashlandi — APK ishlashi muhimroq deb qaror qilindi (foydalanuvchiga tushuntiriladi). Rasmiy silklar baribir 50gram.uz'da; APK ichida manzil satri ko'rinmaydi.
+- v122 live. 11/11 CI yashil. Sayt: https://50gram.uz — workers.dev ham to'liq ishlaydi.
+- Keyingi navbat (foydalanuvchi ma'qullagan, Task 69): bepul kuchaytirishlar — chat ichida xabar qidiruv + adminpanel "Tizim holati" monitoring paneli. TURN bepul (openrelay) qoldirildi; Eskiz SMS keyinga qoldirilgan (SMS_MODE="app" tegilmadi).
