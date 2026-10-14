@@ -122,8 +122,14 @@ ok(!!utok, 'test foydalanuvchi tokeni olindi')
 if (utok) {
   const rep = await j('/api/report', { method: 'POST', h: { authorization: 'Bearer ' + utok }, body: { tt: 'user', tid: 990000000001, reason: 'spam', note: 'v126 tashxis shikoyati (o\'zi yechildi holatiga o\'tadi)' } })
   ok(rep.st === 200 && rep.d.ok === true, '/report qabul qilindi')
-  const selfRep = await j('/api/report', { method: 'POST', h: { authorization: 'Bearer ' + utok }, body: { tt: 'user', tid: U.phone.slice(-9) === '900000090' ? 999999 : 0, reason: 'spam' } })
-  ok(selfRep.st === 400, 'o\'ziga/noto\'g\'ri shikoyat rad (400)')
+  // O'ZIGA SHIKOYAT posboni: /me → o'z uid → shu uid'ga shikoyat → 400 bo'lishi SHART
+  const meU = await j('/api/me', { h: { authorization: 'Bearer ' + utok } })
+  const myId = +(meU.d && meU.d.id) || 0
+  ok(myId > 0, '/me: o\'z id olindi', 'id=' + myId)
+  const selfRep = await j('/api/report', { method: 'POST', h: { authorization: 'Bearer ' + utok }, body: { tt: 'user', tid: myId, reason: 'spam' } })
+  ok(selfRep.st === 400, 'o\'ziga shikoyat rad (400)')
+  const zeroRep = await j('/api/report', { method: 'POST', h: { authorization: 'Bearer ' + utok }, body: { tt: 'user', tid: 0, reason: 'spam' } })
+  ok(zeroRep.st === 400, 'tid=0 shikoyat rad (400)')
   const reps = await j('/api/panel/reports', { h: H })
   const mine = reps.d.items && reps.d.items.find((x) => x.note && x.note.includes('v126 tashxis'))
   ok(!!mine, 'shikoyat panelda ko\'rinadi', mine ? 'id=' + mine.id : '')
@@ -131,6 +137,8 @@ if (utok) {
     const setr = await j('/api/panel/reports/set', { method: 'POST', body: { id: mine.id, status: 'yechildi', answer: 'tashxis yakuni' }, h: H })
     ok(setr.st === 200 && setr.d.ok, 'shikoyat holati yechildi')
   }
+  // TOZALASH: avvalgi run qoldiq shikoyatlari (tid=999999) rad etiladi
+  for (const x of (reps.d.items || [])) if (x.tid === 999999 && x.status !== 'rad') await j('/api/panel/reports/set', { method: 'POST', body: { id: x.id, status: 'rad', answer: 'tashxis qoldigi — tozalandi' }, h: H })
 }
 
 console.log('— 9) AUDIT: v126 amallari aktor bilan yozilgani')
