@@ -849,3 +849,25 @@ Stage Summary:
 - v73 muallif tizimi saqlangan: begona qurilma 409, force=rotatsiya+devs-tozalash (hijak bir tasdiqda uchadi), Chiqish hamma qurilmani o'ldiradi (endigina sessiyani ham aylantiradi — qayta tirilish yo'q).
 - Residual: s-klaimsiz eski tokenlar hali ham boshqa endpoint'larda ishlaydi (yumshoq migratsiya — zanjir yangilangach yopiladi); kick-diag.yml/session-diag.yml vaqtinchalik tashxislar (keyin o'chiriladi); kick-diag panel-maydoni tuzatishi lokalda qoldi (keyingi push bilan boradi).
 - Versiya: v124 (worker/core/sw sinxron). 9/9 CI + jonli urush-o'lim isboti yashil. Sayt LIVE: https://50gram.uz
+
+---
+Task ID: 71
+Agent: Super Z (asosiy agent)
+Task: v126-APK — vc13 «50gram.uz chiqsin» + «Avtorizatsiya kerak» jonli tashxisi. Foydalanuvchi: "Avtorizatsiya kerak deb chiqib ketyapti telefon raqamni yozib kodni kiritgandan keyin ilovadan o'zichi ... 50gram.uz chiqsin https://50gram.begzodbegzodjons.workers.dev/ shu chiqib qolyapti ... ilovani chiqib ketadigan qilib buzib qo'yding tuzat"
+
+Work Log:
+- JONLI TASHXIS (yangi quvur: .github/workflows/login-diag.yml + scripts/login_diag.mjs, run 38548407713): IKKALA domen (50gram.uz + workers.dev) da TO'LIQ login-oqimi: otp(force va oddiy) → verify → /me → /chats → /calls/pending → /ws — HAMMASI 200/426 ✓; logout → qayta kirish → /me 200 ✓; A kirdi → B (boshqa domen) kirdi → A hali tirik (v124 va'dasi) ✓; bo'sh zombi token → 401 ochkosiz ✓; panel: 735 foydalanuvchi. XULOSA: server login-oqimi 100% sog'lom — «Avtorizatsiya kerak» umumiy/server xatosi EMAS.
+- KESH JONLI TEKSHIRUV: ikkala domenda / va core.js/sw.js «no-cache/max-age=0 must-revalidate» + v125 markerlar — klientlar yangi kodda. SW (v120-dan buyon bir xil strategiya): tarmoq-avval, /api/ umuman kesilmaydi — eski kod yetkazib berish yo'q.
+- JURNAL (300 yozuv, run 38549143578): js-xato/js-rad/Avtorizatsiya to'lqini YO'Q; qo'ng'iroqlar real ishlayapti (ko'plab call-yozuvlar); fw bloklari faqat skaner/CI-IP (fw:ext/fw:root/fw:auth) — halol foydalanuvchiga tegishli emas.
+- ILDIZ TOPILDI (shikoyatning «workers.dev chiqib qolyapti» qismi): DEPLOY QILINGAN vc12 APK da URL="https://50gram.begzodbegzodjons.workers.dev/" va HOST faqat workers.dev — ilova WORKERS.DEV'DAN ochiladi va 50gram.uz ga o'tsa TASHQI BRAUZER ochiladi (oq-ro'yxatda yo'q). vc13 manbasi 7411f2b'da (URL=50gram.uz, ikki domen, 50GramApp/3.3) TAYYOR EDI lekin Android SDK yo'qligi uchun BUILD QILINMAGAN edi — foydalanuvchi «ilova chiqib ketadi» deganda vc12 workers.dev holati + o'z qurilmasidagi eski-token boot-401 sikli nazarda tutilgan.
+- V126-APK YECHIM — TO'LIQ BUILD ZANJIRI SHU MUHITDA QURILDI (scripts/build_vc13.sh, takrorlanadigan): Google Maven build-tools r34 (aapt2/zipalign/apksigner/d8.jar) + Sable android-34 stubs + Maven Central ECJ 3.33 (javac o'rniga — JDK yo'q) + mavjud r8.jar placeholder ekanligi aniqlandi (4KB bo'sh — d8.jar ishlatildi). aapt2 compile/link(versionCode=13, versionName=3.3, minSdk 24, targetSdk 34) → ECJ → d8 → zipalign → apksigner(50gram.keystore / 50gram2026 — worklog 208'dan).
+- SERTIFIKAT ISBOTI: SHA-256 9172f1bf714ae01ab4d9c58b6ed9c2a59fc78adee235e85b9806a6d71548d6e9 = worklog 208 + vc12 bilan AYNAN mos → vc13 vc12 USTIGA o'rnatiladi (o'chirish shart emas). aapt2 dump badging: uz.gram50.app vc=13 vN=3.3. dex-strings: URL=https://50gram.uz/, API=https://50gram.uz/api, HOST2 workers.dev (oq-ro'yxat) ✓. vc12'dagi hamma res-fayl vc13'da BOR (comm bo'sh — yo'qotish yo'q). web/50gram.apk + .idsig yangilandi.
+- XAVFSIZLIK QARORI (o'zgartirilmadi): force login devs-tozalashi SAQLANDI — SMS_MODE="app" rejimida kod ilova ichida har qanday so'rovchiga ko'rinadi, 409+devs asosiy hijak-to'siq; force=sess-rotatsiya begona tokenlarni o'ldiradi. Eganing o'z qurilmalari devs ro'yxatidan 4-tagacha qoladi — normal kirish 409 bermaydi.
+- CI (ba9acb4): Deploy ✓ / CF Deploy ✓ / qolgan zanjir qat'iy ketma-ket rerun (testlar-zanjiri).
+- Versiya uchligi: v125 SINXRON QOLDI (worker/core/sw kodiga TEGILMADI — faqat APK-asset; foydasiz 700+ qurilmani reload qilmaslik uchun bump yo'q).
+
+Stage Summary:
+- vc13 APK LIVE: https://50gram.uz/50gram.apk — endi ilova 50GRAM.UZ dan ochiladi (workers.dev emas), fon-xizmat ham 50gram.uz/api ni poll qiladi. Foydalanuvchilar yangi APK o'rnatsa (eski ustiga, o'chirmasdan) «workers.dev chiqib qolyapti» shikoyati butunlay yopiladi.
+- «Avtorizatsiya kerak» serverda UMUMIY EMAS (jonli isbot): login-oqimi 2 domenda ham toza. Qolgan holatlar qurilma-local: eski o'lik token bilan bir marta boot-401 → kirish → tuzaladi; yoki eganing o'z ikkinchi qurilmasi faol bo'lsa 409 ekranida «Bu mening raqamim» (bir marta) kerak.
+- Foydalanuvchilarga: 50gram.uz/50gram.apk dan yangi versiyani o'rnatishlarini ayting (eski ustiga o'rnatiladi, chatlar/tokenlar saqlanadi), keyin BIR MARTA kirsalar yetarli.
+- Residual: session-diag.yml/kick-diag.yml/login-diag.yml vaqtinchalik tashxislar (keyin o'chirladi); scripts/build_vc13.sh repoda — kelgusi APK-buildlar uchun tayyor (Android SDK'siz ham build ishlaydi).
