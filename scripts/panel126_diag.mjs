@@ -107,18 +107,16 @@ for (const [p, key] of [['reports', 'items'], ['tickets', 'items'], ['media', 't
 }
 
 console.log('— 8) FOYDALANUVCHI SHIKOYATI (/report) + PANelda ko\'rinadi')
-// test foydalanuvchi tokeni (kod ilova ichida qaytadi — DEV_MODE)
-const otp = await j('/api/auth/otp', { method: 'POST', body: { phone: U.full } })
+// test foydalanuvchi tokeni (kod ilova ichida qaytadi — DEV_MODE). force:1 — avvalgi
+// tashxis-runlarda qolgan faol-sessiya 409'ini yengish («Bu mening raqamim» oqimi)
+const otp = await j('/api/auth/otp', { method: 'POST', body: { phone: U.full, force: 1 } })
 let utok = ''
-if (otp.st === 200 && otp.d.dev_code) {
-  const ver = await j('/api/auth/verify', { method: 'POST', body: { phone: U.full, code: otp.d.dev_code } })
-  utok = ver.d.token || ''
-} else if (otp.st === 200) {
-  // kod SMS_MODE=app rejimida dev_code'da qaytadi (DEV_PHONES raqam)
-  const ver = await j('/api/auth/verify', { method: 'POST', body: { phone: U.full, code: otp.d.code || '000000' } })
+const code = otp.d && (otp.d.dev_code || otp.d.code)
+if (otp.st === 200 && code) {
+  const ver = await j('/api/auth/verify', { method: 'POST', body: { phone: U.full, code, force: 1 } })
   utok = ver.d.token || ''
 }
-ok(!!utok, 'test foydalanuvchi tokeni olindi')
+ok(!!utok, 'test foydalanuvchi tokeni olindi', utok ? '' : JSON.stringify(otp.d).slice(0, 80))
 if (utok) {
   const rep = await j('/api/report', { method: 'POST', h: { authorization: 'Bearer ' + utok }, body: { tt: 'user', tid: 990000000001, reason: 'spam', note: 'v126 tashxis shikoyati (o\'zi yechildi holatiga o\'tadi)' } })
   ok(rep.st === 200 && rep.d.ok === true, '/report qabul qilindi')
