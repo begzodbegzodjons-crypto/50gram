@@ -3,7 +3,7 @@
 // Frontend (web/) shu Worker orqali Static Assets sifatida beriladi; API: /api/*
 // =====================================================================
 import { makeDb, ph, type Db } from "./db"
-import { signJwt, verifyJwt, sha256, randomStr, randomCode, hmacHex } from "./auth"
+import { signJwt, verifyJwt, verifyJwtLenient, sha256, randomStr, randomCode, hmacHex } from "./auth"
 import { sendSms, smsConfigured } from "./sms"
 import { pushUsers } from "./push"
 import { SecFirewall } from "./firewall"
@@ -357,7 +357,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v124"
+const BUILD_V = "v125"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -5955,8 +5955,21 @@ export default {
       const db = env.__db || makeDb(env.DATABASE_URL)
       // WebSocket
       if (path === "/ws") {
-        const payload = await verifyJwt(url.searchParams.get("token") || "", env.JWT_SECRET)
-        if (!payload) { if (fwip) { if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404(); fwOchko(env, wait, fwip, "tok", 1, secInfo(req, url)) } return json({ error: "Avtorizatsiya kerak" }, 401) }
+        const tk = url.searchParams.get("token") || ""
+        const payload = await verifyJwt(tk, env.JWT_SECRET)
+        if (!payload) {
+          // v125 ZOMBIE-FON-XIZMAT MUHRI: ochko FAQAT haqiqiy hujumchiga. Bo'sh token
+          // (bizning o'z klientimiz — logout'dan keyingi fon-xizmat so'rovi: vc12 xizmati
+          // `t == null` tekshiradi, `""` o'tadi → «Bearer » bilan 20s'da 2 so'rov = 360/soat)
+          // va muddati o'tgan LEKIN IMZOSI TO'G'RI token (sobiq foydalanuvchi qurilmasi)
+          // OCHKOSIZ 401 oladi — aks holda foydalanuvchining O'Z IP'si 1 soatga bloklanib,
+          // ilova umuman ochilmasdi (ro'yxatdan o'tish ham imkonsiz — jonli shikoyat).
+          if (fwip && tk.trim() && !(await verifyJwtLenient(tk, env.JWT_SECRET))) {
+            if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404()
+            fwOchko(env, wait, fwip, "tok", 1, secInfo(req, url))
+          }
+          return json({ error: "Avtorizatsiya kerak" }, 401)
+        }
         // Yagona sessiya nazorati (WS uchun ham): logout/qayta kirish eski ulanishni o'chiradi
         // v104: bloklangan hisobning WS ulanishi ham darhol yopiladi
         // v123: sess mosligi YOKI 5 daqiqalik ruxsatdagi eski sessiya (o'tish davri —
@@ -5975,7 +5988,16 @@ export default {
       if (!r!.open) {
         const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "")
         const payload = await verifyJwt(token, env.JWT_SECRET)
-        if (!payload) { if (fwip) { if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404(); fwOchko(env, wait, fwip, "tok", 1, secInfo(req, url)) } fail("Avtorizatsiya kerak", 401) }
+        if (!payload) {
+          // v125 ZOMBIE-FON-XIZMAT MUHRI (WS yo'li bilan bir xil): bo'sh token va
+          // muddati o'tgan-imzosi-to'g'ri token OCHKOSIZ 401 — faqat yaroqsiz/yasama
+          // token 'tok' ochkosi oladi (hujumchi himoyasi ma'nosicha saqlandi).
+          if (fwip && token.trim() && !(await verifyJwtLenient(token, env.JWT_SECRET))) {
+            if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404()
+            fwOchko(env, wait, fwip, "tok", 1, secInfo(req, url))
+          }
+          fail("Avtorizatsiya kerak", 401)
+        }
         uid = Number(payload.sub)
         juid = uid
         // YAGONA FAOL SESSIYA (bir raqam — bitta faol qurilma): logout barcha tokenlarni

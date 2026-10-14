@@ -1116,8 +1116,12 @@ async function logout(silent, deadTok) {
       new Promise((res) => setTimeout(res, 3000)),
     ])
   } catch {}
-  // APK fon xizmati ham to'xtasin: eski token bilan polling/beat davom etsa hisob "band" qolaveradi
-  try { window.Android50 && window.Android50.setToken && window.Android50.setToken('') } catch {}
+  // APK fon xizmati ham to'xtasin: eski token bilan polling/beat davom etsa hisob "band" qolaveradi.
+  // v125: O'LIK tokenda (deadTok) xizmat tokenini BO'SHATMAYMIZ — vc12 xizmati `t == null`
+  // tekshiradi, `""` o'tib ketadi va «Bearer » (bo'sh) bilan 20s'da 2 so'rov yuboraveradi.
+  // Server (v125 muhri) bo'sh tokeni ochkosiz 401 qiladi, lekin baribir bepul trafik —
+  // oxirgi (imzosi to'g'ri) token qolsa, so'rovlar session-darvozada tinch 401 oladi.
+  try { if (!deadTok && window.Android50 && window.Android50.setToken) window.Android50.setToken('') } catch {}
   localStorage.removeItem('g50_token'); localStorage.removeItem('g50_me')
   S.token = ''; S.me = null
   try { S.ws && S.ws.close() } catch {}
@@ -1393,7 +1397,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v124'
+window.__50BUILD = 'v125'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return

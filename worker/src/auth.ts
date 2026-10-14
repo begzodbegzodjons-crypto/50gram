@@ -39,6 +39,24 @@ export async function verifyJwt(token: string, secret: string): Promise<any | nu
   }
 }
 
+// v125: IMZO-FAQAT tekshiruv (exp e'tiborga olinmaydi) — FAQAT firewall 'tok' qarori uchun.
+// Muddati o'tgan LEKIN imzosi to'g'ri token = BIZNING SOBIQ foydalanuvchimiz (qurilmasining
+// fon-xizmati eski token bilan so'rov yuboradi) — buni 'tok' ochkosi bilan jazolash
+// foydalanuvchining O'Z IP'sini 1 soatga bloklardi (vc12 fon-xizmati 20s'da 2 so'rov =
+// 360 ochko/soat → «ilova umuman ulanmayapti, ro'yxatdan o'tib bo'lmayapti» ildizi).
+// Imzosi buzilgan/yaroqsiz token = haqiqiy hujumchi — ochko baribir yoziladi (middleware'da).
+export async function verifyJwtLenient(token: string, secret: string): Promise<any | null> {
+  try {
+    const [h, b, s] = (token || "").split(".")
+    if (!h || !b || !s) return null
+    const ok = await crypto.subtle.verify("HMAC", await key(secret), fromB64url(s), enc.encode(`${h}.${b}`))
+    if (!ok) return null
+    return JSON.parse(new TextDecoder().decode(fromB64url(b)))
+  } catch {
+    return null
+  }
+}
+
 export async function sha256(text: string) {
   const d = await crypto.subtle.digest("SHA-256", enc.encode(text))
   return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, "0")).join("")
