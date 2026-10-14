@@ -945,3 +945,5 @@ Stage Summary:
 - MUHRLAR BUZILMAGAN: R1 (offer faqat chaqiruvchida), R2 (bitta doimiy oqim), R5 (oseq), M1/M2/M3 (v96 — «keyingi qo'ng'iroq jim» qaytmasligi), SMS_MODE="app", v122 (301 yo'q), v123/v124 (sessiya), v127 (panel faqat egasi) — hammasi statik testlar bilan isbotlangan.
 - Jonli efir (LIVE) offer/answer ham darhol yuboriladi — barcha WebRTC funksiyalari bir xil tezlik paternida.
 - Versiya: v128 (worker/core/sw sinxron). Sayt: https://50gram.uz
+- CI (d8a9720) — 9/9 YASHIL: Deploy ✓×2 / smoke ✓ / MUHR (3 ketma-ket haqiqiy qo'ng'iroq, M1/M2/M3) ✓ / Qo'ng'iroq MEDIA (2-brauzer) ✓ / MEDIA (rasm+fayl — attempt 4, hujjatlashtirilgan flaky, «Server javob bermadi» 20s-tarmoq, kodbilan bog'liq emas) ✓ / XAVFSIZLIK ✓ / DATA ✓ / Jurnal ✓. Bekor qilinganlar qat'iy ketma-ket rerun (bir-vaqtda-4-rerun to'qnashuvi 2 marta cancel berdi — bittama-bitta rerun qoidasi tasdiqlandi).
+- JONLI ISBOT (curl): 50gram.uz → 200 ✓; core.js __50BUILD='v128' ✓; sw.js 50gram-v128 ✓; rtc.js'da v128 markerlari (21 havola) ✓.
