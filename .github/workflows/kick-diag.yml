@@ -1,0 +1,20 @@
+name: Kirish-tashxisi (Task 70 — «Qaytadan kiring» jonli dalil)
+on:
+  workflow_dispatch:
+concurrency:
+  group: testlar-zanjiri
+  cancel-in-progress: false
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Jonli tashxis (kesh + panel + jurnal + urush-sim)
+        env:
+          E2E_BASE: https://50gram.uz
+          ADMIN_PASS: Balandtoglar1
+        run: node scripts/kick_diag.mjs
