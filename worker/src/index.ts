@@ -396,8 +396,35 @@ async function walletOf(c: C, uid: number) {
 // Task 29 sxemasi: yangi jadvallar mavjud emas bo'lsa (migratsiya o'tmagan deploy) — o'z-o'zidan yaratadi.
 // Idempotent: har isolatda bir marta, har bayonot alohida try/catch (ayrimlari allaqachon bo'lsa xato emas).
 let t29ok = false
+// v126 SXEMA-VERSIYA BELGISI: migratsiya to'liq o'tgach schema_ver'ga yoziladi — keyingi
+// sovuq izolyatlar FAQAT bitta probe bilan o'tadi. Nega: bepul-rejada so'roviga 50 subrequest;
+// v126'da 22 yangi bayonot qo'shilgach, eski «hammasini qayta urinish» usuli byudjetni
+// yopib qo'ydi (jonli dalil: smoke «FAIL otp: Server xatosi» — sovuq izolyatda 57 urinish).
+const SCHEMA_V = 126
 async function ensureSchema(db: Db) {
   if (t29ok) return
+  // 1) BELGI-PROBE (issiq yo'l: 1 so'rov) — migratsiya allaqachon bo'lgan bo'lsa shu yerda tugaydi
+  try {
+    const mv: any = await db.one("SELECT v FROM schema_ver WHERE v=?", [SCHEMA_V])
+    if (mv) { t29ok = true; return }
+  } catch {}
+  // 2) BYUDJET-QOROVULI: mavjud jadvallar/ustunlar/indekslar 2 probe bilan bilib olinadi —
+  // FAQAT yetishmayotgan bayonotlar bajariladi (eski «hammasi ketma-ket» usulida har eski
+  // bayonot ham 1 subrequest yeydi va har yangi deploy'da byudjet tugab, 500 berardi).
+  const haveT = new Set<string>(), haveC = new Set<string>(), haveI = new Set<string>()
+  try {
+    const cr = await db.q("SELECT TABLE_NAME AS t, COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE()")
+    for (const r of cr as any[]) {
+      const tn = String(r.t || "").toLowerCase()
+      if (!tn) continue
+      haveT.add(tn)
+      if (r.c) haveC.add(tn + "." + String(r.c).toLowerCase())
+    }
+  } catch {}
+  try {
+    const ir = await db.q("SELECT TABLE_NAME AS t, INDEX_NAME AS i FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE()")
+    for (const r of ir as any[]) { if (r.t && r.i) haveI.add(String(r.t).toLowerCase() + "." + String(r.i).toLowerCase()) }
+  } catch {}
   const stmts = [
     "CREATE TABLE IF NOT EXISTS wallets (user_id BIGINT PRIMARY KEY, coins BIGINT NOT NULL DEFAULT 500, earned BIGINT NOT NULL DEFAULT 0, spent BIGINT NOT NULL DEFAULT 0, gifts_sent INT NOT NULL DEFAULT 0, gifts_recv INT NOT NULL DEFAULT 0, last_daily BIGINT NOT NULL DEFAULT 0, updated_at BIGINT NOT NULL)",
     "CREATE INDEX IF NOT EXISTS idx_wallets_earned ON wallets (earned)",
@@ -518,7 +545,23 @@ async function ensureSchema(db: Db) {
     // 7-modul: MEDIA QORA RO'YXATI (SHA-256 bo'yicha — yuklash nazorati 2-bosqichda ulanadi)
     "CREATE TABLE IF NOT EXISTS media_black (sha VARCHAR(70) PRIMARY KEY, ts BIGINT NOT NULL, note VARCHAR(200) NOT NULL DEFAULT '')",
   ]
-  for (const s of stmts) { try { await db.run(s) } catch {} }
+  // 3) FAQAT YETISHMAYOTGANLAR: CREATE TABLE/INDEX va ADD COLUMN mavjud bo'lsa O'TKAZILADI
+  const todo = stmts.filter((s) => {
+    let m = /^CREATE TABLE IF NOT EXISTS (\w+)/i.exec(s)
+    if (m) return !haveT.has(m[1].toLowerCase())
+    m = /^CREATE INDEX IF NOT EXISTS (\w+) ON (\w+)/i.exec(s)
+    if (m) return haveT.has(m[2].toLowerCase()) && !haveI.has(m[2].toLowerCase() + "." + m[1].toLowerCase())
+    m = /^ALTER TABLE (\w+) ADD COLUMN (\w+)/i.exec(s)
+    if (m) return haveT.has(m[1].toLowerCase()) && !haveC.has(m[1].toLowerCase() + "." + m[2].toLowerCase())
+    return true
+  })
+  let bad = 0
+  for (const s of todo) { try { await db.run(s) } catch { bad++ } }
+  // 4) BELGI: hamma bayonot muvaffaqiyatli bo'lsa — versiya belgilanadi (keyingi sovuq
+  // izolyatlar 1 probe bilan o'tadi). Yarim-qolgan bo'lsa — belgi YO'Q, keyingi chaqiruv
+  // FAQAT yetishmayotganlarini davom ettiradi (o'z-o'zidan to'planadigan migratsiya).
+  try { await db.run("CREATE TABLE IF NOT EXISTS schema_ver (v INT PRIMARY KEY)") } catch { bad++ }
+  if (bad === 0) { try { await db.run("REPLACE INTO schema_ver(v) VALUES(" + SCHEMA_V + ")") } catch {} }
   try {
     await db.one("SELECT user_id FROM wallets LIMIT 1")
     t29ok = true // so'rov o'tdi — jadval bor
