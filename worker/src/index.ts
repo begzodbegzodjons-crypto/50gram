@@ -357,7 +357,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v123"
+const BUILD_V = "v124"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -468,6 +468,15 @@ async function ensureSchema(db: Db) {
     // ma'nosicha saqlanadi (begona qurilma baribir 409 bilan to'siladi, logout darhol o'ldiradi).
     "ALTER TABLE users ADD COLUMN prev_sess VARCHAR(24) NULL",
     "ALTER TABLE users ADD COLUMN prev_sess_exp BIGINT NULL",
+    // v124 URUSHNI TUGATISH: MA'LUM QURILMALAR RO'YXATI (JSON massiv, ko'pi 4) — eganing
+    // o'z qurilmalari (APK, brauzer, PWA) ro'yxatda bo'lsa «Bu raqam tarmoqda mavjud» (409)
+    // HECH QACHON so'ralmaydi. v120/v121 «brauzerga otish» xaosida foydalanuvchining bir
+    // hisobi IKKITA klientda qoldi (APK + brauzer) — qattiq sess-aylanish ularni abadiy
+    // urushga soldi (biri kirsа ikkinchisi 401, u ham kirsа birinchisi o'lardi).
+    // v124 yechimi: ODDIY kirish sessiyani UMUMAN aylantirmaydi (quyida authVerify) —
+    // urush matematik jihatdan imkonsiz. Force («Bu mening raqamim») — ro'yxatni tozalaydi
+    // (hijak-tozalash muallif tizimi v73 ma'nosicha saqlanadi).
+    "ALTER TABLE users ADD COLUMN devs MEDIUMTEXT NULL",
   ]
   for (const s of stmts) { try { await db.run(s) } catch {} }
   try {
@@ -648,12 +657,17 @@ async function authOtp(c: C) {
   // Haqiqiy SMS (Eskiz) ulanganda bu qo'riqchi shart emas — kod faqat haqiqiy egasiga boradi.
   const dev = String(c.req.headers.get("x-dev") || "").slice(0, 40)
   if (!smsOn && !test) {
-    const ex = await c.db.one("SELECT id, logout_at, token_exp, last_seen, dev, blocked FROM users WHERE phone=?", [phone])
+    const ex = await c.db.one("SELECT id, logout_at, token_exp, last_seen, dev, devs, blocked FROM users WHERE phone=?", [phone])
     // v104 ADMIN PANEL BLOK: bloklangan raqamga kod BERILMAYDI (verify ham baribir yopiq —
     // bu yerda erta to'xtatish foydalanuvchiga aniq sababni ko'rsatadi)
     if (ex && +ex.blocked === 1) fail("Hisobingiz bloklangan", 403)
     const faol = ex && !ex.logout_at && +(ex.token_exp || 0) > t && +(ex.last_seen || 0) > t - 15 * 60_000
-    const ozQurilma = !!faol && !!dev && ex.dev === dev
+    // v124: MA'LUM QURILMA — shu hisobdan OLDIN kirgan qurilma (devs ro'yxatida) eganing
+    // o'zi hisoblanadi: 409 YO'Q, «Bu mening raqamim» bosish shart emas. v120/v121 xaosidan
+    // qolgan ikkinchi klient (APK yonida brauzer) foydalanuvchini boshqa to'siqqa urmasin.
+    let devsOk = false
+    if (dev && ex?.devs) { try { devsOk = JSON.parse(String(ex.devs)).includes(dev) } catch {} }
+    const ozQurilma = !!faol && !!dev && (ex.dev === dev || devsOk)
     if (faol && !ozQurilma && !devPhones.includes(phone) && !c.b.force)
       return fail("Bu raqam tarmoqda mavjud — bitta raqam faqat bitta dasturda ishlaydi. Agar bu raqam sizniki bo'lsa, «Bu mening raqamim» tugmasini bosib kod oling", 409)
   }
@@ -702,24 +716,36 @@ async function authVerify(c: C) {
   await c.db.run("DELETE FROM otp WHERE phone=?", [phone])
   await ensureSchema(c.db)
   const tnow = now(), texp = tnow + 180 * 86400 * 1000
-  const sess = randomStr(16)
-  let u = await c.db.one(`SELECT ${USER_COLS}, blocked FROM users WHERE phone=?`, [phone])
+  let sess = randomStr(16)
+  let u = await c.db.one(`SELECT ${USER_COLS}, blocked, sess, dev, devs FROM users WHERE phone=?`, [phone])
   if (!u) {
     const id = newId()
-    await c.db.run("INSERT INTO users(id,phone,created_at,last_seen,token_exp,sess,dev) VALUES(?,?,?,?,?,?,?)", [id, phone, tnow, tnow, texp, sess, dev || null])
+    await c.db.run("INSERT INTO users(id,phone,created_at,last_seen,token_exp,sess,dev,devs) VALUES(?,?,?,?,?,?,?,?)", [id, phone, tnow, tnow, texp, sess, dev || null, JSON.stringify(dev ? [dev] : [])])
     u = await c.db.one(`SELECT ${USER_COLS} FROM users WHERE id=?`, [id])
   } else {
     // v104 ADMIN PANEL BLOK: bloklangan hisob yangi sessiya OLOLMAYDI (eski tokenlari ham
     // sessiya-darvozada 401 oladi — blok = ilova umuman ochilmaydi)
     if (+u.blocked === 1) fail("Hisobingiz bloklangan", 403)
-    // Kirish → hisob yana FAOL bo'ldi + YANGI YAGONA SESSIYA: eskirgan barcha tokenlar
-    // o'lik bo'lib qoladi (sess mos kelmadi → 401) — bir raqam, bitta faol qurilma.
-    // v123: ESKI sessiya 5 daqiqa prev_sess ruxsatida yashaydi — v120/v121 xaosidan
-    // qolgan ikkinchi klient (zombi brauzer tab/PWA) egani QAYTA-QAYTA uloqtirmasin.
-    // Faqat KIRISH ruxsat beradi; explicit logout baribir DARHOL hammasini o'ldiradi
-    // (logout_at tekshiruvi sess tekshiruvidan OLDIN — middleware'da tartib shu).
-    // v73: qurilma guvohnomasi ham yangilanadi (bo'sh bo'lsa — eski saqlanadi, eski mijozlar buzilmasin).
-    await c.db.run("UPDATE users SET prev_sess=sess, prev_sess_exp=?, logout_at=NULL, token_exp=?, last_seen=?, sess=?, dev=COALESCE(NULLIF(?,''),dev) WHERE id=?", [tnow + 5 * 60_000, texp, tnow, sess, dev, u.id])
+    // v124 URUSHNI TUGATISH — «Qayta-qayta kiring» halqasining YAKUNIY yopilishi:
+    // ODDIY kirish sessiyani AYLANTIRMAYDI — shu hisobning MAVJUD sessiyasi qayta
+    // ishlatiladi (token shu sessiya qiymati bilan beriladi). Natija: hech qanday oddiy
+    // kirish BOSHQA qurilmani o'ldira olmaydi — APK↔brauzer↔PWA «urushi» matematik
+    // jihatdan imkonsiz (hamma qurilma bitta sessiyada yashaydi, Telegram-uslub).
+    // ROTATSIYA FAQAT force=1 («Bu mening raqamim» — muallif tizimi v73) yoki sess=NULL
+    // (juda eski qator) bo'lganda: barcha eski sessiyalar DARHOL o'ladi (prev_sess_exp=0)
+    // va devs ro'yxati tozalanadi — begona qurilma (hijak) eganing bitta tasdig'i bilan
+    // uchadi. logout ham sessiyani aylantiradi — eski tokenlar qayta «tirilmaydi».
+    const devList = (() => { try { const a = JSON.parse(String(u.devs || "[]")); return Array.isArray(a) ? a.filter((x) => typeof x === "string").slice(-4) : [] } catch { return [] } })()
+    const force = +c.b.force === 1
+    const devsNew = JSON.stringify(force ? (dev ? [dev] : []) : [...new Set([...devList, ...(dev ? [dev] : [])])].slice(-4))
+    if (force || !u.sess) {
+      await c.db.run("UPDATE users SET prev_sess=sess, prev_sess_exp=0, logout_at=NULL, token_exp=?, last_seen=?, sess=?, devs=?, dev=? WHERE id=?", [texp, tnow, sess, devsNew, dev || u.dev, u.id])
+    } else {
+      // ODDIY kirish: sess SAQLANADI. dev faqat BO'SH bo'lsa to'ldiriladi (qurilma
+      // yozuvi qotib qolmasin — v73 qurilma-mosligi saqlanadi).
+      sess = u.sess
+      await c.db.run("UPDATE users SET logout_at=NULL, token_exp=?, last_seen=?, devs=?, dev=COALESCE(dev, NULLIF(?,'')) WHERE id=?", [texp, tnow, devsNew, dev, u.id])
+    }
   }
   const token = await signJwt({ sub: String(u.id), s: sess }, c.env.JWT_SECRET, 180 * 86400)
   return json({ token, user: pubUser(u, u.id), is_new: !u.first_name })
@@ -730,7 +756,21 @@ async function authLogout(c: C) {
   // last_seen=0: "hozir faol" belgisi o'chadi — qayta kirish DARHOL ochiladi.
   // Chiqmagan faol hisob esa "BAND" qoladi — boshqa qurilmadan shu raqamga kod
   // olib bo'lmaydi (bir raqam — bir faol foydalanuvchi, paralel ishlatish yo'q).
-  await c.db.run("UPDATE users SET logout_at=?, last_seen=0 WHERE id=?", [now(), c.uid])
+  // v124 IKKI POYDEVOR («qayta kirish tutmaydi» ildizlari yopiladi):
+  //  (1) CHIQISH FAQAT JORIY SESSIYA TOKENI BILAN: token imzosi borkenligi yetarli EMAS —
+  //      payload.s aynan su.sess bo'lishi SHART. Eski/zombi tokenlar (s-klaimsiz yumshoq
+  //      migratsiya tokenlari — v104 bypassi) logout_at'ni GLOBAL yozib, foydalanuvchining
+  //      BOSHQA qurilmadagi yangi sessiyasini ham o'ldirardi — «qayta-qayta kiring» halqasi
+  //      ana shu zahardan ham o'sgan edi. Endi bunday token javobi 401 (klient baribir
+  //      lokal tozalanadi — logout() javobni kutmaydi, hech narsa buzilmaydi).
+  //  (2) CHIQISH SESSIYANI AYLANTIRADI: sess yangilanadi — qandaydir qayta tirilish
+  //      imkonsiz (eski token s-eski ≠ sess-yangi → 401). logout_at = hamma qurilmaga
+  //      DARHOL 401 (tartib: logout_at sess tekshiruvidan OLDIN — middleware'da shu).
+  const token = (c.req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "")
+  const payload = await verifyJwt(token, c.env.JWT_SECRET)
+  const su = await c.db.one("SELECT sess FROM users WHERE id=?", [c.uid])
+  if (!payload || !payload.s || !su || payload.s !== su.sess) return json({ ok: false }, 401)
+  await c.db.run("UPDATE users SET logout_at=?, last_seen=0, sess=? WHERE id=?", [now(), randomStr(16), c.uid])
   return json({ ok: true })
 }
 

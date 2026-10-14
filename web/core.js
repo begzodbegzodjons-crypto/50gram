@@ -1014,9 +1014,11 @@ $('phone').addEventListener('keydown', (e) => e.key === 'Enter' && $('b-otp').cl
 $('code').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 6); if (e.target.value.length === 6) $('b-verify').click() })
 $('code').addEventListener('keydown', (e) => e.key === 'Enter' && $('b-verify').click())
 // v73: «Bu raqam tarmoqda mavjud» holati — raqam boshqa qurilmada faol. EGASI hech
-// qachon qotib qolmasin: «Bu mening raqamim» tugmasi force=1 bilan kodni ochadi,
-// kirgach eski qurilma sess aylanishi tufayli avtomatik chiqadi (bitta raqam — bitta faol dastur).
-let bandForce = false
+// qachon qotib qolmasin: «Bu mening raqamim» tugmasi force=1 bilan kodni ochadi.
+// v124: force ENDI verify'ga ham yuboriladi — force bilan kirish boshqa eski sessiyalarni
+// DARHOL o'ldiradi (hijak-tozalash, server tomonda). ODDIY kirish esa sessiyani UMUMAN
+// aylantirmaydi — «qayta-qayta kiring» urushi server tomonda YO'Q QILINDI (v124).
+let bandForce = false, authForce = false
 $('b-band-yes').onclick = () => { bandForce = true; $('band-note').classList.add('hide'); $('b-otp').click() }
 $('b-band-no').onclick = () => { bandForce = false; $('band-note').classList.add('hide') }
 $('b-otp').onclick = async () => {
@@ -1029,8 +1031,9 @@ $('b-otp').onclick = async () => {
   $('band-note').classList.add('hide')
   const b = $('b-otp'); b.disabled = true; b.textContent = 'Yuborilmoqda...'
   try {
-    const r = await post('/auth/otp', { phone: authCC.d + d, ...(bandForce ? { force: 1 } : {}) })
-    bandForce = false
+    const forceNow = bandForce
+    const r = await post('/auth/otp', { phone: authCC.d + d, ...(forceNow ? { force: 1 } : {}) })
+    authForce = !!forceNow; bandForce = false
     authPhone = r.phone
     if (r.dev_code) {
       // ILOVA-ICHKI REJIM (SMS_MODE="app", haqiqiy SMS hali yo'q): kod SHU YERDA
@@ -1068,7 +1071,10 @@ $('b-verify').onclick = async () => {
   if (code.length !== 6) return toast('6 xonali kodni kiriting')
   const b = $('b-verify'); b.disabled = true
   try {
-    const r = await post('/auth/verify', { phone: authPhone, code })
+    // v124: force «Bu mening raqamim» oqimidan shu yerga yetkaziladi — begona qurilma
+    // (hijak) eganing bitta tasdig'i bilan DARHOL uchadi (sess rotatsiyasi faqat shu yerda).
+    const r = await post('/auth/verify', { phone: authPhone, code, ...(authForce ? { force: 1 } : {}) })
+    authForce = false
     S.token = r.token; localStorage.setItem('g50_token', r.token)
     setMe(r.user)
     if (r.is_new) { step('a-prof'); setTimeout(() => $('ap-first').focus(), 50) }
@@ -1387,7 +1393,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v123'
+window.__50BUILD = 'v124'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
