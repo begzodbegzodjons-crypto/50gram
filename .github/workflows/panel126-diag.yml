@@ -1,0 +1,19 @@
+name: Panel v126 tashxis (boshqaruv markazi)
+on:
+  workflow_dispatch:
+concurrency:
+  group: testlar-zanjiri
+  cancel-in-progress: false
+jobs:
+  panel126:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: v126 yangi endpointlar jonli sinov (MFA davra + rollar + audit)
+        env:
+          E2E_BASE: https://50gram.uz
+        run: node scripts/panel126_diag.mjs
