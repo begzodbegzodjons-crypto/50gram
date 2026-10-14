@@ -803,3 +803,24 @@ Stage Summary:
 - workers.dev-yashiruvchi (v120 kosmetik funksiyasi) olib tashlandi — APK ishlashi muhimroq deb qaror qilindi (foydalanuvchiga tushuntiriladi). Rasmiy silklar baribir 50gram.uz'da; APK ichida manzil satri ko'rinmaydi.
 - v122 live. 11/11 CI yashil. Sayt: https://50gram.uz — workers.dev ham to'liq ishlaydi.
 - Keyingi navbat (foydalanuvchi ma'qullagan, Task 69): bepul kuchaytirishlar — chat ichida xabar qidiruv + adminpanel "Tizim holati" monitoring paneli. TURN bepul (openrelay) qoldirildi; Eskiz SMS keyinga qoldirilgan (SMS_MODE="app" tegilmadi).
+
+---
+Task ID: 69
+Agent: Super Z (asosiy agent)
+Task: v123 — «Qaytadan kiring» halqasi. Foydalanuvchi: "qayta kiring deb chiqib ketyapti ilovadan barcha foydalanuvchilar chiqib ketgan qayta qayta raqamini yozib kirishsa ham qayta kiring deb chiqib ketyapti"
+
+Work Log:
+- ILDIZ SABAB (ikki qatlamli zanjir): ① v120/v121 «brauzerga otish» xaosida har foydalanuvchining bir hisobi IKKITA klientda qolib ketdi (APK workers.dev + brauzer 50gram.uz — xaos davrida brauzerda qayta kirishgan). v122 APK'ni tuzatgach: APK'dagi eski token o'lik (sess aylangan) → ommaviy «Qaytadan kiring» (core.js:218 xatosi aynan shu matn). ② QAT'IQ sess-aylanish «URUSH» yaratar edi: egasi bir klientga kirsa → ikkinchisi (zombi tab/PWA) 401 oladi → u ham kirsa → birinchisi o'lar edi — ABADIY. ③ QO'SHIMCHA ZAHAR: 401'da klient logout(true) bilan O'LIK token bilan /auth/logout yuborardi — eski s-klaimsiz tokenlar middleware sess-tekshiruvini o'tib ketardi (v104 yumshoq migratsiya bypass) → logout_at GLOBAL yozilardi → boshqa qurilmadagi YANGI sessiya ham bir necha soniyada o'lar edi («qayta kirish tutmaydi» ildizi).
+- V123-1 SESSIYA O'TISH DAVRI (worker): yangi ustunlar prev_sess VARCHAR(24) + prev_sess_exp BIGINT (ensureSchema ALTER). authVerify: eski sessiya 5 daqiqa ruxsatga qo'yiladi (UPDATE ... prev_sess=sess, prev_sess_exp=tnow+5*60_000, logout_at=NULL, sess=yangi — bitta atomik UPDATE). Middleware (WS 5910-zona + HTTP sess-tekshiruvi): sess mosligi YOKI (payload.s === prev_sess && prev_sess_exp > now()) — IKKALA yo'lda bir xil. «Bir raqam — bitta faol dastur» (v73 muallif tizimi) MA'NOSICHA saqlandi: 5 daqiqadan keyin eski sessiya o'ladi; begona qurilma baribir 409 bilan to'siladi; explicit logout logout_at orqali DARHOL hammasini o'ldiradi (tekshiruv tartibi: logout_at OLDIN, sess KEYIN).
+- V123-2 O'LIK TOKEN ZAHARI YO'Q (klient): core.js api() 401-handler endi logout(true, TRUE) — deadTok flag bilan /auth/logout GA BORMAYDI (o'lik token uchun befud + s-klaimsiz eski tokenlar uchun halokatli edi). Oddiy chiqish (manage.js 'logout') o'zgarmadi — tirik token bilan serverga xabar boradi.
+- TASHXIS INFRA: .github/workflows/session-diag.yml (vaqtinchalik, dispatch-only) — urush-simulyatsiyasi CI runner'da: 2 marta kirish → eski/yangi token holatlari.
+- SINOV: scripts/test_v123_static.js 52/52 YASHIL (prev_sess migratsiya/verify/middleware-2joy + deadTok + v122-301-yo'q muhri + v73 muallif tizimi saqlangan + versiya uchligi v123 + APK manbalari + node --check ×10); tsc 14 = BAZAVIY (0 yangi); wrangler dry-run OK (374.20 KiB).
+- CI: birinchi push'da DATA workflow «otp 404 Not found» bilan yiqildi — firewall OTP limiteri (bir vaqtda ko'p CI /api/auth/otp) — KOD XATOSI EMAS (rerun'da yashil). 13cde4d yakuniy: Deploy ✓×2 / Smoke ✓ / MUHR (3 ketma-ket) ✓ / Qo'ng'iroq MEDIA ✓ / MEDIA ✓ / XAVFSIZLIK ✓ / DATA ✓ / Jurnal ✓ / Panel E2E ✓ (dispatch) / Domen ✓ (dispatch) / Sessiya tashxisi ✓ (5/5).
+- JONLI ISBOT (session-diag, CI runner): ① 2-klient kirgandan keyin 1-klient (eski) tokeni /api/me → 200 (RUXSAT — v123'dan oldin 401 = urush) ✓ ② yangi token 200 ✓ ③ WS yo'li ham: /api/ws?token=eski → 426 (auth OK), yangi → 426 ✓ ④ buzilgan token 401 — xavfsizlik saqlangan ✓ ⑤ versiya uchligi v123 ✓.
+
+Stage Summary:
+- «Qayta-qayta kiring» halqasi 3 xil yo'ldan YOPILDI: ① zombi ikkinchi klient 5 daqiqada o'zi jim bo'ladi (foydalanuvchini uloqtirmaydi), ② o'lik token logout-atrof-devorlari (logout_at global zahari yo'q), ③ foydalanuvchi bir marta kirsa — TURADI.
+- Foydalanuvchilarga aytish: «bir marta qayta kiring — keyin qayta so'ramaydi». Brauzerdagi eski oyna/PWA ikonkasi bilan kirsa yana kiring so'raydi — ilova ikonkasi orqali kirsinar (brauzer versiyasini umuman ochmasin).
+- v73 muallif tizimi (bir raqam — bitta dastur) MA'NOSICHA SAQLANGAN: begona 409, force tugmasi, logout darhol o'ldiradi. Faqat kirish-aylanishida 5 daqiqalik o'tish davri bor.
+- Residual (keyingi task'larga): s-klaimsiz eski tokenlar bypassi hali ham ochiq (yumshoq migratsiya — zanjir yangilangach yopiladi); session-diag.yml vaqtinchalik qoldi (keyin o'chiriladi).
+- Versiya: v123 (worker/core/sw sinxron). 11/11 + tashxis 5/5 yashil. Sayt LIVE: https://50gram.uz
