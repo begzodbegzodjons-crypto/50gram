@@ -357,7 +357,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v121"
+const BUILD_V = "v122"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -5730,22 +5730,19 @@ function fw4xx(env: Env, wait: (p: Promise<unknown>) => void, ip: string, info?:
 export default {
   async fetch(req: Request, env: Env, ctx?: { waitUntil: (p: Promise<unknown>) => void }): Promise<Response> {
     const url = new URL(req.url)
-    // v120 WORKERS.DEV-YASHIRUVCHI: foydalanuvchi talabi — «begzodbegzodjons.workers.dev
-    // silka ko'rinmasin, bossa 50gram.uz bo'lib chiqsin». Har qanday GET/HEAD so'rov
-    // workers.dev hostida DARHOL https://50gram.uz ga 301 (doimiy, keshlanadi) — manzil
-    // satri toza 50gram.uz bo'lib qoladi. WebSocket (Upgrade) va POST/PATCH/DELETE
-    // o'tkazib yuboriladi (eski ilova/WS-ulanish uzilib qolmasin — o'zi yangilanadi).
-    // v121 APK-ISTISNOSI (shoshilinch): o'rnatilgan APK (700+ foydalanuvchi, versionCode 12)
-    // WebView'da aynan workers.dev manzilini yuklaydi (MainActivity URL) — v120 301'i
-    // WebView'dagi shouldOverrideUrlLoading'ga tushib, ilova foydalanuvchini TASHQI
-    // BRAUZERGA otardi («APK ochilsa brauzer ochiladi»). APK UA imzosi (50GramApp)
-    // kelganda redirect O'TKAZIB YUBORILADI — kontent to'g'ridan-to'g'ri workers.dev'da
-    // beriladi, ilova ilovada qoladi. Brauzerlar (UA'da 50GramApp yo'q) avvalgidek
-    // 50gram.uz ga yo'naltiriladi — yashirish funksiyasi to'liq saqlanadi.
-    if (/\.workers\.dev$/.test(url.hostname) && (req.method === "GET" || req.method === "HEAD") && !req.headers.get("upgrade") && !/50gramapp/i.test(req.headers.get("user-agent") || "")) {
-      const loc = "https://50gram.uz" + url.pathname + url.search
-      return new Response(null, { status: 301, headers: { location: loc, "cache-control": "public, max-age=86400" } })
-    }
+    // v122: v120 WORKERS.DEV-YASHIRUVCHI (workers.dev -> 50gram.uz 301) TO'LIQ
+    // OLINIB TASHLANDI — foydalanuvchi haqiqiy testda tasdiqladi: v121 UA-istisnosi
+    // YETARLI EMAS («telefonni o'chirib yoqdim — yana brauzerga kirib ketmoqda»).
+    // Sabablar: 1) eski o'rnatilgan APK (versionCode 12) doim UA imzo yubormasligi
+    // mumkin — server uni brauzerdan ishonchli ajrata olmaydi; 2) 301 "cache-control:
+    // max-age=86400" bilan WebView HTTP-keshiga 24 soatgacha YO'NIB QOLADI — telefonni
+    // o'chirib-yoqish keshni tozalamaydi, server esa keshlangan redirect'ni bekor
+    // qila olmaydi. Yagona ishonchli yechim: workers.dev UMUMAN YO'NALTIRMASIN —
+    // kontent to'g'ridan-to'g'ri 200 bilan berilsin (bu v120'dan OLDINGI asl holat,
+    // 700+ foydalanuvchi 2024-yildan shunday ishlab kelgan). APK ishlashi > manzil
+    // yashirish. OGOHLANTIRISH: QAYTA QO'SMANG — 700+ eski APK yana brauzerga
+    // otiladi. Agar bir kun kelib yana kerak bo'lsa: faqat butun zanjir yangi APK
+    // (v3.3+) ga o'tgandan KEYIN va redirect MUMMO no-store bilan qilinishi shart.
     // v117 HTTPS-QO'RIQCHISI: foydalanuvchi brauzerga faqat "50gram.uz" yozsa — mobil
     // brauzerlar (eski Chrome, Samsung Internet, UC, Mi) AVVAL http:// sinaydi. HTTP'da
     // xavfsiz kontekst YO'Q: Service Worker, kamera/mikrofon, crypto.subtle (shifrlash)

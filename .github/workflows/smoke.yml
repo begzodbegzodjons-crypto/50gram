@@ -136,15 +136,24 @@ jobs:
           P2=$(curl -s -A "$UA" -H "$AUTH2" "$BASE/api/calls/pending")
           echo "$P2" | grep -q "\"call_id\":$CID1" && { echo "FAIL ghost: pending qaytardi: $P2"; exit 1; }
           echo "call status + no-ghost: OK"
-      - name: v120 workers.dev -> 50gram.uz yo'naltirish (doimiy regressiya qorovuli)
+      - name: v122 workers.dev TO'G'RIDAN-TO'G'RI (APK brauzerga-otmaslik regressiya qorovuli)
         run: |
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-          # 1) GET → 301 https://50gram.uz (manzil yashirinadi, path+search saqlanadi)
-          LOC=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' -A "$UA" "https://50gram.begzodbegzodjons.workers.dev/?tekshir=v120")
-          echo "GET: $LOC"
-          echo "$LOC" | grep -q "^301 https://50gram\.uz/?tekshir=v120$" || { echo "FAIL yo'naltirish: $LOC"; exit 1; }
-          echo "GET redirect: OK (manzil 50gram.uz bo'lib chiqadi)"
-          # 2) POST yo'naltirilmaydi (eski mijozlar/WS uzilib qolmasin)
+          # v122: workers.dev -> 50gram.uz 301 OLINIB TASHLANDI. O'rnatilgan APK (700+,
+          # versionCode 12) WebView'da workers.dev ni yuklaydi — 301 bo'lsa ilova
+          # TASHQI BRAUZERGA otadi (v121 UA-istisnosi real testda yetarli emas chiqdi).
+          # Endi HECH QANDAY UA bilan ham 301 BO'LMASLIGI kerak.
+          # 1) Brauzer-UA: GET → 200, redirect_url BO'SH
+          LOC=$(curl -s -o /dev/null -w '%{http_code}|%{redirect_url}' -A "$UA" "https://50gram.begzodbegzodjons.workers.dev/?tekshir=v122")
+          echo "GET (brauzer-UA): $LOC"
+          echo "$LOC" | grep -q "^200|$" || { echo "FAIL workers.dev GET yo'naltirildi yoki xato (APK buziladi!): $LOC"; exit 1; }
+          echo "GET 200 to'g'ridan-to'g'ri: OK (yo'naltirish yo'q)"
+          # 2) APK-UA (eski imzo bilan ham) — xuddi shu kafolat
+          LOC2=$(curl -s -o /dev/null -w '%{http_code}|%{redirect_url}' -A "Mozilla/5.0 (Linux; Android 13; M2101K6G) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.0.0 Mobile Safari/537.36 50GramApp/3.1" "https://50gram.begzodbegzodjons.workers.dev/?tekshir=v122")
+          echo "GET (APK-UA): $LOC2"
+          echo "$LOC2" | grep -q "^200|$" || { echo "FAIL APK-UA yo'naltirildi: $LOC2"; exit 1; }
+          echo "APK-UA 200: OK (ilova ICHIDA qoladi)"
+          # 3) POST passthrough (eski mijozlar/WS uzilib qolmasin)
           ST=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -A "$UA" -d '{"pass":"x-notogri"}' "https://50gram.begzodbegzodjons.workers.dev/api/panel/login")
           echo "POST /api/panel/login: $ST (401 kutiladi — o'tdi demak yo'naltirilmagan)"
           [ "$ST" = "401" ] || { echo "FAIL POST yo'naltirildi yoki boshqa xato: $ST"; exit 1; }
