@@ -1,0 +1,20 @@
+name: Login tashxisi (Task 71 — «Avtorizatsiya kerak» jonli repro)
+on:
+  workflow_dispatch:
+concurrency:
+  group: testlar-zanjiri
+  cancel-in-progress: false
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Jonli login oqimi tashxisi (2 domen + qayta kirish + ikki-klient)
+        env:
+          ADMIN_PASS: Balandtoglar1
+          DIAG_PHONE: '998900000005'
+        run: node scripts/login_diag.mjs
