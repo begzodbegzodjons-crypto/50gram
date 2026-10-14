@@ -40,7 +40,7 @@ import java.nio.charset.StandardCharsets;
 public class KeepAliveService extends Service {
 
   static final String CH_ID = "50gram_service";
-  static final String API_BASE = "https://50gram.begzodbegzodjons.workers.dev/api";
+  static final String API_BASE = "https://50gram.uz/api";
   static final long POLL_MS = 20000;
 
   /** JS tomondan Android50.setToken() orqali beriladi (MainActivity o'qiydi). */

@@ -50,8 +50,12 @@ import org.json.JSONObject;
  */
 public class MainActivity extends Activity {
 
-  static final String URL = "https://50gram.begzodbegzodjons.workers.dev/";
-  static final String HOST = "50gram.begzodbegzodjons.workers.dev";
+  // v121 (navbatdagi APK build uchun): ASOSIY manzil endi 50gram.uz — workers.dev
+  // yashirilgani uchun server u yerda 301 beradi. HOSTS ro'yxatidagi ikkala domen ham
+  // WebView ICHIDA ochiladi (tashqi brauzerga otmaydi) — eski havolalar ham ishlaydi.
+  static final String URL = "https://50gram.uz/";
+  static final String HOST = "50gram.uz";
+  static final String HOST2 = "50gram.begzodbegzodjons.workers.dev";
   static final int FILE_REQ = 1001;
   static final int MEDIA_REQ = 1002;
 
@@ -303,14 +307,17 @@ public class MainActivity extends Activity {
     s.setCacheMode(WebSettings.LOAD_DEFAULT);
     s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
     s.setJavaScriptCanOpenWindowsAutomatically(true);
-    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/3.1");
+    s.setUserAgentString(s.getUserAgentString() + " 50GramApp/3.3");
     web.addJavascriptInterface(new Bridge(), "Android50");
 
     web.setWebViewClient(new WebViewClient() {
       @Override
       public boolean shouldOverrideUrlLoading(WebView v, String url) {
         Uri u = Uri.parse(url);
-        if (HOST.equals(u.getHost())) return false;
+        // v121: ikkala o'z domenimiz (50gram.uz + workers.dev) WebView ICHIDA ochiladi —
+        // boshqa domeni (telegram, instagram va h.k.) tashqi brauzer ochadi.
+        String h = u.getHost();
+        if (HOST.equals(h) || HOST2.equals(h)) return false;
         try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception e) { }
         return true;
       }

@@ -357,7 +357,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v120"
+const BUILD_V = "v121"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -5735,7 +5735,14 @@ export default {
     // workers.dev hostida DARHOL https://50gram.uz ga 301 (doimiy, keshlanadi) — manzil
     // satri toza 50gram.uz bo'lib qoladi. WebSocket (Upgrade) va POST/PATCH/DELETE
     // o'tkazib yuboriladi (eski ilova/WS-ulanish uzilib qolmasin — o'zi yangilanadi).
-    if (/\.workers\.dev$/.test(url.hostname) && (req.method === "GET" || req.method === "HEAD") && !req.headers.get("upgrade")) {
+    // v121 APK-ISTISNOSI (shoshilinch): o'rnatilgan APK (700+ foydalanuvchi, versionCode 12)
+    // WebView'da aynan workers.dev manzilini yuklaydi (MainActivity URL) — v120 301'i
+    // WebView'dagi shouldOverrideUrlLoading'ga tushib, ilova foydalanuvchini TASHQI
+    // BRAUZERGA otardi («APK ochilsa brauzer ochiladi»). APK UA imzosi (50GramApp)
+    // kelganda redirect O'TKAZIB YUBORILADI — kontent to'g'ridan-to'g'ri workers.dev'da
+    // beriladi, ilova ilovada qoladi. Brauzerlar (UA'da 50GramApp yo'q) avvalgidek
+    // 50gram.uz ga yo'naltiriladi — yashirish funksiyasi to'liq saqlanadi.
+    if (/\.workers\.dev$/.test(url.hostname) && (req.method === "GET" || req.method === "HEAD") && !req.headers.get("upgrade") && !/50gramapp/i.test(req.headers.get("user-agent") || "")) {
       const loc = "https://50gram.uz" + url.pathname + url.search
       return new Response(null, { status: 301, headers: { location: loc, "cache-control": "public, max-age=86400" } })
     }
