@@ -6,7 +6,7 @@
  * («Not found») berishi mumkin → 4 martagacha 25s pauza bilan qayta urinamiz. */
 const BASE = (process.env.E2E_BASE || 'https://50gram.uz').replace(/\/$/, '')
 const PHONE = process.env.JURNAL_PHONE || '998900000005' // DEV_PHONES egasi (audit raqami)
-const N = Math.min(300, +(process.env.JURNAL_N || 80))
+const N = Math.min(300, +(process.env.JURNAL_N || 300))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 // MUHIM: SEC firewall faqat brauzer/app UA'larini qabul qiladi (FW_UA_OK) — node'ning
 // standart 'node' UA'si «tashqi josus» deb 1-urinishda 30 KUNGA blok beradi (isbot: jurnal
