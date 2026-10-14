@@ -1,5 +1,23 @@
 /* 50 Gram — audio/video qo'ng'iroqlar va jonli efir (WebRTC)
    ═══════════════════════════════════════════════════════════════════════════
+   v128: ULANISH TEZLIGI — «12-20s ulanmoqda» tashxisi (6 ta ildiz, hammasi yopildi):
+   1) setLocalDescription eski WebView'larda to'liq ICE-YIG'UVNI KUTADI (TURN-TCP 3-10s)
+      → offer/answer SDP endi DARHOL yuboriladi, lokal-apply FONDA (C.applyP — javob
+      erta kelsa kutish uchun). Trickle ICE allaqachon bor edi — blok faqat ortiqcha edi.
+   2) /ice setupPC ICHIDA sequential kelardi (TURN-kalit 3.5s gacha) → endi PRE-WARM:
+      qo'ng'iroq boshida fonda olib qo'yiladi (kesh 10daq) + newPC'da 1.5s timeout-race
+      (zaxira ICE bilan darhol boshlash).
+   3) Signal-navbat polling 1.8s → ADAPTIV: ulanish bosqichida 600ms, ulangach 1800ms.
+   4) Server signal() navbat-INSERT'ni kutardi → endi fonda (worker: c.wait) — har
+      signal POST ~100-300ms tez (accept→offer→answer→ICE zanjiri × 6-10 signal).
+   5) Chaqiruvchi kamerasi POST /calls BILAN PARALLEL + qabul qiluvchi accept'ni kamera
+      ochilishiga PARALLEL yuboradi — ikkala kamera bir vaqtda ochiladi (offer parklanadi).
+   6) Brauzer 'failed'ni 15-30s da beradi → 10s ULANISH-QOROVULI (bitta erta tiklash).
+   + sigTo har urinishi 6s timeout (osilgan POST 20s kutmasdi), ICE candidate POST'iga
+   1 marta qayta urinish, Jonli efir offer/answer ham darhol yuboriladi.
+   SAQLANGAN MUHRLAR: R1 (offer faqat chaqiruvchida), R2 (bitta doimiy oqim), R5 (oseq),
+   M1/M2/M3 (v96 audio-hayotiy sikli — endCall tartibi TEGILMAGAN).
+   ═══════════════════════════════════════════════════════════════════════════
    v77: QO'NG'IROQ DVIGATELI 0 DAN QAYTA YOZILDI (eski ~1160 qatorli yamaq-qatlami
    to'liq o'chirildi — 2 kunlik «birtomonlama ovoz» ildizlari konstruktiv yo'q qilindi)
 
@@ -126,6 +144,10 @@ async function iceServers(force) {
   try { iceCache = (await api('/ice')).iceServers; iceAt = Date.now() } catch { iceCache = ICE_FALLBACK }
   return iceCache
 }
+// v128 PRE-WARM: qo'ng'iroq boshlanishida ICE-serverlar FONDA olib qo'yiladi — accept
+// paytida setupPC keshdan DARHOL oladi (/ice round-trip + TURN-kalit 3.5s gacha
+// kutish KRTIK YO'Ldan chiqadi). Kesh 10 daqiqa — bir qo'ng'iroq uchun 1 so'rov.
+const icePreWarm = () => { try { iceServers().catch(() => {}) } catch {} }
 const sig = (to, data) => post('/signal', { to, data }).catch(() => {})
 async function getMedia(video) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('Brauzer qo‘ng‘iroqni qo‘llamaydi (HTTPS kerak)')
@@ -220,16 +242,30 @@ window.__50warmup = async () => {
   }, { once: true })
 }
 async function newPC(onIce) {
-  const pc = new RTCPeerConnection({ iceServers: await iceServers() })
+  // v128: /ice javobi 1.5s ichida kelmasa — ZAXIRA ICE bilan DARHOL boshlaymiz
+  // (kech kelsa keshda qoladi — keyingi qo'ng'iroqda ishlaydi; qo'ng'iroq
+  // «Ulanmoqda…»da /ice kutib qotib qolmaydi). Zaxira ro'yxatda STUN+TURN bor.
+  const srv = await Promise.race([iceServers(), new Promise((r) => setTimeout(() => r(ICE_FALLBACK), 1500))])
+  const pc = new RTCPeerConnection({ iceServers: srv })
   pc.onicecandidate = (e) => e.candidate && onIce(e.candidate.toJSON())
   return pc
 }
 // ─────────────────────── ISHONCHLI SIGNAL + KLIENT JURNALI ───────────────────────
 // sigTo: muhim signallar (accept/offer/answer) 3 martagacha qayta uriniladi —
 // 'accept'/'answer' yo'qolsa qo'ng'iroq abadiy osilib qolmasdi
+// v128: HAR urinish 6s timeout bilan — osilgan POST 20s kutib qolmaydi (muhim:
+// mobil tarmoqda 'accept'/'offer' bosqichi ana shunda 20s osilib qolardi).
+// Timeout'dan keyingi qayta urinish IKKI MARTA yetishi mumkin — barcha signal
+// ishlovchilari idempotent (oseq + sdp-tenglik + dedup) — xavfsiz.
+const sigTmo = (ms) => new Promise((_, rej) => setTimeout(() => rej(new Error('sig-tmo')), ms))
 async function sigTo(to, data, tries = 3, gap = 700) {
   for (let i = 0; i < tries; i++) {
-    try { await post('/signal', { to, data }); return true }
+    try {
+      const p = post('/signal', { to, data })
+      p.catch(() => {}) // timeout g'alaba qilsa — kechikkan rad etish jim bo'lsin (qayta urinish allaqachon ketgan)
+      await Promise.race([p, sigTmo(6000)])
+      return true
+    }
     catch (e) { if (i < tries - 1) await new Promise((r) => setTimeout(r, gap)) }
   }
   return false
@@ -283,10 +319,15 @@ function startSigPoll() {
   stopSigPoll()
   sigFails = 0
   logSig('poll yoqildi', 'lastSid=' + lastSid)
-  sigPollT = setInterval(drainSigQueue, 1800)
-  drainSigQueue()
+  // v128 ADAPTIV POLLING: ulanish bosqichida (qo'ng'iroq bor, hali connected emas)
+  // har 600ms — accept/offer/answer/candidate WS-zombi bo'lsa ham 1.8s emas, 0.6s
+  // ichida yetadi (avval HAR bosqich 1.8s gacha kutardi → 12-20s kechikishning
+  // yig'indisi). Ulangach yengil rejimga qaytadi (1800ms). drainSigQueue ichidagi
+  // 8s qotiq-qorovul overlapping'ni o'zi bloklaydi — zanjir xavfsiz.
+  const loop = () => { try { drainSigQueue() } catch {} sigPollT = setTimeout(loop, CALL && !CALL.started ? 600 : 1800) }
+  sigPollT = setTimeout(loop, 300)
 }
-function stopSigPoll() { if (sigPollT) { clearInterval(sigPollT); sigPollT = 0 } }
+function stopSigPoll() { if (sigPollT) { clearTimeout(sigPollT); sigPollT = 0 } }
 // Yangi CHAQIRUVCHI boshlanishida eski juvonlarni supurish (yangi qo'ng'iroqning o'z
 // signallari hali bo'lolmaydi — supurish xavfsiz)
 async function purgeStaleSignals() {
@@ -797,7 +838,14 @@ async function setupPC(C) {
   if (C.pc || C.pcStarting) return
   C.pcStarting = true
   try {
-    C.pc = await newPC((c) => sig(C.peer.id, { k: 'ice', call_id: C.id, c }))
+    // v128: ICE candidate POST'iga 1 marta qayta urinish — bitta candidate yo'qolsa
+    // uning yonidagi yo'l hech qachon sinab ko'rilmasdi (avval jim yutardi).
+    // Dublikat candidate qabul tomonida xavfsiz (addIceCandidate rad etilsa — catch).
+    const sigIce = (to, c) => {
+      const b = { k: 'ice', call_id: C.id, c }
+      post('/signal', { to, data: b }).then(null, () => setTimeout(() => { try { if (CALL === C) sig(to, b) } catch {} }, 600))
+    }
+    C.pc = await newPC((c) => sigIce(C.peer.id, c))
     for (const t of C.local.getTracks()) C.pc.addTrack(t, C.local)
     C.sndV = C.pc.getSenders().find((x) => x.track?.kind === 'video') || null
     C.qaLvl = 0
@@ -886,9 +934,11 @@ async function restartIce(C) {
     try { const srv = await iceServers(true); C.pc.setConfiguration?.({ iceServers: srv }) } catch {}
     C.oseq = (C.oseq || 0) + 1
     const o = await C.pc.createOffer({ iceRestart: true })
-    await C.pc.setLocalDescription(o)
+    // v128: lokal-apply FONDA — restart offeri DARHOL yuboriladi (ICE-yig'uv kutilmaydi)
+    C.applyP = C.pc.setLocalDescription(o)
+    C.applyP.catch((e) => clog('restart-apply-xato', String((e && e.message) || e).slice(0, 100)))
     C.offerAt = Date.now()
-    sigTo(C.peer.id, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON(), oseq: C.oseq }, 3, 900)
+    sigTo(C.peer.id, { k: 'offer', call_id: C.id, sdp: { type: 'offer', sdp: o.sdp }, oseq: C.oseq }, 3, 900)
     clog('ice-restart', 'offer #' + C.oseq)
   } catch (e) { clog('ice-restart-xato', String((e && e.message) || e).slice(0, 120)) }
   finally { C.restaring = false }
@@ -912,9 +962,11 @@ async function audioTransceiverReset(C) {
     }
     C.oseq = (C.oseq || 0) + 1
     const o = await C.pc.createOffer()
-    await C.pc.setLocalDescription(o)
+    // v128: lokal-apply FONDA — a-reset offeri DARHOL yuboriladi
+    C.applyP = C.pc.setLocalDescription(o)
+    C.applyP.catch((e) => clog('a-reset-apply-xato', String((e && e.message) || e).slice(0, 100)))
     C.offerAt = Date.now()
-    sigTo(C.peer.id, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON(), oseq: C.oseq, areset: 1 }, 3, 900)
+    sigTo(C.peer.id, { k: 'offer', call_id: C.id, sdp: { type: 'offer', sdp: o.sdp }, oseq: C.oseq, areset: 1 }, 3, 900)
     clog('a-reset', 'YANGI m-line offer yuborildi (oseq=' + C.oseq + ')')
   } catch (e) { clog('a-reset-xato', String((e && e.message) || e).slice(0, 120)) }
   finally { C.aRstBusy = false }
@@ -1004,10 +1056,19 @@ async function callUser(uid, video) {
   nativeRouteStart(!!video)
   freshAudioUniverse(CALL)
   clog('chaqirildi', 'to=' + uid + ' video=' + !!video)
+  icePreWarm() // v128: /ice fonda — accept paytida kesh tayyor
   startSigPoll()
   purgeStaleSignals()
   callButtons('active')
   ringTone(true)
+  // v128 TEZLIK: kamera POST /calls BILAN PARALLEL ochiladi — tarmoq-roundtrip
+  // kamerani kutmaydi. Agar post xato bersa yoki qo'ng'iroq yopilsa — GHOST-SWEEPER
+  // ishlatilmagan oqimni o'chiradi (kamera band qolmaydi).
+  const mediaP = getMedia(video).catch((e) => { throw e })
+  // GHOST-SWEEPER: oqim HECH QACHON ishlatilmagan bo'lsa (qo'ng'iroq yopildi YOKI
+  // boshqa oqim allaqachon o'rnatilgan) — kamerani ozod qiladi. DIQQAT: CALL.local
+  // hali tayinlanmagan (undefined) bo'lsa — ana shu oqim endi tayinlanadi, TEGMAYMIZ.
+  mediaP.then((s) => { const C0 = CALL; if (!C0 || (C0.local && C0.local !== s)) { try { s.getTracks().forEach((t) => t.stop()) } catch {} } }).catch(() => {})
   try {
     const r = await post('/calls', { to: uid, video: !!video })
     if (!CALL) return
@@ -1017,7 +1078,7 @@ async function callUser(uid, video) {
     // Halol UI: kamera 2.5s+ kutsa — foydalanuvchi NIMA kutayotganini ko'rsin
     const C1 = CALL
     CALL.camT = setTimeout(() => { if (CALL === C1 && !C1.local && !C1.started) setCallState('Kamera ochilmoqda…') }, 2500)
-    const local = await getMedia(video)
+    const local = await mediaP
     // OQIM-OQISH HIMOYASI: getMedia davomida qo'ng'iroq yopilsa — ghost oqim kamerani band qolmasin
     if (!CALL) { try { local.getTracks().forEach((t) => t.stop()) } catch {}; return }
     CALL.local = validateMedia(local, video)
@@ -1050,6 +1111,15 @@ async function acceptCall() {
   nativeRouteStart(!!C.video)
   freshAudioUniverse(C)
   try {
+    // v128 TEZLIK: accept ENDI DARHOL yuboriladi — kamera ochilishiga PARALLEL.
+    // Avval: kamera (0.5-3s) → setupPC → accept → keyingina chaqiruvchi offer yaratardi
+    // (butun zanjir ketma-ket). Endi: chaqiruvchi accept bilan BIR VAQTDA offer yaratadi,
+    // ikkala tomon kamerasi BIR VAQTDA ochiladi. Offer erta kelsa — parklanadi (quyida).
+    // Kamera baribir xato bersa — endCall('declined') chaqiruvchiga yetadi (avvalgidek).
+    sigTo(C.peer.id, { k: 'accept', call_id: C.id }, 5, 1200).then((ok) => {
+      if (!ok && CALL === C && !C.started && !C.pc) endCall('missed', true, 'Signal yetmadi — internetni tekshirib ko‘ring')
+    })
+    post(`/calls/${C.id}/status`, { status: 'active' }).catch(() => {})
     const local = await getMedia(C.video)
     if (CALL !== C) { try { local.getTracks().forEach((t) => t.stop()) } catch {}; return }
     C.local = validateMedia(local, C.video)
@@ -1058,10 +1128,6 @@ async function acceptCall() {
     clog('media tayyor', 'audio=' + C.local.getAudioTracks().length + ' video=' + C.local.getVideoTracks().length)
     setCallState('Ulanmoqda…')
     await setupPC(C)
-    // 'accept' yo'qolsa chaqiruvchi hech qachon offer yaratmaydi — 5 marta/1.2s
-    const ok = await sigTo(C.peer.id, { k: 'accept', call_id: C.id }, 5, 1200)
-    if (!ok) return endCall('missed', true, 'Signal yetmadi — internetni tekshirib ko‘ring')
-    post(`/calls/${C.id}/status`, { status: 'active' }).catch(() => {})
     // EARLY-OFFER PARKING: accept yuborilishidan OLDIN kelgan offer bo'lsa — hoziroq javob
     if (C.pendingOffer && CALL === C && C.pc) {
       const po = C.pendingOffer
@@ -1087,9 +1153,16 @@ async function processAccept(C) {
     await setupPC(C)
     C.oseq = 1
     const o = await C.pc.createOffer()
-    await C.pc.setLocalDescription(o)
+    // v128 TEZLIK (asosiy tuzatish): eski WebView'larda setLocalDescription to'liq
+    // ICE-YIG'UV tugashini KUTADI (openrelay TURN-TCP candidate 3-10s yig'iladi) —
+    // offer yuborilishi ana shu yerda bloklanar edi («Ulanmoqda…»ning ildizi).
+    // ENDI: lokal qo'llash FONDA (applyP), offer SDP DARHOL yuboriladi — candidate'lar
+    // baribir alohida trickle qilinadi (onicecandidate). applyP javob kechikib kelsa
+    // signalingState tekshiruvidan OLDIN kutish uchun saqlanadi.
+    C.applyP = C.pc.setLocalDescription(o)
+    C.applyP.catch((e) => clog('offer-apply-xato', String((e && e.message) || e).slice(0, 100)))
     C.offerAt = Date.now()
-    const ok = await sigTo(C.peer.id, { k: 'offer', call_id: C.id, sdp: C.pc.localDescription.toJSON(), oseq: C.oseq })
+    const ok = await sigTo(C.peer.id, { k: 'offer', call_id: C.id, sdp: { type: 'offer', sdp: o.sdp }, oseq: C.oseq })
     if (!ok && !C.started) return endCall('missed', true, 'Signal yetmadi — internetni tekshirib ko‘ring')
   } catch (e) {
     try { if (CALL) setCallState('⚠️ ' + ((e && e.message) || 'Ulanmadi')) } catch {}
@@ -1165,6 +1238,7 @@ function incomingCall(ev, force) {
   // v92: kiruvchi ham xuddi shu siyosat: video→karnay (spkOn=true), audio→quloqchi
   CALL = { id: ev.call_id, peer, video: !!ev.video, outgoing: false, role: 'answerer', spkOn: !!ev.video, ice: [], el: callUI(peer, ev.video, ev.video ? 'Video qo‘ng‘iroq…' : 'Qo‘ng‘iroq…'), t0: Date.now(), ringMode: 'in' }
   clog('kirish-qo\'ng\'iroq', 'call=' + ev.call_id + ' from=' + ev.from.id + ' video=' + !!ev.video)
+  icePreWarm() // v128: /ice fonda — «Javob berish» paytida kesh tayyor
   startSigPoll()
   CALL.el.classList.add('incoming')
   callButtons('incoming')
@@ -1326,16 +1400,21 @@ async function handleSignalEv(ev) {
       if (C.pc.signalingState !== 'stable') { logSig('offer drop', 'signaling=' + C.pc.signalingState); return }
       C.lastOseq = oseq
       await C.pc.setRemoteDescription(d.sdp)
+      C.remoteAt = Date.now() // v128: ulanish-qorovuli uchun (10s qorovul shu vaqtdan)
       await flushIce(C)
       const a = await C.pc.createAnswer()
-      await C.pc.setLocalDescription(a)
-      const ok = await sigTo(from, { k: 'answer', call_id: C.id, sdp: C.pc.localDescription.toJSON(), oseq }, 3, 900)
+      // v128 TEZLIK: lokal-apply FONDA — javob SDP DARHOL yuboriladi (ICE-yig'uv
+      // kutilmaydi; candidate'lar trickle bilan o'z-o'zidan yetadi)
+      C.applyP = C.pc.setLocalDescription(a)
+      C.applyP.catch((e) => clog('answer-apply-xato', String((e && e.message) || e).slice(0, 100)))
+      const ok = await sigTo(from, { k: 'answer', call_id: C.id, sdp: { type: 'answer', sdp: a.sdp }, oseq }, 3, 900)
       // v94: a-reset javobi — O'Z MIKROFONIMIZNI yangi transceiver'ga qayta ulaymiz.
       // Sabab: qarshi tomon eski (umumiy) audio m-line'ni to'xtatdi — bizning mikrofon
       // o'sha m-line'da yurardi; qayta ulanmasa qarshi tomon bizni eshitmay qoladi.
       // MUHIM: AVVAL answer yuboriladi (peer 'stable'ga qaytadi), KEYIN yangi offer.
       if (d.areset && C.local && ok) {
         try {
+          if (C.applyP) { try { await C.applyP } catch {} } // v128: answer-apply tugagach (stable)
           const at2 = C.local.getAudioTracks()[0]
           const ntr = C.pc.getTransceivers().find((t) => !t.stopped && t.receiver && t.receiver.track && t.receiver.track.kind === 'audio' && (!t.sender || !t.sender.track))
           if (at2 && ntr) {
@@ -1352,10 +1431,15 @@ async function handleSignalEv(ev) {
     }
     // ── answer: faqat CHAQIRUVCHI oladi (R5: eski javob qabul qilinmaydi) ──
     if (d.k === 'answer' && C.pc) {
+      // v128: bizning lokal-apply (offer setLocalDescription fon-da) hali tugamagan
+      // bo'lishi mumkin — javobni tashlab yubormaslik uchun AVVAL kutamiz
+      if (C.applyP) { try { await C.applyP } catch {} }
+      C.applyP = null
       if (C.pc.signalingState !== 'have-local-offer') { logSig('answer drop', 'signaling=' + C.pc.signalingState); return }
       if (C.oseq && d.oseq && +d.oseq !== C.oseq) { logSig('eski javob tashlandi', 'oseq=' + d.oseq + ' bizniki=' + C.oseq); return }
       if (C.pc.remoteDescription && d.sdp && C.pc.remoteDescription.sdp === d.sdp.sdp) return
       await C.pc.setRemoteDescription(d.sdp)
+      C.remoteAt = Date.now() // v128: ulanish-qorovuli uchun (10s qorovul shu vaqtdan)
       await flushIce(C)
       return
     }
@@ -1590,6 +1674,19 @@ setInterval(() => {
     try { if (ringCtx && ringCtx.state === 'suspended') ringCtx.resume().catch(() => {}) } catch {}
     // 4) PC 'failed' — tiklash narvoni
     if (C.pc && C.pc.connectionState === 'failed' && C.started) { recover(C, 'pc-failed-halqa'); return }
+    // 4b) v128 ULANISH-QOROVULI: SDP almashinuvi tugagan (remoteDescription bor) lekin
+    // 10s ichida PC ulanmagan. Brauzer 'failed'ni 15-30s da e'lon qiladi — JUDA KECH
+    // (shu kechikish «12-20s ulanish»ning oxirgi bo'g'ini). Bitta erta-tiklash:
+    // offerer o'zi ICE-restart, answerer 'needice'. iceNudged — bir marta (po'ansa
+    // yig'uvni uzmaslik uchun), recover'ning o'z 12s-throttle + 3-urinish kafolati saqlanadi.
+    if (!C.started && C.pc && C.pc.remoteDescription && !C.iceNudged) {
+      const since = C.remoteAt || C.offerAt || 0
+      if (since && Date.now() - since > 10000) {
+        C.iceNudged = 1
+        clog('ulanish-qorovuli', 'SDP tayyor, 10s ulanmadi (holat=' + C.pc.connectionState + ') — erta tiklash')
+        recover(C, 'ulanish-turgun')
+      }
+    }
     // 5) Media statistikasi — faqat ulangan qo'ng'iroqda
     if (C.started && C.pc && C.pc.connectionState === 'connected') {
       C.pc.getStats().then((st) => { if (CALL === C) evalStats(C, st) }).catch(() => {})
@@ -2102,9 +2199,10 @@ async function addChild(uid) {
     }, 10000)
   }, 10000)
   const o = await k.pc.createOffer()
-  await k.pc.setLocalDescription(o)
+  // v128: lokal-apply FONDA — efir-offeri DARHOL yuboriladi (ICE-yig'uv kutilmaydi)
+  k.pc.setLocalDescription(o).catch(() => {})
   limitBitrate(k.pc)
-  sig(uid, { k: 'loffer', live_id: L.id, sdp: k.pc.localDescription.toJSON() })
+  sig(uid, { k: 'loffer', live_id: L.id, sdp: { type: 'offer', sdp: o.sdp } })
 }
 function armRetry(L) {
   clearTimeout(L.retry)
@@ -2269,8 +2367,9 @@ async function liveSignal(from, d) {
       await pc.setRemoteDescription(d.sdp)
       for (const c of L.ice.splice(0)) await pc.addIceCandidate(c).catch(() => {})
       const a = await pc.createAnswer()
-      await pc.setLocalDescription(a)
-      sig(from, { k: 'lanswer', live_id: L.id, sdp: pc.localDescription.toJSON() })
+      // v128: lokal-apply FONDA — efir-javobi DARHOL yuboriladi
+      pc.setLocalDescription(a).catch(() => {})
+      sig(from, { k: 'lanswer', live_id: L.id, sdp: { type: 'answer', sdp: a.sdp } })
       // Task 34: ULANISH WATCHDOG — javob yuborilgach 12s ichida 'connected' bo‘lmasa,
       // yangi ota bilan qayta ulanamiz (eski yo‘nalish o‘lgan bo‘lishi mumkin).
       clearTimeout(L.connT)

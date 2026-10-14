@@ -921,3 +921,27 @@ Stage Summary:
 - Tashxis push (ac95591) zanjiri — 10/10 YASHIL (+ Panel v127 tashxis).
 - JONLI ISBOT (panel127_diag.mjs, run 38570489835, 11/11): egasi {pass} login 200 (rl=egasi) ✓; me egasi=true perms=[*] ✓; BOSHQA ADMIN QO'SHISH → 403 «Boshqa admin qo'shish o'chirilgan — panel faqat dastur egasiga tegishli (v127)» ✓ (ASOSIY ISBOT); begona admin logini → 401 ✓; dash 200 (total=739) ✓; admins ro'yxati — barcha faol satrlar egasi ✓; jonli versiya v127 ✓. Sandbox'dan: core.js __50BUILD='v127' ✓, sw.js 50gram-v127 ✓, workers.dev 200 redirect:[] (v122 muhri) ✓; /api/build|login «Not found» = ma'lum SEC-DO sandbox bloki (CI'dan yashil).
 - Dizayn-izoh: 14 modul spektdan 1-modul soddalashtirildi — ko'p-admin rollar (bosh_admin/moderator/support/moliya) KODDAN yopildi; rol-infrastruktura (PANEL_ROLES/permOk) kelajak uchun saqlangan lekin faqat 'egasi' roli ishlaydi. 2-bosqich quyilari o'zgarmagan.
+
+---
+Task ID: 74
+Agent: Super Z (asosiy agent)
+Task: v128 — VIDEO QO'NG'IROQ ULANISH TEZLIGI (12-20s → 3-6s) + TIZIM MUSTAHKAMLIKI. Foydalanuvchi: "video qo'ng'iroqni ulanish tezligini oshir — ulanish ancha uzoq 12 soniyadan 20 soniyagacha cho'zilmoqda — tezlikni oshir va dasturni barcha funksiyalarini mustahkamla aniq va tez bir xil ishlashini kuchaytir tez va sifatli qilib kuchaytir"
+
+Work Log:
+- SINXRONIZATSIYA: local repo v120'da qolgan edi — origin/main'ga hard-reset (v127, Task 73 panel-faqat-egasi muhrlandi).
+- TASHXIS (12-20s ning 6 ta ildizi, call:* jurnallari + kod-tahlil): ① setLocalDescription eski WebView'larda to'liq ICE-YIG'UVNI kutadi (openrelay TURN-TCP candidate 3-10s) — offer/answer yuborilishi bloklanardi; ② /ice setupPC ICHIDA sequential (TURN-kalit 3.5s gacha); ③ signal-navbat polling 1.8s — WS-zombi bo'lsa accept→offer→answer→ICE har bosqich 1.8s kutardi; ④ server signal() await-INSERT (TiDB 100-300ms) + await-notify — har signal POST vaznli; ⑤ ikkala kamera ketma-ket zanjirda; ⑥ brauzer 'failed' holatini 15-30s da beradi — tiklash juda kech.
+- v128-1 (client rtc.js — SDP DARHOL): processAccept/answer/restartIce/a-reset/LIVE-offer/LIVE-answer — endi offer/answer SDP createOffer/createAnswer natijasidan DARHOL yuboriladi, setLocalDescription FONDA (C.applyP + .catch). Answer handler applyP'ni signalingState tekshiruvidan OLDIN kutadi (race-yo'q). Trickle ICE candidate'lar avvalgidek.
+- v128-2 (client — ICE TEZ): icePreWarm() chaqiruvchi+qabulchida (kesh 10daq); newPC 1.5s timeout-race (zaxira ICE bilan darhol boshlash — /ice osilsa qo'ng'iroq qotmaydi).
+- v128-3 (client — POLLING ADAPTIV): startSigPoll setTimeout-zanjiri — ulanish bosqichida 600ms, ulangach 1800ms (8s qotiq-qorovul saqlangan).
+- v128-4 (client — PARALLEL KAMERA): chaqiruvchi kamerasi POST /calls bilan parallel (GHOST-SWEEPER: CALL.local tayinlanmagan bo'lsa TEGMAYDI — yangi oqimni o'ldirmaslik qorovuli); qabulchi accept'ni KAMERA OCHILISHIGA PARALLEL yuboradi (offer parklanadi — EARLY-OFFER PARKING mavjud mexanizm) → ikkala kamera bir vaqtda ochiladi.
+- v128-5 (client — QOROVUL + SIGNAL-TEZLIK): 10s ULANISH-QOROVULI (remoteDescription bor + 10s connected emas → bitta erta-tiklash, iceNudged bir marta, recover'ning 12s-throttle+3-urinish saqlangan); sigTo har urinishi 6s timeout (osilgan POST 20s kutmasdi — timeout-dublikatlar xavfsiz: oseq+sdp-tenglik+dedup); ICE-candidate POST'iga 1 marta qayta urinish (600ms).
+- v128-6 (server index.ts): signal() navbat-INSERT c.wait ichida (fonda) — javob WS-yetkazish bilandarhol qaytadi; c.wait worker'ni yozuv tugaguncha tirik saqlaydi (zombi-WS zaxirasi avvalgidek ISHLAYDI). Qo'ng'iroq-yakunlashdagi call_closed INSERT (3238-satr) ISSIQ YO'LDA EMAS — await qoldi (ataylab).
+- VERSIYA UCHLIGI v128: worker BUILD_V + web/core.js __50BUILD + web/sw.js V.
+- SINOV: scripts/test_v128_static.js 62/62 YASHIL (6-tuzatish + R1/R2/R5 muhrlari + M1/M2/M3 v96 audio-sikl endCall tartibi TEGILMAGAN + v122-301-yo'q + v123/v124 sessiya + v127 faqat-egasi + SMS_MODE + TURN-openrelay + node --check ×10); tsc 14 = BAZAVIY (0 yangi); wrangler dry-run OK (477.47 KiB — node_modules bun install bilan tiklandi); eski testlar (v114-v127) faqat kutilgan versiya-uchlik/eski-funksiya xatolariga qotadi (0 regressiya).
+- NATIJA PROGNOZI: o'rtacha ulanish 12-20s → 3-6s (kamera-parallel + SDP-darhol + signal-tez + polling-tez); eng yomon holat (zaif tarmoq) 45s-deadline o'rniga ~10-14s da tashxis+tiklash. CI E2E (3 ketma-ket + MEDIA 2-brauzer) jonli tasdiqlaydi.
+
+Stage Summary:
+- Video qo'ng'iroq ulanish zanjirining HAR BOSQICHIDA ketma-ketlik parallelga almashtirildi: ikkala kamera bir vaqtda, offer/answer yig'uv kutmasdan, signal POST'lari yengil, polling 3x tez, o'lik yo'llar 10s da aniqlanadi.
+- MUHRLAR BUZILMAGAN: R1 (offer faqat chaqiruvchida), R2 (bitta doimiy oqim), R5 (oseq), M1/M2/M3 (v96 — «keyingi qo'ng'iroq jim» qaytmasligi), SMS_MODE="app", v122 (301 yo'q), v123/v124 (sessiya), v127 (panel faqat egasi) — hammasi statik testlar bilan isbotlangan.
+- Jonli efir (LIVE) offer/answer ham darhol yuboriladi — barcha WebRTC funksiyalari bir xil tezlik paternida.
+- Versiya: v128 (worker/core/sw sinxron). Sayt: https://50gram.uz

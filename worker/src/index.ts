@@ -360,7 +360,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v127"
+const BUILD_V = "v128"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -3156,7 +3156,12 @@ async function signal(c: C) {
   // qiluvchining WebSocket'i o'lik/zombi bo'lsa, POST 200 OK qaytarardi LEKIN signal 0 ta
   // soketga yetib «Ulanmoqda…» abadiy qolardi. Endi navbat 2 daqiqa saqlanadi — klient
   // polling bilan albatta oladi.
-  try { await c.db.run("INSERT INTO call_signals(id,to_uid,from_uid,body,created_at) VALUES(?,?,?,?,?)", [sid, to, c.uid, body, now()]) } catch (e) { jurnalYoz(c.env, "/signal", c.uid, "sigq", "navbat INSERT: " + String(e)) } // console.log'da YO'QOLARDI — signal yo'qolishining ko'rinmas ildizi
+  // v128 TEZLIK: navbat-yozuvi (TiDB INSERT, 100-300ms) FONDA (c.wait) — javob
+  // WS-yetkazish bilandarhol qaytadi. Avval await INSERT + await notify — HAR signal
+  // POST shu yozuvni kutardi; qo'ng'iroq zanjirida (accept→offer→answer→ICE) 6-10
+  // signal bor → 1-3s ortiqcha kechikish. c.wait worker'ni yozuv tugaguncha tirik
+  // saqlaydi — navbat (zombi-WS zaxirasi) avvalgidek ISHLAYDI, faqat javob KUTMAYDI.
+  c.wait(c.db.run("INSERT INTO call_signals(id,to_uid,from_uid,body,created_at) VALUES(?,?,?,?,?)", [sid, to, c.uid, body, now()]).catch((e) => { jurnalYoz(c.env, "/signal", c.uid, "sigq", "navbat INSERT: " + String(e)) }))
   await notify(c.env, [to], { type: "signal", sid, from: c.uid, data })
   return json({ ok: true })
 }
