@@ -357,7 +357,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v122"
+const BUILD_V = "v123"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -459,6 +459,15 @@ async function ensureSchema(db: Db) {
     // egada har bir boshqaruv amali dalili bilan. Retensiyasi 90 kun (cleanup).
     "CREATE TABLE IF NOT EXISTS adm_log (id BIGINT AUTO_INCREMENT PRIMARY KEY, ts BIGINT NOT NULL, act VARCHAR(32) NOT NULL DEFAULT '', tgt VARCHAR(64) NOT NULL DEFAULT '', note VARCHAR(300) NOT NULL DEFAULT '')",
     "CREATE INDEX IF NOT EXISTS idx_admlog_ts ON adm_log (ts)",
+    // v123 SESSIYA O'TISH DAVRI: yangi kirish sess aylantirganda ESKI sessiya 5 daqiqa
+    // ruxsat (prev_sess) bilan yashaydi. Sabab: v120/v121 «brauzerga otish» xaosida
+    // foydalanuvchining bir hisobi IKKITA klientda qolib ketdi (APK + brauzer). Qattiq
+    // aylanish ularni QAYTA-QAYTA «Qaytadan kiring»ga otardi: egasi bir klientga kirsa
+    // ikkinchisi 401 oladi, u ham kirsa birinchisi o'lardi — abadiy urush. 5 daqiqadan
+    // keyin eski sessiya baribir o'ladi — «bir raqam — bitta faol dastur» himoyasi
+    // ma'nosicha saqlanadi (begona qurilma baribir 409 bilan to'siladi, logout darhol o'ldiradi).
+    "ALTER TABLE users ADD COLUMN prev_sess VARCHAR(24) NULL",
+    "ALTER TABLE users ADD COLUMN prev_sess_exp BIGINT NULL",
   ]
   for (const s of stmts) { try { await db.run(s) } catch {} }
   try {
@@ -705,8 +714,12 @@ async function authVerify(c: C) {
     if (+u.blocked === 1) fail("Hisobingiz bloklangan", 403)
     // Kirish → hisob yana FAOL bo'ldi + YANGI YAGONA SESSIYA: eskirgan barcha tokenlar
     // o'lik bo'lib qoladi (sess mos kelmadi → 401) — bir raqam, bitta faol qurilma.
+    // v123: ESKI sessiya 5 daqiqa prev_sess ruxsatida yashaydi — v120/v121 xaosidan
+    // qolgan ikkinchi klient (zombi brauzer tab/PWA) egani QAYTA-QAYTA uloqtirmasin.
+    // Faqat KIRISH ruxsat beradi; explicit logout baribir DARHOL hammasini o'ldiradi
+    // (logout_at tekshiruvi sess tekshiruvidan OLDIN — middleware'da tartib shu).
     // v73: qurilma guvohnomasi ham yangilanadi (bo'sh bo'lsa — eski saqlanadi, eski mijozlar buzilmasin).
-    await c.db.run("UPDATE users SET logout_at=NULL, token_exp=?, last_seen=?, sess=?, dev=COALESCE(NULLIF(?,''),dev) WHERE id=?", [texp, tnow, sess, dev, u.id])
+    await c.db.run("UPDATE users SET prev_sess=sess, prev_sess_exp=?, logout_at=NULL, token_exp=?, last_seen=?, sess=?, dev=COALESCE(NULLIF(?,''),dev) WHERE id=?", [tnow + 5 * 60_000, texp, tnow, sess, dev, u.id])
   }
   const token = await signJwt({ sub: String(u.id), s: sess }, c.env.JWT_SECRET, 180 * 86400)
   return json({ token, user: pubUser(u, u.id), is_new: !u.first_name })
@@ -5906,8 +5919,11 @@ export default {
         if (!payload) { if (fwip) { if (fwLokal(fwip, "tok", 60, 3_600_000)) return FW_404(); fwOchko(env, wait, fwip, "tok", 1, secInfo(req, url)) } return json({ error: "Avtorizatsiya kerak" }, 401) }
         // Yagona sessiya nazorati (WS uchun ham): logout/qayta kirish eski ulanishni o'chiradi
         // v104: bloklangan hisobning WS ulanishi ham darhol yopiladi
-        const su = await db.one("SELECT sess, logout_at, token_exp, blocked FROM users WHERE id=?", [Number(payload.sub)])
-        if (!su || su.logout_at || (su.token_exp && +su.token_exp < now()) || (payload.s && payload.s !== su.sess) || +su.blocked === 1)
+        // v123: sess mosligi YOKI 5 daqiqalik ruxsatdagi eski sessiya (o'tish davri —
+        // v120/v121 xaosidan qolgan ikkinchi klient foydalanuvchini qayta uloqtirmasin)
+        const su = await db.one("SELECT sess, prev_sess, prev_sess_exp, logout_at, token_exp, blocked FROM users WHERE id=?", [Number(payload.sub)])
+        if (!su || su.logout_at || (su.token_exp && +su.token_exp < now()) || +su.blocked === 1 ||
+            (payload.s && payload.s !== su.sess && !(payload.s === su.prev_sess && +(su.prev_sess_exp || 0) > now())))
           return json({ error: "Avtorizatsiya kerak" }, 401)
         if (req.headers.get("Upgrade") !== "websocket") return json({ error: "WebSocket kerak" }, 426)
         const stub = env.USER_SOCKET.get(env.USER_SOCKET.idFromName(String(payload.sub)))
@@ -5927,9 +5943,14 @@ export default {
         // tokenlar (s klaimsiz) moslik bo'yicha ishlaydi — yangilanish yumshoq o'tadi.
         // v104 ADMIN PANEL BLOK: blocked=1 hisob — HAR BIR autentifikatsiyalangan so'rovda
         // darhol 401 (ilova o'zi kirish ekraniga qaytaradi; qayta kirish ham authVerify'da yopiq)
-        const su = await db.one("SELECT sess, logout_at, token_exp, blocked FROM users WHERE id=?", [uid])
+        const su = await db.one("SELECT sess, prev_sess, prev_sess_exp, logout_at, token_exp, blocked FROM users WHERE id=?", [uid])
         if (!su || su.logout_at || (su.token_exp && +su.token_exp < now()) || +su.blocked === 1) fail("Avtorizatsiya kerak", 401)
-        if (payload.s && payload.s !== su.sess) fail("Avtorizatsiya kerak", 401)
+        // v123: sess mosligi YOKI 5 daqiqalik ruxsatdagi ESKI sessiya — v120/v121 «brauzerga
+        // otish» xaosidan qolgan ikkinchi klient (zombi tab/PWA) egani QAYTA-QAYTA «Qaytadan
+        // kiring»ga uloqtirmasin (qayta kirish → eski klient o'ladi → u ham kiradi → urush).
+        // logout_at bo'lsa yuqoridagi qator hamma tokeni darhol o'ldiradi — chiqish kuchida.
+        if (payload.s && payload.s !== su.sess && !(payload.s === su.prev_sess && +(su.prev_sess_exp || 0) > now()))
+          fail("Avtorizatsiya kerak", 401)
         // MA'LUMOT TORTISH POSBONI (hatto yaroqli token bilan ham ma'lumot olib qochish mumkin emas):
         // bitta hisob 10 daqiqada 3000+ so'rov = skript (inson UI'da bunga yaqinlasha olmaydi —
         // ping 45s, qo'ng'iroq polling 20s, lenta paginatsiyasi... hammasi birgalikda << 300).

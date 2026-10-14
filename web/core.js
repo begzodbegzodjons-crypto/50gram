@@ -215,7 +215,11 @@ async function api(path, opt = {}) {
   if (!r) { try { console.info('[api] tarmoq xato', path, lastErr && lastErr.name) } catch {} ; throw new Error(lastErr && lastErr.name === 'AbortError' ? 'Server javob bermadi — birozdan so‘ng qayta urinib ko‘ring' : 'Internet aloqasi yo‘q') }
   let j = {}
   try { j = await r.json() } catch {}
-  if (r.status === 401 && S.token && !path.startsWith('/auth')) { logout(true); throw new Error('Qaytadan kiring') }
+  // v123: 401 = token server tomonidan ALLAQACHON rad etilgan. logout(true, TRUE) — o'lik
+  // token bilan /auth/logout'ga borilmaydi (eski s-klaimsiz tokenlar bilan u logout_at'ni
+  // GLOBAL yozardi → boshqa qurilmadagi yangi sessiya ham o'lar edi → «qayta kirish tutmaydi»
+  // halqasi — v120/v121 xaosining eng og'riqli effekti). Lokal tozalash yetarli.
+  if (r.status === 401 && S.token && !path.startsWith('/auth')) { logout(true, true); throw new Error('Qaytadan kiring') }
   if (!r.ok) { const err = new Error(j.error || 'Xatolik (' + r.status + ')'); err.status = r.status; throw err }
   return j
 }
@@ -1090,14 +1094,18 @@ $('b-prof').onclick = async () => {
   b.disabled = false
 }
 function setMe(u) { S.me = { ...(S.me || {}), ...u }; localStorage.setItem('g50_me', JSON.stringify(S.me)) }
-async function logout(silent) {
+async function logout(silent, deadTok) {
   // Serverga ham xabar: hisob "chiqdi" → shu raqam endi kod olish uchun OCHIQ (muallif tizimi).
+  // v123: deadTok=true → token allaqachon o'lik (401 berildi). Bunday token bilan serverga
+  // xabar BEFUDDA (javob baribir 401) va XAVFLI: eski s-klaimsiz tokenlar logout_at'ni
+  // GLOBAL yozib, foydalanuvchining BOSHQA qurilmadagi yangi sessiyasini ham o'ldirardi —
+  // «qayta-qayta kiring» halqasi ana shu edi. O'lik token bilan faqat LOKAL tozalash.
   // v72 TUZATISH («logout qilmay dastur» — raqam BAND qolishi ildizi): oldin fetch FIRE-AND-FORGET
   // edi — darhol location.reload() WebView so'rovni o'chirib yuborardi, server logout_at YOZMASDI
   // → raqam «BAND» qolaverardi. Endi fetch AWAIT qilinadi (3s oshiq-vaqt himoyasi bilan) —
   // server javobini kutib turib, SO'NNG sahifa yangilanadi.
   try {
-    if (S.token) await Promise.race([
+    if (S.token && !deadTok) await Promise.race([
       fetch(API + '/auth/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + S.token }, keepalive: true }),
       new Promise((res) => setTimeout(res, 3000)),
     ])
@@ -1379,7 +1387,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v122'
+window.__50BUILD = 'v123'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
