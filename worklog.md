@@ -824,3 +824,28 @@ Stage Summary:
 - v73 muallif tizimi (bir raqam — bitta dastur) MA'NOSICHA SAQLANGAN: begona 409, force tugmasi, logout darhol o'ldiradi. Faqat kirish-aylanishida 5 daqiqalik o'tish davri bor.
 - Residual (keyingi task'larga): s-klaimsiz eski tokenlar bypassi hali ham ochiq (yumshoq migratsiya — zanjir yangilangach yopiladi); session-diag.yml vaqtinchalik qoldi (keyin o'chiriladi).
 - Versiya: v123 (worker/core/sw sinxron). 11/11 + tashxis 5/5 yashil. Sayt LIVE: https://50gram.uz
+
+---
+Task ID: 70
+Agent: Super Z (asosiy agent)
+Task: v124 — «Qaytadan kiring» URUSHINI YAKUNAN TUGATISH. Foydalanuvchi: "yana qayta kiring deb chiqib ketyapti umuman tuzalmagan foydalanuvchilarga qayerdan aytaman dunyo bo'ylab ishlatishmoqda sharmanda qilyapsan tuzat tezroq" (v123'dan KEYIN ham davom etdi)
+
+Work Log:
+- ILDIZ TOPILDI — JONLI MA'LUMOTLAR BILAN (kick-diag.yml + scripts/kick_diag.mjs yangi tashxis quvuri): ① KESH TEKSHIRUVI: / va /index.html «no-cache, must-revalidate», core.js/sw.js «max-age=0, must-revalidate»+ETag — YETKAZIB BERISH SANOQLI (klientlar yangilanadi). ② REAL QURILMA BUILD-TAQSIMOTI (klient jurnali, err_jurnal src=klient): {v123:40, v122:37, v120:3} — mijozlar yangi kodda, kik baribir davom etadi → ildiz SERVERDA. ③ URUSH-SIM v123: A kirdi → B kirdi → 320s → A=401 — v123'ning 5 daqiqalik ruxsati urushni to'xtata OLMAYDI: har yangi kirish oldingi qurilmani o'ldiradi (qattiq sess-aylanish, v73). v120/v121 «brauzerga otish» xaosida foydalanuvchining bir hisobi IKKI klientda qolgani uchun (APK + brauzer/PWA) foydalanuvchi O'ZINI O'ZI BILAN URUSHAYOTGAN edi.
+- V124 «URUSHNI TUGATISH» (worker/src/index.ts):
+  1) authVerify ODDIY kirish sessiyani UMUMAN AYLANTIRMAYDI — MAVJUD sess qayta ishlatiladi (sess=u.sess, token shu qiymat bilan). Hech qanday oddiy kirish boshqa qurilmani o'ldira olmaydi — urush MATEMATIK JIHATDAN imkonsiz (hamma qurilma bitta sessiyada, Telegram-uslub). dev endi QOTIQ (COALESCE(dev,new) — faqat bo'sh to'ldiriladi).
+  2) ROTATSIYA FAQAT force=1 («Bu mening raqamim» — v73 hijak-tozalash MA'NOSICHA saqlandi) yoki sess=NULL (juda eski qator): eski sessiyalar DARHOL o'ladi (prev_sess=sess, prev_sess_exp=0) + devs tozalanadi.
+  3) YANGI USTUN devs MEDIUMTEXT (ensureSchema ALTER): MA'LUM qurilmalar ro'yxati (ko'pi 4, FIFO) — eganing o'z qurilmalari (APK/brauzer/PWA) 409 «tarmoqda mavjud» HECH QACHON olmaydi. Oddiy kirish ro'yxatni BIRLASHTIRADI, force TOZALAYDI.
+  4) authLogout IKKI POYDEVOR: (a) chiqish FAQAT joriy sessiya tokeni bilan (payload.s===su.sess — s-klaimsiz eski tokenlar logout_at'ni zaharlay olmaydi, javob 401); (b) chiqish sessiyani AYLANTIRADI (eski tokenlar qayta «tirilmaydi» — logout→login resurrect teshigi yopildi).
+- KLIENT (web/core.js): force «Bu mening raqamim» oqimidan ENDI verify'ga ham yetkaziladi (authForce: otp→saqlanadi→verify body'ga force:1) — begona qurilma eganing bitta tasdig'i bilan DARHOL uchadi. ESKI KLIENTLAR (yangilanmagan) ham server tomon davolanadi — force'siz kirishlar endi hech kimi o'ldirmaydi.
+- TASHXIS INFRA: .github/workflows/kick-diag.yml (dispatch) + scripts/kick_diag.mjs (kesh-sarlavhalar + panel + jurnal + urush-sim 320s) + scripts/raw_log.mjs (job-log to'liq yuklash). panel login javob maydoni «token» (lokal tuzatildi, keyingi run'da ishlaydi).
+- SINOV: scripts/test_v124_static.js 44/44 YASHIL (devs migratsiya + sess-reuse + force-rotatsiya + 409-ozod + logout-ikki-poydevor + authForce + versiya-uchligi v124 + v123/v122 muhrlar + APK manbalari + node --check ×10); tsc 14 = BAZAVIY (0 yangi); wrangler dry-run OK.
+- CI (f075d0a): Deploy ✓ / CF Deploy ✓ / Smoke ✓ / MUHR ✓ / XAVFSIZLIK ✓ / DATA ✓ (rerun) / MEDIA ✓ (rerun) / 2-brauzer MEDIA ✓ (rerun) / Jurnal ✓ (rerun) — 9/9 YASHIL.
+- JONLI ISBOT (kick-diag, run 38539455294, v124): A kirdi → B kirdi → 320s → **A=200, B=200** (v123'da A=401 edi!) — B kirishi A'ni o'ldirmadi, URUSH O'LDI. Versiya uchligi v124 jonli. Real qurilmalar v124 olmoqda: {v124:13, v123:44, v122:15} (build-guard ishlayapti). Klient jurnalida qo'ng'iroqlar tabiiy ishlayapti (sig/endCall yozuvlari).
+
+Stage Summary:
+- «Qayta-qayta kiring» ildizi YAKUNAN yo'q: endi HECH qanday oddiy kirish boshqa qurilmani chiqarib yubormaydi. Foydalanuvchi APK'da ham, brauzerda ham, PWA'da ham BIR VAQTDA ishlaydi (barchasi bitta sessiyada).
+- Foydalanuvchilarga aytish: hamma JOYDA BIR MARTA qayta kirsinlar (eski tokenlar v123-davrasi qoldig'i) — shundan keyin ilova boshqa hech qachon «qaytadan kiring» so'ramaydi. «Bu mening raqamim» tugmasi faqat haqiqiy boshqa-qurilma holatida bir marta so'raladi.
+- v73 muallif tizimi saqlangan: begona qurilma 409, force=rotatsiya+devs-tozalash (hijak bir tasdiqda uchadi), Chiqish hamma qurilmani o'ldiradi (endigina sessiyani ham aylantiradi — qayta tirilish yo'q).
+- Residual: s-klaimsiz eski tokenlar hali ham boshqa endpoint'larda ishlaydi (yumshoq migratsiya — zanjir yangilangach yopiladi); kick-diag.yml/session-diag.yml vaqtinchalik tashxislar (keyin o'chiriladi); kick-diag panel-maydoni tuzatishi lokalda qoldi (keyingi push bilan boradi).
+- Versiya: v124 (worker/core/sw sinxron). 9/9 CI + jonli urush-o'lim isboti yashil. Sayt LIVE: https://50gram.uz
