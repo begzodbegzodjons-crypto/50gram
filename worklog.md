@@ -947,3 +947,26 @@ Stage Summary:
 - Versiya: v128 (worker/core/sw sinxron). Sayt: https://50gram.uz
 - CI (d8a9720) — 9/9 YASHIL: Deploy ✓×2 / smoke ✓ / MUHR (3 ketma-ket haqiqiy qo'ng'iroq, M1/M2/M3) ✓ / Qo'ng'iroq MEDIA (2-brauzer) ✓ / MEDIA (rasm+fayl — attempt 4, hujjatlashtirilgan flaky, «Server javob bermadi» 20s-tarmoq, kodbilan bog'liq emas) ✓ / XAVFSIZLIK ✓ / DATA ✓ / Jurnal ✓. Bekor qilinganlar qat'iy ketma-ket rerun (bir-vaqtda-4-rerun to'qnashuvi 2 marta cancel berdi — bittama-bitta rerun qoidasi tasdiqlandi).
 - JONLI ISBOT (curl): 50gram.uz → 200 ✓; core.js __50BUILD='v128' ✓; sw.js 50gram-v128 ✓; rtc.js'da v128 markerlari (21 havola) ✓.
+
+---
+Task ID: 75
+Agent: Super Z (asosiy agent)
+Task: v129 — «OVOZ KELMAYAPTI / QO'NG'IROQ QOTIB QOLYAPTI» tuzatish. Foydalanuvchi: "A foydalanuvchi B foydalanuvchiga video qo'ng'iroq qilsa A foydalanuvchida video qotib qolyapti ovoz ham kelmayapti — B foydalanuvchi A foydalanuvchiga video qo'ng'iroq qilsa ishlayapti — tuzat yana buzildi tezlataman deding buzding"
+
+Work Log:
+- JONLI TASHXIS (jurnal.yml run 38686515909, 300 yozuv — foydalanuvchining o'z sinov qo'ng'iroqlari: 1792040740709708/26s, 1792040789067439/19s, 1792040815813996/16s, 1792041147071227/125s): ULANISH TEZLIGI YAXSHI (2-5s — v128 isbotlangan, shikoyat tezlik emas). ASOSIY 3 KASALLIK topildi:
+- ① DEKODER-O'LIK (asosiy): 05:07 qo'ng'iroqda 85563 tomonda inA=+12365 bayt/5s (ovoz baytlari KELYAPTI) lekin smp=+0 (totalSamplesReceived NOL — dekoder BIR TA namuna ham decode qilmagan), kon=+0 (urinish ham yo'q) — Chrome/153-154 WebView dekoder-qotishi (v94 kasalligi). Yagona davo = a-reset (yangi m-line → yangi dekoder), lekin u narvonda bosqich-7 (35-40s) da — foydalanuvchi 16-26s da uzatardi.
+- ② NARVON-ZAHARI (hech qachon davolanmaganining ildizi): ovoz-qutqaruv narvoni (C.silN) va mikro-jim BITTA hisoblagichdan foydalanar edi — mikro-jimning `else C.silN = 0` shoxi eshitmayotgan foydalanuvchining narvonini HAR oynada nolga tushirar edi. JURNAL-ISBOT: «ovoz-jim bosqich 1» har 5s takrorlangan (05:07:13, 05:13:47, 05:14:37...), lekin bosqich 3/4/5/6/7 bir marta ham chiqmagan!
+- ③ MIKRO-JIM CHEGARASI: yuboruvchi mikrofoni jim oqim oyna-max=4% beradi (05:12 qo'ng'iroq: 86492 ch=4%, outA=+11714) — `outR < 1` chegarasidan qochib qutar edi → qarshi tomon jimin eshitardi («mening ovozim yetmayapti»).
+- v129-1 (dekoder-detektor): evalStats'da DARHOL-detektor — dInA>4000 && dSmpl===0 && dKon===0 && hasSmpl → 5-10s ichida a-reset so'raladi (bosqich-7'ning 35-40s'iga qarshi). dKon===0 — paket-yo'qotishni (recover/needice kasalligi) ajratib turadi. 15s cooldown + decFired (o'sha oynada boshqa qutqaruv yugurmaydi, video/mikro qorovullari ishlaydi).
+- v129-2 (hisoblagich-ajratish): mikro-jim o'z C.micSilN'ini oldi — silN bilan umuman bog'lanmagan. Narvon endi erkin climb qiladi: z=1 (5s) → z=3 almashtirildi → z=4 elementlar → z=5 kontekst → z=6 kick → z=7 a-reset.
+- v129-3 (mikro-jim chegara): outR<1 → outR<5 && dOutA>15000 (uzluksiz-oqim dalili; sukut-uzluksiz 2-2.5KB/5s, jim-oqim 3-4KB/5s). 2 ketma-ket oyna + 4-heal cap (v94 yalg'on-heal posbonlari saqlangan).
+- v129-4 (a-reset ×2 + baseline): a-reset 2 martagacha (detektor + narvon umumiy hisobda); areset-javobida C.st0=null + decDead=0 + decCool — yangi dekoder toza o'lchanadi, detektor yolg'on qayta ishga tushmaydi; audioTransceiverReset'da ham st0 tozalanadi.
+- MUHRLAR TEGILMAGAN: v128 tezlik-qanoti (SDP-darhol/applyP/pre-warm/adaptiv-poll/parallel-kamera/10s-qorovul — hammasi saqlangan), R1/R2/R5, M1/M2/M3 (v96 endCall), SMS_MODE, v122/v123/v124/v127.
+- VERSIYA UCHLIGI: BUILD_V="v129" / __50BUILD='v129' / V='50gram-v129' — sinxron. SCHEMA_V=126 (0 sxema o'zgarishi).
+- SINOV: scripts/test_v129_static.js 44/44 YASHIL (detektor + hisoblagichlar + chegara + baseline + v128-qanot + R1/R2/R5 + M1/M2/M3 + v122/v123/v124/v127 + versiya + node --check ×3); tsc 14 = BAZAVIY (0 yangi); wrangler dry-run OK.
+
+Stage Summary:
+- «Ovoz kelmayapti»ning uch ildizi ham yopildi: o'lik dekoder 5-10s da yangilanadi (avval hech qachon), jim mikrofon 10-15s da davolanadi (avval ch=4% qochardi), qutqaruv narvoni endi hech narsa tomonidan buzilmaydi.
+- v128 tezligi SAQLANGAN (jurnal: 2-5s ulanish — foydalanuvchining asl shikoyati tezlik emas edi).
+- Sayt: https://50gram.uz — keyingi sinovda ikkala tomonda ham ovoz + video tiklanishi kutiladi; yangi jurnal belgisi: dekoder-olik / mikro-jim / bosqich-7 a-reset #1-#2.

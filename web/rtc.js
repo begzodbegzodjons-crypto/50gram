@@ -1,5 +1,21 @@
 /* 50 Gram — audio/video qo'ng'iroqlar va jonli efir (WebRTC)
    ═══════════════════════════════════════════════════════════════════════════
+   v129: «OVOZ KELMAYAPTI / QO'NG'IROQ QOTIB QOLYAPTI» — jonli-jurnal ildizlari (3 ta):
+   1) DEKODER-O'LIK: kiruvchi ovoz baytlari oqadi (inA>4KB/5s) lekin dekoder NOL namuna
+      decode qiladi (smp=+0, kon=+0) — Chrome/153-154 WebView kasalligi. Yagona davo =
+      a-reset (yangi m-line → YANGI dekoder). ENDI: darhol-detektor 5-10s ichida a-reset
+      so'raydi (avval narvon bosqich-7 = 35-40s — foydalanuvchi kutmasdan uzatardi).
+   2) NARVON-ZAHARI: ovoz-qutqaruv narvoni (C.silN) va mikro-jim BIR hisoblagichdan
+      foydalanardi — mikro-jimning else-shoxi narvonni HAR oynada nolga tushirardi →
+      jurnal-dalil: «bosqich 1» har 5s aylanagan, a-reset HEB QACHON yetmagan. ENDI:
+      mikro-jim o'z hisoblagichi (C.micSilN) — narvon ozod, a-reset yetadi.
+   3) MIKRO-JIM CHEGARASI: mikrofoni jim oqim oyna-max=4% beradi — outR<1 chegarasidan
+      qochardi («mening ovozim yetmayapti» davolansiz). ENDI outR<5 + dOutA>15000
+      (haqiqiy uzluksiz oqim dalili) — 2 ketma-ket oynada heal.
+   + a-reset 2 martagacha (birinchi yordam bermasa — ikkinchisi), a-reset'dan keyin
+   o'lchov-baseline 0 dan (detektor yolg'on-qayta-ishga tushmasin).
+   SAQLANGAN: v128 tezlik-qanoti (ulanish 2-5s — jurnal-isbot), R1/R2/R5, M1/M2/M3.
+   ═══════════════════════════════════════════════════════════════════════════
    v128: ULANISH TEZLIGI — «12-20s ulanmoqda» tashxisi (6 ta ildiz, hammasi yopildi):
    1) setLocalDescription eski WebView'larda to'liq ICE-YIG'UVNI KUTADI (TURN-TCP 3-10s)
       → offer/answer SDP endi DARHOL yuboriladi, lokal-apply FONDA (C.applyP — javob
@@ -951,6 +967,8 @@ async function audioTransceiverReset(C) {
   if (!C.pc || C.aRstBusy) return
   C.aRstBusy = true
   try {
+    // v129: transceiver to'xtatiladi — eski dekoder-statistikasi baseline'i ham o'ladi
+    C.st0 = null; C.decDead = 0
     const tr = C.pc.getTransceivers().find((t) => (t.sender && t.sender.track && t.sender.track.kind === 'audio') || (t.receiver && t.receiver.track && t.receiver.track.kind === 'audio'))
     const at = C.local && C.local.getAudioTracks()[0]
     if (tr && typeof tr.stop === 'function') { try { tr.stop() } catch {} }
@@ -1415,6 +1433,9 @@ async function handleSignalEv(ev) {
       if (d.areset && C.local && ok) {
         try {
           if (C.applyP) { try { await C.applyP } catch {} } // v128: answer-apply tugagach (stable)
+          // v129: YANGI dekoder tug'ilishidan oldin o'lchov-baseline tozalanadi —
+          // dekoder-o'lik detektori eski baseline bilan yolg'on qayta ishga tushmasin
+          C.st0 = null; C.decDead = 0; C.decCool = Date.now()
           const at2 = C.local.getAudioTracks()[0]
           const ntr = C.pc.getTransceivers().find((t) => !t.stopped && t.receiver && t.receiver.track && t.receiver.track.kind === 'audio' && (!t.sender || !t.sender.track))
           if (at2 && ntr) {
@@ -1521,6 +1542,32 @@ function evalStats(C, st) {
   // v87: stat har 2-oynada (10s — avval 15s edi, 29s'lik qo'ng'iroqlarda 1 tagina chiqardi)
   // v92: eshit= — qo'ng'iroq davomida HECH BO'LMASA BIR marta eshitish dalili bo'lganmi
   if (C.statN % 2 === 0) clog('stat', `inA=+${dInA} inV=+${dInV} outA=+${dOutA} outV=+${dOutV} kadrlar=+${fr - s.fr} | ovoz=${C.audioMode || '?'}${C.audioBlocked ? '(blok)' : ''} eshit=${C.everHeard ? 1 : 0} k=${inR}% ch=${outR}% mik=${at ? (at.enabled ? 'on' : 'O‘CHIRILGAN') : 'yo‘q'} rmut=${rat ? (rat.muted ? 'ha' : 'yo‘q') : '?'} sil=${C.silN || 0} fb=${C.fbN || 0} kk=${C.kickN || 0} vx=${C.qaLvl || 0} | alv=${alvR}% smp=+${dSmpl} kon=+${dKon} | el=${elState} | turn=${C.relay === undefined ? '?' : C.relay} | ctx=${C.ctx ? C.ctx.state : 'yo‘q'} aS=${C.hasAlv ? 1 : 0} sS=${C.hasSmpl ? 1 : 0} rej=${C.playRejN || 0}`)
+  // ── v129: DEKODER-O'LIK DETEKTORI — «ovoz baytlari kelyapti, lekin dekoder NOL
+  // namuna decode qilgan» — Chrome/154 WebView jimligining ANIQ imzosi (jonli jurnal:
+  // inA=+12365, smp=+0, kon=+0 — dekoder hech narsaga urinmagani ham yo'q). Bu holatda
+  // wa/ra/v almashtirish, element-qayta-qurish, kontekst-qayta-tug'ilish — HAMMASI BEKOR:
+  // yagona davo = a-reset (yangi m-line → YANGI dekoder). Narvondagi bosqich-7 (35-40s)
+  // kutmaymiz — DARHOL (5-10s ichida) so'raymiz. dKon=0 sharti: paket-yo'qotish (tarmoq)
+  // bo'lsa kon o'sadi — u boshqa kasallik (recover/needice to'g'ri), dekoder-o'likda kon=0.
+  // decFired: o'sha oynada boshqa ovoz-qutqaruvlar YO'Q (qayta-urinishlar to'qnashuvi yo'q),
+  // lekin video/mikro qorovullari ISHLAYDI (ertak emas — oyna 5s, keyingisida ushlaydi).
+  let decFired = false
+  if (C.started && C.hasSmpl && !C.aRstBusy && !C.restaring && dInA > 4000 && dSmpl === 0 && dKon === 0) {
+    const cool = C.decCool && Date.now() - C.decCool < 15000
+    if (!cool) {
+      C.decCool = Date.now()
+      C.decDead = (C.decDead || 0) + 1
+      clog('dekoder-olik', 'ovoz kelmoqda (' + Math.round(dInA / 1000) + 'KB/5s) lekin NOL namuna decode — darhol a-reset #' + C.decDead)
+      if ((C.aRstReq || 0) < 2) {
+        C.aRstReq = (C.aRstReq || 0) + 1
+        sigTo(C.peer.id, { k: 'a-reset', call_id: C.id }, 3, 900)
+      }
+      try { freshWASource(C) } catch {}
+      playRemote(C)
+      C.st0 = null // baseline 0 dan — yangi dekoder toza o'lchanadi
+      decFired = true
+    }
+  }
   // ── v92: JIMLIK-QUTQARUVCHI — NUTQ DALILI BILAN (ANIQLANGAN) ──
   // v91 XATOSI (shikoyatning asosiy ildizi): qorovul dInA>0 bilan ishlar edi — lekin
   // Opus SUKUTI ham paket yuboradi (dInA>0, ~10x kam). Ya'ni qarshi tomon 15s GAPIRMASA
@@ -1531,11 +1578,14 @@ function evalStats(C, st) {
   //   NUTQ DALILI: dInA > 8000 bayt/5s (faol gapirish — Opus sukuti bunday bo'lolmaydi)
   //   ES HITISH DALILI YO'Q: alv<1 (dekoder energiyasi) VA k<1 (ijro/oqim metrikasi)
   // Sukutda (dInA≤8000) yo'l HECH QACHON o'zgartirilmaydi — ishlayotgan yo'l buzilmaydi.
+  // v129: narvonda O'Z hisoblagichi (C.silN) — mikro-jim bilan UMUMAN BOG'LANMAGAN
+  // (jonli-jurnal ildizi: mikro-jim'ning else-shoxi silN'ni HAR oynada nolga tushirardi →
+  // narvon «bosqich 1»da abadiy aylanardi, a-reset (bosqich 7) HEB QACHON yetmasdi!)
   const alvAvail = alvR >= 0
   const mut = !!C.spkMuted && !window.Android50 // browser «Dinamik»-jim — foydalanuvchi tanlovi, qutqaruv aralashmaydi
   const heard = (alvAvail && alvR > 1) || inR > 1
   if (heard) { C.everHeard = 1; C.silN = 0 }
-  else if (dInA > 8000 && !mut) {
+  else if (dInA > 8000 && !mut && !decFired) {
     C.silN = (C.silN || 0) + 1
     const z = C.silN
     if (z === 1) {
@@ -1571,11 +1621,12 @@ function evalStats(C, st) {
       // v94: DEKODER-QAYTA-QURISH so'rovi — barcha JS yo'llari o'lgan bo'lsa (wa/ra/v +
       // yangi manba + yangi kontekst ham jim) — qarshi tomonning audio m-line'ini yangilash
       // SO'RALADI: yangi m-line = qarshi tomonda YANGI receiver/dekoder (renegotiation).
-      if (!C.aRstReq) {
-        C.aRstReq = 1
-        clog('ovoz-jim', 'bosqich 7: a-reset — qarshi tomondan yangi dekoder so\'raldi')
+      // v129: 2 MARTAGACHA (birinchi a-reset yangi dekoder ham o'lsa — ikkinchisi bor).
+      if ((C.aRstReq || 0) < 2) {
+        C.aRstReq = (C.aRstReq || 0) + 1
+        clog('ovoz-jim', 'bosqich 7: a-reset — qarshi tomondan yangi dekoder so\'raldi #' + C.aRstReq)
         sigTo(C.peer.id, { k: 'a-reset', call_id: C.id }, 3, 900)
-      } else { nativeKick(C); clog('ovoz-jim', 'bosqich 7: native kick (a-reset allaqachon so\'rilgan)') }
+      } else { nativeKick(C); clog('ovoz-jim', 'bosqich 7: native kick (a-reset 2 marta so\'rilgan)') }
     } else if (z >= 8) {
       // AYLANISH: uch fizik yo'l almashadi — abadiy jimlik mumkin emas
       const seq = ['wa', 'ra', 'v']
@@ -1613,10 +1664,15 @@ function evalStats(C, st) {
   // v94: faqat KUCHLI nutq dalilida (dOutA>12000 — Opus sukuti ~1-2KB/5s, gapirish 8-15KB).
   // Avvalgi shart dOutA>0 edi — TINGLAYOTGAN (gapirmayotgan) tomonda YALG'ON heal bo'lar,
   // har 15s mikrofon ochilishi churn = video muzlashlarga xissa qo'shgan (X jurnali: heal #1-#4).
-  if (outR !== -1 && outR < 1 && dOutA > 12000 && at && at.readyState === 'live' && at.enabled) {
-    C.silN = (C.silN || 0) + 1
-    if (C.silN >= 3 && (C.heals || 0) < 4) { C.silN = 0; C.heals = (C.heals || 0) + 1; clog('mikro-jim', 'mikrofon 15s jim oqmoqda (oyna-max<1%) — qayta ochilmoqda #' + C.heals); healOutgoing(C, 'audio') }
-  } else C.silN = 0
+  // v129: O'Z HISOBLAGICHI (C.micSilN) — silN bilan BOG'LANMAGAN (eski else-shoxi
+  // eshitmayotgan foydalanuvchining qutqaruv-narvonini HAR oynada nolga tushirardi).
+  // v129 CHEGARA: outR<1 → outR<5 (jonli-jurnal: mikrofoni jim oqim ch=4% beradi —
+  // 1% chegarasidan QOCHIB QOLARDI → «mening ovozim yetmayapti» davolansiz qolardi;
+  // dOutA>15000 = haqiqiy uzluksiz oqim dalili — sukut-uzluksizligi 2-2.5KB/5s).
+  if (outR !== -1 && outR < 5 && dOutA > 15000 && at && at.readyState === 'live' && at.enabled) {
+    C.micSilN = (C.micSilN || 0) + 1
+    if (C.micSilN >= 2 && (C.heals || 0) < 4) { C.micSilN = 0; C.heals = (C.heals || 0) + 1; clog('mikro-jim', 'mikrofon jim oqmoqda (oyna-max<5%, ' + Math.round(dOutA / 1000) + 'KB/5s) — qayta ochilmoqda #' + C.heals); healOutgoing(C, 'audio') }
+  } else C.micSilN = 0
   // ── CHIQUVCHI VIDEO o'lgan (faqat-ovoz rejimida video ataylab yuborilmaydi) ──
   const vt = C.local && C.local.getVideoTracks()[0]
   if (C.video && !C.aOnly && dOutV === 0 && dOutA > 0 && vt && vt.readyState === 'live' && vt.enabled) {
