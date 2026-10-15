@@ -1,0 +1,19 @@
+name: v131 jonli isbot (sessiya o'lmas)
+on:
+  workflow_dispatch:
+concurrency:
+  group: v131-live
+  cancel-in-progress: false
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Versiya uchligi + /auth/refresh real oqimi
+        env:
+          E2E_BASE: https://50gram.uz
+        run: node scripts/v131_live_check.mjs
