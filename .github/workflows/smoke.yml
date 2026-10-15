@@ -124,8 +124,10 @@ jobs:
           echo "$P" | grep -q "\"call_id\":$CID1" || { echo "FAIL pending: $P"; exit 1; }
           echo "call pending: OK"
           # 3) SIGNAL NAVBATI: offer yuboriladi va qabul qiluvchi navbat orqali ALBATTA oladi
+          # v130: navbat-INSERT fon rejimida (v128-6 c.wait) — o'qish DARHOL qilsa poyga
+          # (smoke flake: «signals:[]»). 3s gacha 400ms pauza bilan qayta o'qiydi (retry).
           curl -s -A "$UA" -H "$AUTH" -X POST "$BASE/api/signal" -H 'content-type: application/json' -d "{\"to\":$UID2,\"data\":{\"k\":\"offer\",\"call_id\":$CID1,\"sdp\":{\"type\":\"offer\",\"sdp\":\"v=0\"}}}" | grep -q '"ok":true' || { echo "FAIL signal post"; exit 1; }
-          Q=$(curl -s -A "$UA" -H "$AUTH2" "$BASE/api/signal/queue?since=0")
+          Q=""; for i in 1 2 3 4 5 6 7; do Q=$(curl -s -A "$UA" -H "$AUTH2" "$BASE/api/signal/queue?since=0"); echo "$Q" | grep -q '"k":"offer"' && break; sleep 0.4; done
           echo "$Q" | grep -q '"k":"offer"' || { echo "FAIL signal queue: $Q"; exit 1; }
           echo "signal queue: OK"
           # 4) STATUSLAR: active → yakuniy status (call_closed bildirishnomasi manbasi)
