@@ -7,7 +7,7 @@
  */
 const BASE = (process.env.E2E_BASE || 'https://50gram.uz').replace(/\/$/, '')
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
-const PHONE = '998900000006', FULL = '+998900000006'
+const PHONE = '998900000005', FULL = '+998900000005' // 006 o'rniga jurnal-read isbotlangan raqam (ayrim runner-IP'lar firewall'da)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 let fails = 0
 const ok = (c, l, x = '') => { console.log((c ? '  ✓ ' : '  ✗ FAIL ') + l + (x ? ' — ' + x : '')); if (!c) fails++ }
