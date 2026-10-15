@@ -1,5 +1,18 @@
 /* 50 Gram — audio/video qo'ng'iroqlar va jonli efir (WebRTC)
    ═══════════════════════════════════════════════════════════════════════════
+   v130: «BIRINCHI QO'NG'IROQDA OVOZ KELMADI + KICHIK OYNA QOTIB QOLDI» (jonli-jurnal
+   10-15 06:52 dalili: dekoder-olik a-reset bilan 10-15s ovoz-sukut qoldirdi):
+   1) DEKODER-OLDIN-ISSIQ: sessiyaning birinchi qo'ng'iroqida WebView Opus-dekoderi
+      qotadi (inA=+16KB lekin smp=+0 kon=+0) — keyingi qo'ng'iroqlarda HECH QACHON
+      takrorlanmaydi. Profilaktika: haqiqiy PC'dan OLDIN jim lokal loopback (pc1→pc2)
+      dekoderni isitadi — «birinchi PC» kasalligi o'tkinchi PC'ga tegadi. 1 marta/sessiya.
+   2) TEZ TASHXIS: qo'ng'iroqning birinchi 20sida 2.5s getStats + 2.2s oyna —
+      detektor a-reset'ni 3-5s da so'raydi (avval 10-14s).
+   3) OYNA-QOTISHI: o'z-oyna (self-view) va masofa-oynasi ELEMENTI muzlashi — oqim
+      tirik, element currentTime turibdi → srcObject null→qayta + play() (oyna-qotdi
+      jurnal belgisi) + ekran fon'dan qaytganda elementlar qayta jonlanadi.
+   SAQLANGAN: v129 (detektor/narvon/mikro-jim), v128 tezlik-qanoti, R1/R2/R5, M1/M2/M3.
+   ═══════════════════════════════════════════════════════════════════════════
    v129: «OVOZ KELMAYAPTI / QO'NG'IROQ QOTIB QOLYAPTI» — jonli-jurnal ildizlari (3 ta):
    1) DEKODER-O'LIK: kiruvchi ovoz baytlari oqadi (inA>4KB/5s) lekin dekoder NOL namuna
       decode qiladi (smp=+0, kon=+0) — Chrome/153-154 WebView kasalligi. Yagona davo =
@@ -1059,6 +1072,52 @@ function endCall(status = 'ended', report = true, msg) {
   try { window.__50buildCheck && window.__50buildCheck() } catch {}
   for (let i = 0; i < 12 && clogBuf.length; i++) shipClog()
 }
+// ═══ v130: DEKODER-OLDIN-ISSIQ — «birinchi qo'ng'iroqda ovoz kelmadi» profilaktikasi ═══
+// Jonli-jurnal dalili (10-15 06:52, call 1792047155252438): sessiyaning BIRINCHI
+// qo'ng'iroqida Chrome WebView Opus-dekoderi qotadi (inA=+16KB/5s lekin smp=+0 kon=+0)
+// — keyingi qo'ng'iroqlarda HECH QACHON takrorlanmaydi. v129 davosi (a-reset) ishlaydi
+// lekin 10-15s ovoz-sukut qoldiradi. ENDI: haqiqiy PC yaratilishidan OLDIN — XAVFSIZ
+// lokal loopback (pc1→pc2, BIR sahifada, TASHQIGA hech narsa chiqmaydi, JIMSIZ —
+// Ostsillyator destination'ga ulanmagan) dekoderni isitadi: «birinchi PC» kasalligi
+// O'TKINCHI PC'ga tegadi, haqiqiy qo'ng'iroq ISSIQ dekoder bilan tug'iladi.
+// Sessiyada FAQAT 1 MARTA (window.__50decWarm) — tezlikka ta'siri 0 (fon rejimida).
+let __50warmBusy = false
+async function decoderPreWarm(C) {
+  let osc = null, tr = null, p1 = null, p2 = null
+  try {
+    if (window.__50decWarm || __50warmBusy) return
+    if (typeof RTCPeerConnection === 'undefined' || typeof MediaStreamAudioDestinationNode === 'undefined') return
+    __50warmBusy = true
+    const ctx = (C && C.ctx) || unlockAudio(null)
+    if (!ctx || ctx.state === 'closed') return
+    if (ctx.state === 'suspended') { try { ctx.resume().catch(() => {}) } catch {} }
+    osc = ctx.createOscillator()
+    const dest = ctx.createMediaStreamDestination()
+    osc.connect(dest); osc.start()
+    tr = dest.stream.getAudioTracks()[0]
+    if (!tr) return
+    p1 = new RTCPeerConnection({ iceServers: [] })
+    p2 = new RTCPeerConnection({ iceServers: [] })
+    p1.addTrack(tr, dest.stream)
+    let got = false
+    p2.ontrack = (e) => { got = e.track.kind === 'audio' }
+    const of = await p1.createOffer()
+    await p1.setLocalDescription(of)
+    await p2.setRemoteDescription(p1.localDescription)
+    const an = await p2.createAnswer()
+    await p2.setLocalDescription(an)
+    await p1.setRemoteDescription(p2.localDescription)
+    await new Promise((r) => setTimeout(r, 900)) // dekoder namunalar yutadi (900ms)
+    window.__50decWarm = 1
+    clog('dekoder-oldin-issiq', 'birinchi-qongiroq dekoderi isitildi (trek=' + got + ', ctx=' + ctx.state + ')')
+  } catch (e) { try { clog('dekoder-issiq-xato', String((e && e.message) || e).slice(0, 80)) } catch {} }
+  finally { // v130: HAR yo'lda toza yopilish — o'tkinchi resurslar hech narsani band qolmasin
+    try { osc && osc.stop() } catch {}
+    try { tr && tr.stop() } catch {}
+    try { p1 && p1.close() } catch {}; try { p2 && p2.close() } catch {}
+    __50warmBusy = false
+  }
+}
 // ───────────────────────────── QO'NG'IROQ OQIMLARI ─────────────────────────────
 // CHAQIRUVCHI (offerer): qo'ng'iroq AVVAL yuboriladi — qarshi tomon DARHOL jiringlaydi,
 // kamera parallel ochiladi (kamera osilsa ham chaqiruv YO'QOLMAYDI — v76 isbotlangan tartib)
@@ -1073,6 +1132,7 @@ async function callUser(uid, video) {
   // v95: FOYDALANUVCHI BOSISHI ICHIDA — proaktiv native marshrut + virgin AudioContext
   nativeRouteStart(!!video)
   freshAudioUniverse(CALL)
+  decoderPreWarm(CALL) // v130: birinchi-qo'ng'iroq dekoderi oldindan isitiladi (fon rejimida)
   clog('chaqirildi', 'to=' + uid + ' video=' + !!video)
   icePreWarm() // v128: /ice fonda — accept paytida kesh tayyor
   startSigPoll()
@@ -1128,6 +1188,7 @@ async function acceptCall() {
   // virgin AudioContext (qabul qiluvchi tomonda ham xuddi shu toza-kainot kafolati)
   nativeRouteStart(!!C.video)
   freshAudioUniverse(C)
+  decoderPreWarm(C) // v130: birinchi-qo'ng'iroq dekoderi oldindan isitiladi (fon rejimida)
   try {
     // v128 TEZLIK: accept ENDI DARHOL yuboriladi — kamera ochilishiga PARALLEL.
     // Avval: kamera (0.5-3s) → setupPC → accept → keyingina chaqiruvchi offer yaratardi
@@ -1288,6 +1349,16 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && CALL) {
     const C = CALL
     try { if (C.ctx && C.ctx.state === 'suspended') C.ctx.resume().catch(() => {}) } catch {}
+    // v130: VIDEO-ELEMENTLAR ham qayta jonlanadi — fon-rejimdan qaytganda WebView video
+    // elementlarni MUZLATIB qo'yadi (oqim tirik, element qotgan — «kichik oyna qoldi»).
+    // Oqimlar O'ZGARMAYDI — faqat element qayta bog'lanadi + qorovul-baseline 0 dan.
+    try {
+      const lv = qs('.local', C.el), rv = qs('.remote', C.el)
+      if (lv && C.local) { lv.srcObject = null; lv.srcObject = C.local; try { const p = lv.play(); if (p && p.catch) p.catch(() => {}) } catch {} }
+      if (rv && C.remote) { rv.srcObject = null; rv.srcObject = C.remote; try { const p = rv.play(); if (p && p.catch) p.catch(() => {}) } catch {} }
+      C.lc0 = undefined; C.rc0 = undefined
+      clog('ekran-qaytdi', 'video-elementlar qayta jonlantirildi')
+    } catch {}
     try { playRemote(C) } catch {}
   }
   if (!document.hidden && S.token) {
@@ -1509,7 +1580,10 @@ function evalStats(C, st) {
   })
   const now = Date.now(), s = C.st0
   if (!s) { C.st0 = { t: now, inA, inV, outA, outV, fr, fd, lostV, recvV, lostA, recvA, smpl, kon }; return }
-  if (now - s.t < 4500) return // ~5s oynada bir marta
+  // v130: birinchi 20s — TEZ oynalar (2.2s): birinchi-qo'ng'iroq kasalligi 3-5s da
+  // ushlanadi (avval 4.5s+5s-sikl = 10-14s kechikish — foydalanuvchi uzatardi).
+  const minWin = (C.started && now - C.started < 20000) ? 2200 : 4500
+  if (now - s.t < minWin) return // ~5s oynada bir marta (birinchi 20s — 2.2s)
   const dts = Math.max(1, (now - s.t) / 1000)
   const dInA = inA - s.inA, dInV = inV - s.inV, dOutA = outA - s.outA, dOutV = outV - s.outV
   const dSmpl = Math.max(0, smpl - (s.smpl || 0)), dKon = Math.max(0, kon - (s.kon || 0))
@@ -1679,6 +1753,44 @@ function evalStats(C, st) {
     C.ovDead = (C.ovDead || 0) + 1
     if (C.ovDead >= 4 && (C.heals || 0) < 3) { C.ovDead = 0; C.heals = (C.heals || 0) + 1; healOutgoing(C, 'video') }
   } else C.ovDead = 0
+  // ── v130: VIDEO-ELEMENT QOTISHI — oqim tirik lekin ELEMENT muzlagan (WebView kasalligi:
+  // fon-rejim qaytishi / render-sirt yo'qolishi — dekoder ham tarmoq ham AYBIGA tegmaydi).
+  // Dalil: element currentTime turibdi, lekin treklar LIVE va baytlar oqmoqda.
+  // Davo: srcObject null→qayta — element o'z ijrochisini yangilaydi. O'Z-OYNA (self-view —
+  // foydalanuvchining «kichik oyna qotib qoldi» shikoyati) ham MASOFA-OYNA ham nazoratda.
+  // 9s cooldown — qayta-bog'lash to'qnashuvi yo'q; oqim YO'Q bo'lsa tegilmaydi (recover ishlaydi).
+  try {
+    if (C.video && !C.aOnly && C.el) {
+      const nowMs = Date.now()
+      const lv = qs('.local', C.el)
+      if (lv && C.local) {
+        const ct = lv.currentTime || 0
+        const dL = C.lc0 === undefined ? 1 : Math.round((ct - C.lc0) * 100) / 100
+        C.lc0 = ct
+        const lLive = vt && vt.readyState === 'live' && vt.enabled
+        if (lLive && dL === 0 && (dOutV > 0 || dInV > 0) && nowMs - (C.locFixAt || 0) > 9000) {
+          C.locFixAt = nowMs; C.locFix = (C.locFix || 0) + 1
+          clog('oyna-qotdi', 'o‘z-oynasi currentTime turibdi (kadrlar oqmoqda) — element qayta bog‘lanmoqda #' + C.locFix)
+          lv.srcObject = null
+          lv.srcObject = C.local
+          try { const p = lv.play(); if (p && p.catch) p.catch(() => {}) } catch {}
+        }
+      }
+      const rv = qs('.remote', C.el)
+      if (rv && C.remote) {
+        const ct2 = rv.currentTime || 0
+        const dR = C.rc0 === undefined ? 1 : Math.round((ct2 - C.rc0) * 100) / 100
+        C.rc0 = ct2
+        if (dInV > 0 && dR === 0 && nowMs - (C.remFixAt || 0) > 9000) {
+          C.remFixAt = nowMs; C.remFix = (C.remFix || 0) + 1
+          clog('oyna-qotdi', 'masofa-oynasi currentTime turibdi (video oqmoqda) — element qayta bog‘lanmoqda #' + C.remFix)
+          rv.srcObject = null
+          rv.srcObject = C.remote
+          try { const p = rv.play(); if (p && p.catch) p.catch(() => {}) } catch {}
+        }
+      }
+    }
+  } catch {}
   // ── v82: SIFAT BAHOSI (ko'rsatkich) + AVTOMATIK MOSLASHUV ──
   try {
     let bad = 0
@@ -1749,6 +1861,16 @@ setInterval(() => {
     }
   } catch {}
 }, 5000)
+// v130: BIRINCHI-20s TEZ TASHXIS — dekoder-o'lik/oyna-qotish kasalliklari birinchi
+// qo'ng'iroqda BOSHIDA bo'ladi; 5s-sikl + 4.5s-oyna = 10-14s kechikish (jonli-jurnal:
+// foydalanuvchi 16-26s da uzatardi). Bu sikl FAQAT qo'ng'iroqning birinchi 20sida
+// 2.5s'da bir getStats yuguradi → detektor 3-5s da javob beradi. Keyin o'zi jimtaq.
+setInterval(() => {
+  const C = CALL
+  if (!C || !C.started || !C.pc || C.pc.connectionState !== 'connected') return
+  if (Date.now() - C.started > 20000) return
+  try { C.pc.getStats().then((st) => { if (CALL === C) evalStats(C, st) }).catch(() => {}) } catch {}
+}, 2500)
 // ---------------- v76: KAMERA XATO-TASHXISI + AVTO-TIKLANISH ----------------
 async function camFail(C, e) {
   const name = (e && e.name) || ''

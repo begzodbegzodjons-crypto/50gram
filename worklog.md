@@ -970,3 +970,24 @@ Stage Summary:
 - «Ovoz kelmayapti»ning uch ildizi ham yopildi: o'lik dekoder 5-10s da yangilanadi (avval hech qachon), jim mikrofon 10-15s da davolanadi (avval ch=4% qochardi), qutqaruv narvoni endi hech narsa tomonidan buzilmaydi.
 - v128 tezligi SAQLANGAN (jurnal: 2-5s ulanish — foydalanuvchining asl shikoyati tezlik emas edi).
 - Sayt: https://50gram.uz — keyingi sinovda ikkala tomonda ham ovoz + video tiklanishi kutiladi; yangi jurnal belgisi: dekoder-olik / mikro-jim / bosqich-7 a-reset #1-#2.
+
+---
+Task ID: 76
+Agent: Super Z (asosiy agent)
+Task: v130 — «BIRINCHI QO'NG'IROQDA OVOZ KELMADI + KICHIK OYNA QOTIB QOLDI». Foydalanuvchi: "sinap ko'rildi — birinchi qo'ng'iroqda bir tarafni ovozi kelmadi keyingilarida keldi nima qilish kerak — video qo'ng'iroq vaqtida o'zini ko'rsatadigan kichik oyna orada qotib qolmoqda"
+
+Work Log:
+- JONLI-JURNAL DALILI (jurnal.yml run 38698395677, 300 yozuv — foydalanuvchining 10-15 06:52-07:17 sinovlari): call 1792047155252438 (BIRINCHI qo'ng'iroq) — v129 dekoder-olik DETEKTORI ISHLADI (inA=+16KB/5s lekin smp=+0 kon=+0 → a-reset #1 06:52:52, yangi dekoder 06:52:55) — lekin bu davos 10-15s OVOZ-SUKUT qoldirdi (detektor 5s-oyna + a-reset-davra). Keyingi qo'ng'iroqlar (06:53/06:54/06:55/06:56) smp=+240000, k=18-100%, eshit=1 — TOZA. ILDIZ: sessiyaning BIRINCHI qo'ng'iroqida WebView Opus-dekoderi qotadi («birinchi PC» kasalligi) — keyingi qo'ng'iroqlarda HECH QACHON takrorlanmaydi. DEMAK davos yetarli EMAS — PROFILAKTIKA kerak.
+- v130-1 DEKODER-OLDIN-ISSIQ (decoderPreWarm): haqiqiy PC yaratilishidan OLDIN — XAVFSIZ lokal loopback (pc1→pc2, BIR sahifada, iceServers:[] — TASHQIGA hech narsa chiqmaydi, JIMSIZ — Ostsillyator ctx.destination'ga ulanmagan, MediaStreamAudioDestination faqat trekga) — dekoder 900ms namuna yutadi → «birinchi PC» kasalligi O'TKINCHI PC'ga tegadi, haqiqiy qo'ng'iroq ISSIQ dekoder bilan tug'iladi. Sessiyada FAQAT 1 MARTA (window.__50decWarm); chaqiruvchi (callUser) VA qabulchi (acceptCall) bosishida fon rejimida; finally-bloqda HAR-holatda toza yopilish (osc/track/PC leak posboni). Jurnal: dekoder-oldin-issiq / dekoder-issiq-xato.
+- v130-2 TEZ TASHXIS: qo'ng'iroqning birinchi 20sida alohida 2.5s getStats-sikl (keyin o'zi jimtaq) + evalStats oyna-darvozasi adaptiv (birinchi 20s — 2.2s, keyin 4.5s) → agar profilaktikaga qaramay dekoder-o'lik uchrasa, a-reset 3-5s DA so'raladi (avval 10-14s). Ikkinchi-qo'ng'iroqdan keyin xatti-harakat ESKI 5s-kadansda (xarajat 0).
+- v130-3 OYNA-QOTDI (kichik oyna tuzatishi): O'Z-OYNA (self-view, .local) va MASOFA-OYNA (.remote) ELEMENT-qorovuli — evalStats'da element currentTime harakati o'lchanadi: trek LIVE + baytlar oqmoqda (dOutV>0/dInV>0) lekin element currentTime TURIBDI → srcObject null→qayta + play() (element o'z ijrochisini yangilaydi — WebView render-sirt qotishi, dekoder/tarmoq AYBIGA tegmaydi). 9s cooldown; faqat-ovoz rejimida va kamera-o'chirilganda tegilmaydi. Avval faqat .ra (audio) elState nazorati bor edi — video-elementlar UMUMAN nazoratsiz edi.
+- v130-4 EKRAN-QAYTDI: visibilitychange (fon'dan qaytish) — avval faqat AudioContext+playRemote jonlanardi; ENDI video-elementlar ham qayta bog'lanadi (WebView fon-rejimdan qaytganda video-elementlarni MUZLATIB qo'yadi — «kichik oyna qoldi»ning eng keng tarqalgan manbasi) + qorovul-baseline (lc0/rc0) 0 dan.
+- MUHRLAR TEGILMAGAN: v129 (dekoder-detektor/narvon/mikro-jim outR<5/a-reset×2), v128 tezlik-qanoti (SDP-darhol/applyP/ICE-pre-warm/adaptiv-poll/parallel-kamera/ulanish-qorovuli), R1/R2/R5, M1/M2/M3 (v96 endCall tartibi), SMS_MODE, v122 (301 yo'q), v123/v124 (sessiya), v127 (panel faqat egasi) — test_v130_static.js isbotlaydi.
+- VERSIYA UCHLIGI: BUILD_V="v130" / __50BUILD='v130' / V='50gram-v130' — sinxron. SCHEMA_V=126 (0 sxema o'zgarishi).
+- SINOV: scripts/test_v130_static.js 44/44 YASHIL; tsc 14 = BAZAVIY (0 yangi); wrangler dry-run OK; eski testlar (v128/v129) FAQAT versiya-uchlik xatosida qotadi (0 regressiya).
+
+Stage Summary:
+- «Birinchi qo'ng'iroqda ovoz kelmadi»ning ildizi yopildi: sessiyaning birinchi qo'ng'iroqidan OLDIN dekoder loopback bilan isitiladi (profilaktika) + agar baribir qotsa 3-5s da a-reset (avval 10-15s sukut).
+- «Kichik oyna qotib qoldi» yopildi: self-view va masofa-video elementlari endi element-darajasida nazorat qilinadi — qotgan element 5-9s ichida o'zi jonlanadi; fon-rejimdan qaytganda hammasi qayta jonlanadi.
+- v128 tezligi (2-5s ulanish) va barcha avvalgi muhrlar saqlangan. Versiya: v130 (worker/core/sw sinxron). Sayt: https://50gram.uz
+- Yangi jurnal belgilari keyingi tashxis uchun: dekoder-oldin-issiq / oyna-qotdi / ekran-qaytdi.
