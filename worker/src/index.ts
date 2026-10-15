@@ -360,7 +360,7 @@ const NOTIFY_CAP = 40
 // 90s /api/build'ni so'raydi — versiyasi mos kelmasa ilova o'zi yangilanadi. Shu tufayli
 // tuzatish HAR QURILMAGA ~1 daqiqada yetib boradi (eski kod xotirada qolib «o'zi buzildi»
 // effekti abadiy yo'qoladi).
-const BUILD_V = "v130"
+const BUILD_V = "v131"
 
 // ------------------------- Coin / Martaba (jonli efir iqtisodiyoti) -------------------------
 // coin — sarflanadigan valyuta (sovg'a yuborish), earned — umumiy yig'ilgan ball (martaba, kamaymaydi)
@@ -861,6 +861,21 @@ async function authLogout(c: C) {
   if (!payload || !payload.s || !su || payload.s !== su.sess) return json({ ok: false }, 401)
   await c.db.run("UPDATE users SET logout_at=?, last_seen=0, sess=? WHERE id=?", [now(), randomStr(16), c.uid])
   return json({ ok: true })
+}
+
+// v131 SESSIYA YANGILASH («sessiya o'lmas» — foydalanuvchi: «tuzatish qilganda qayta
+// ro'yxatdan o'tishga to'g'ri kelib chiqib ketyapti»). JWTning O'ZI qattiq exp bilan
+// tug'iladi (180 kun) — shu kundan keyin faol foydalanuvchi ham QAYTA RO'YXATDAN O'TISHI
+// kerak bo'lardi. Endi klient har ishga tushishida shu yerda YANGI 180-kunlik token oladi —
+// faol foydalanuvchining sessiyasi UMUMAN tugamaydi. XAVFSIZLIK: route OCHIQ EMAS —
+// middleware sessiya-darvozasi (imzo + logout_at + token_exp + sess mosligi) AVVAL
+// o'tadi, demak yangi token faqat ALLAQACHON yaroqli sessiyaga beriladi. sess O'ZGARMAYDI
+// (boshqa qurilmalar, logout_at, token_exp — hech narsa tegilmaydi; faqat exp yangilanadi).
+async function authRefresh(c: C) {
+  const su = await c.db.one("SELECT sess FROM users WHERE id=?", [c.uid])
+  if (!su?.sess) return json({ ok: false }, 401)
+  const token = await signJwt({ sub: String(c.uid), s: su.sess }, c.env.JWT_SECRET, 180 * 86400)
+  return json({ ok: true, token })
 }
 
 // ------------------------- Profil -------------------------
@@ -6630,6 +6645,8 @@ const routes: Array<[string, string, H, boolean?]> = [
   ["POST", "/auth/otp", authOtp, true],
   ["POST", "/auth/verify", authVerify, true],
   ["POST", "/auth/logout", authLogout],
+  // v131 SESSIYA YANGILASH: OCHIQ EMAS — sessiya-darvoza avval o'tadi (yuqorida izoh)
+  ["POST", "/auth/refresh", authRefresh],
   ["GET", "/avatar/u/:id", (c) => avatar(c, "users"), true],
   ["GET", "/avatar/c/:id", (c) => avatar(c, "chats"), true],
   ["GET", "/health", async () => json({ ok: true, app: "50 Gram" }), true],

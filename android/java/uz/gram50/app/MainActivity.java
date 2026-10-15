@@ -116,6 +116,20 @@ public class MainActivity extends Activity {
       } catch (Exception ignored) { }
     }
 
+    /** v3.4 (v131 «SESSIYA O'LMAZ»): sahifa saqlangan tokenni SO'RAYDI.
+     * Nega kerak: APK yangilanishida (vc13→vc14 kabi) WebView origini o'zgarsa
+     * (workers.dev → 50gram.uz) yangi origin'ning localStorage'i BO'SH bo'ladi va
+     * foydalanuvchi QAYTA RO'YXATDAN O'TISHGA MAJBUR bo'lardi. Lekin SHU JOYDAKI
+     * (SharedPreferences) token APK yangilanishida o'chmaydi — sahifa uni /me bilan
+     * tekshirib sessiyani JIM tiklaydi (klient: g50SessRestore, 3-manba: IDB→cookie→shu).
+     * Xavfsizlik: token faqat o'z ilovasining sahifasiga qaytadi (addJavascriptInterface
+     * faqat shu APK ichida ishlaydi — tashqi sayt uni o'qiy olmaydi). */
+    @JavascriptInterface
+    public String getSavedToken() {
+      try { return getSharedPreferences("g50", MODE_PRIVATE).getString("token", null); }
+      catch (Exception e) { return null; }
+    }
+
     // v2.8 (v74 klient bilan birga): QO'NG'IROQ OVOZI YO'NALISHI — WebView WebRTC ovozi
     // ko'pincha QULOQCHIGA yo'nalgan bo'ladi, foydalanuvchi «ovoz kelmayapti» deb o'ylaydi.
     // JS: Android50.speaker(true) — karnayga, speaker(false) — quloqchiga qaytaradi.

@@ -1007,3 +1007,29 @@ Stage Summary:
 - v130 JONLI: birinchi-qo'ng'iroq dekoderi oldindan isitiladi + qotsa 3-5s da a-reset; kichik-oyna (self-view) va masofa-video elementlari element-darajasida nazoratda (5-9s da o'zi jonlanadi); fon-rejimdan qaytganda elementlar qayta jonlanadi.
 - Smoke signal-queue poygasi butunlay yopildi (retry) — kelgusi CI'larda bu flake qaytmaydi.
 - Sayt: https://50gram.uz — foydalanuvchi sinovi uchun: ilovani ochib-yoqish (yoki 90s kutish — build-check o'zi yangilaydi), keyin BIRINCHI qo'ng'iroqda ham ikkala tomonda ovoz + o'z-oynasi tirik bo'lishi kutiladi.
+
+---
+Task ID: 77
+Agent: Super Z (asosiy agent)
+Task: v131 — «SESSIYA O'LMAZ». Foydalanuvchi: "dasturga o'zgartirish va tuzatishlar qilganda ilova o'rnatib ro'yxatdan o'tgan ilovadan qayta ro'yxatdan o'tishga to'g'ri kelib chiqib ketyapti — o'zgartirish tuzatish qilganda ilovadan chiqib ketmaydigan qilib ishlagin tuzatishlarni"
+
+Work Log:
+- JONLI EKSPERIMENT (scripts/sess_survive_test.mjs + sess-probe.yml, run 38709569004): 998907776655 (egani raqami, DEV_PHONES 1-qator) oddiy kirish → /me 200 → REAL wrangler deploy (workflow_dispatch) → XUDI eski token bilan /me → 200. ISBOT: DEPLOY SESSIYANI O'LDIRMAYDI — aybdor KLIENT/APK tomoni. Panel-probe (uid→phone): foydalanuvchining qurilmalari +998910533050/+998946234464 — CI raqamlari (998900000003-016, 998901234567...) bilan USTMAYDI (CI-logout nazari o'ldi). audit.yml izohida o'z tasdig'i: "bir xil test raqamlari sessiyalarni o'chirib 401-bo'roni berardi" (faqat test-raqamlar ichida).
+- ILDIZ-KANDIDATLAR (client/APK): ① WebView localStorage yo'qolishi/corrupti (yagona logout-yo'li: 401→logout YOKI token/me missing→showAuth — index.html:234), ② APK origin-migratsiya: yuklab-olinayotgan APK vc13 (v126, commit ba9acb4) 50gram.uz'dan ochiladi, lekin o'rnatilgan vc12 workers.dev'dan ochgan edi — IKKI XIL ORIGIN = IKKI xil localStorage; vc12→vc13 yangilashda token "yo'qolgan" bo'lib ko'rinadi, ③ vaqtinchalik 401 (razvatka-poyga/TiDB titrash) — eski kod BITTA 401'da sessiyani o'ldirar edi, ④ JWT qattiq exp (180 kun) — faol foydalanuvchi ham bir kunda qayta ro'yxatdan o'tishga majbur edi.
+- v131-1 (server): POST /auth/refresh — OCHIQ EMAS (sessiya-darvoza: imzo+logout_at+token_exp+sess avval o'tadi), XUDDI SHU sess bilan yangi 180-kunlik JWT. sess O'ZGARMAYDI (boshqa qurilmalar/zombilar tegilmagan). SCHEMA_V=126 (0 sxema o'zgarishi).
+- v131-2 (klient — UCH QATLAB NUSXA): applyToken(t) — token birdaniga localStorage + IndexedDB 'kv' (IDB 5→6 versiya) + cookie (g50_tok, 400 kun, SameSite=Lax, Secure) + APK native (Android50.setToken) + SW prefs. setMe IDB nusxani yangilaydi. Kirish applyToken orqali.
+- v131-3 (klient — 401 TASDIQLASH): BITTA 401 endi sessiyani DARHOL o'ldirmaydi — 1.2s'dan keyin /me bilan tasdiqlash; faqat 2-marta ham 401 → logout(true,true) (haqiqiy chiqish/xavfsizlik buzilmagan: qattiq 401 baribir o'lim, vaqtinchalik 401 — "Aloqa tekshirilmoqda" xabari bilan tirik qoladi).
+- v131-4 (klient — SESSIYA TIKLASH): g50SessRestore() — index.html boot'ida token/me bo'lmasa: IDB 'kv' → cookie → APK native getSavedToken (eshik-tekshiruvi: typeof — eski APK'larda o'tib ketadi) tartibida nusxa topiladi → /me bilan TASDIQLAB JIM tiklanadi ('sessiya-tiklandi | manba=' beacon — egasi jurnalida qaysi qatlam ishlagani ko'rinadi). HOLAT B: token bor/me yo'q → /me bilan to'liq tiklash. O'lik nusxa jim rad etiladi (haqiqiy chiqish/qurilma o'z o'rnida).
+- v131-5 (klient — BOOT YANGILASH): startApp'da /auth/refresh → har ishga tushishda 180-kunlik sliding — FAOL FOYDALANUVCHI SESSIYASI UMUMAN TUGAMAYDI.
+- v131-6 (logout): cookie + IDB nusxalar ham tozalanadi (chiqish haqiqiy chiqish; server baribir sess aylantiradi — eski nusxa o'lik).
+- v131-7 (APK vc14 manbasi): Bridge.getSavedToken() (SharedPreferences'dan token qaytaradi — faqat o'z ilovasining sahifasiga), AndroidManifest versionCode 13→14/versionName 3.4. scripts/build_vc14.sh tayyor (toolchain'li mashinada qurish kerak — apkbuild/ bu muhitda yo'q; o'rnatilgan APK'lar tegilmagan — web/50gram.apk vc13 qoldi).
+- VERSIYA UCHLIGI: BUILD_V="v131" / __50BUILD='v131' / V='50gram-v131' — sinxron.
+- SINOV: scripts/test_v131_static.js 57/57 YASHIL (S1-S7 tuzatishlar + SMS_MODE/DEV_PHONES/SCHEMA_V/v122/v123/v124/v127 muhrlar + v128/v129/v130 rtc muhrlar + M1/DO-pong + versiya uchligi + node --check ×8); tsc 14 = BAZAVIY (0 yangi — authRefresh/refresh route); wrangler dry-run OK.
+- EKSPERIMENT-ARTIFAKTLAR: scripts/sess_survive_test.mjs + .github/workflows/sess-probe.yml (deploy-tiriklik isboti — qayta ishlatiladi), scripts/uid_probe.mjs + uid-probe.yml (uid→phone tashxisi).
+
+Stage Summary:
+- «Har deploydan keyin qayta ro'yxatdan o'tish»ning 4 sinf ildizi ham yopildi: ① token-yo'qolish → uch qatlab nusxa + JIM tiklash; ② APK origin-migratsiya → native getSavedToken (vc14 bilan kuchga kiradi); ③ vaqtinchalik 401 → tasdiqlash-qorovuli; ④ JWT muddati → boot-refresh bilan abadiy sessiya.
+- Server sessiyasi deployda o'zgarmasligi JONLI EKSPERIMENT bilan isbotlandi (deploy oldin/keyin /me 200).
+- Xavfsizlik buzilmagan: /auth/refresh ochiq emas (sessiya-darvoza), tasdiqlangan 401 baribir logout, real logout hamma nusxani tozalaydi, sess rotatsiyasi faqat logout/force'da.
+- Barcha avvalgi muhrlar (SMS_MODE, TURN, v122/v123/v124/v127, v128 tezlik, v129/v130 media, R1/R2/R5, M1/M2/M3) tegilmagan — statik test isbotlaydi.
+- Versiya: v131 (worker/core/sw sinxron). Sayt: https://50gram.uz — foydalanuvchi sinovi: ilovani ochib-yoqish (yoki 90s kutish — build-check o'zi yangilaydi), sessiya saqlanib qolishi kutiladi; keyingi deploylarda ham chiqib ketmaslik kerak.

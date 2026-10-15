@@ -231,7 +231,7 @@
 <script src="rtc.js"></script>
 <script src="tools.js"></script>
 <script>
-  if (S.token && S.me) startApp(); else showAuth();
+  if (S.token && S.me) startApp(); else { showAuth(); try { g50SessRestore() } catch (e) {} }
   // v111 «Dasturga kirish» — rasmdagi 1-oyna oqimi: avval landing, tugma bosilgach
   // telefon kiritish formasi ochiladi (hech qanday asosiy mantig'ga tegilmagan).
   (function () {

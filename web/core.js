@@ -195,6 +195,8 @@ try {
 } catch {}
 
 // ---------------- API ----------------
+// v131: tasdiqlash-taymeri (yuqorida SESSIYA-QOROVULI izohi)
+let sessConfirmT = 0
 async function api(path, opt = {}) {
   const h = { 'x-dev': G50DEV }
   if (S.token) h.Authorization = 'Bearer ' + S.token
@@ -219,7 +221,24 @@ async function api(path, opt = {}) {
   // token bilan /auth/logout'ga borilmaydi (eski s-klaimsiz tokenlar bilan u logout_at'ni
   // GLOBAL yozardi → boshqa qurilmadagi yangi sessiya ham o'lar edi → «qayta kirish tutmaydi»
   // halqasi — v120/v121 xaosining eng og'riqli effekti). Lokal tozalash yetarli.
-  if (r.status === 401 && S.token && !path.startsWith('/auth')) { logout(true, true); throw new Error('Qaytadan kiring') }
+  // v131 SESSIYA-QOROVULI («sessiya o'lmas»): BITTA 401 endi sessiyani DARHOL o'ldirmaydi —
+  // 1.2s'dan keyin /me bilan TASDIQLAYMIZ. Nega: deploy-razvatka davrida eski/yangi izolyat
+  // poygasi, TiDB bir zumlik titrashi yoki proxy javobi VAQTINCHALIK 401 berishi mumkin —
+  // foydalanuvchi buning uchun QAYTA RO'YXATDAN O'TMASLIGI KERAK (egani shikoyati).
+  // Tasdiqlangan 401 (2-marta ham 401) → baribir logout — haqiqiy chiqish/xavfsizlik buzilmaydi.
+  if (r.status === 401 && S.token && !path.startsWith('/auth')) {
+    if (!sessConfirmT) {
+      sessConfirmT = setTimeout(async () => {
+        sessConfirmT = 0
+        if (!S.token) return
+        try {
+          const rr = await fetch(API + '/me', { cache: 'no-store', headers: { authorization: 'Bearer ' + S.token } })
+          if (rr && rr.status === 401) { logout(true, true); toast('Sessiya tugadi — qaytadan kiring') }
+        } catch {}
+      }, 1200)
+    }
+    throw new Error('Aloqa tekshirilmoqda — bir zum kuting')
+  }
   if (!r.ok) { const err = new Error(j.error || 'Xatolik (' + r.status + ')'); err.status = r.status; throw err }
   return j
 }
@@ -237,7 +256,7 @@ const IDB = {
     if (this.db) return Promise.resolve(this.db)
     return new Promise((res) => {
       try {
-        const r = indexedDB.open('50gram', 5)
+        const r = indexedDB.open('50gram', 6)
         r.onupgradeneeded = () => {
           const d = r.result
           if (!d.objectStoreNames.contains('chats')) d.createObjectStore('chats')
@@ -250,6 +269,11 @@ const IDB = {
           // edi: ilova o'chib-yoqilganda eski rasm/ovozlarning kalitlari YO'QOLARDI —
           // «Faylni ochish kaliti yo'q» + ovoz «yuklanmoqda» abadiy (egani shikoyati).
           if (!d.objectStoreNames.contains('mkeys')) d.createObjectStore('mkeys')
+          // v131 SESSIYA NUSXASI ('kv'): token+me uch qatlab saqlanadi (localStorage + IDB +
+          // cookie) — localStorage qandaydir sababga ko'ra yo'qolsa (WebView tozalashi,
+          // corrupt yozuv, xotira siqilishi) sessiya NUSXADAN JIM TIKLANADI — foydalanuvchi
+          // qayta ro'yxatdan o'tmaydi (egani talabi: tuzatish qilganda ilovadan chiqmasin).
+          if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv')
         }
         r.onsuccess = () => { this.db = r.result; res(this.db) }
         r.onerror = () => res(null)
@@ -1075,8 +1099,8 @@ $('b-verify').onclick = async () => {
     // (hijak) eganing bitta tasdig'i bilan DARHOL uchadi (sess rotatsiyasi faqat shu yerda).
     const r = await post('/auth/verify', { phone: authPhone, code, ...(authForce ? { force: 1 } : {}) })
     authForce = false
-    S.token = r.token; localStorage.setItem('g50_token', r.token)
     setMe(r.user)
+    applyToken(r.token) // v131: barcha nusxalarga (localStorage+IDB+cookie+APK+SW) birdaniga
     if (r.is_new) { step('a-prof'); setTimeout(() => $('ap-first').focus(), 50) }
     else startApp()
   } catch (e) { toast('⚠️ ' + e.message); $('code').select() }
@@ -1099,7 +1123,26 @@ $('b-prof').onclick = async () => {
   } catch (e) { toast('⚠️ ' + e.message) }
   b.disabled = false
 }
-function setMe(u) { S.me = { ...(S.me || {}), ...u }; localStorage.setItem('g50_me', JSON.stringify(S.me)) }
+// v131 SESSIYA NUSXALARI («sessiya o'lmas» — egani talabi: tuzatish/deploy qilganda ilova
+// chiqib ketmasin). Token ENDI UCH QATLAB saqlanadi: 1) localStorage (asosiy), 2) IndexedDB
+// 'kv' (alo'hida saqlash tizimi — localStorage corrupt/yo'qolgan holatlarda tirik qoladi),
+// 3) cookie (g50_tok — uchinchi mexanizm, WebView'ning localStorage-fokusli kasalliklaridan
+// chetda). APK'da 4-qatlam: native SharedPreferences (Android50.setToken — APK yangilanishida
+// origin o'zgarsa ham token qoladi; vc14+ sahifa getSavedToken bilan uni SO'RAYDI).
+// QAYTA TIKLASH: g50SessRestore() (index.html boot'ida chaqiriladi) — token topilmasa
+// nusxalardan /me bilan tekshirib JIM tiklaydi. Real logout esa HAMMA nusxani tozalaydi.
+function g50CookieSet(tok) { try { document.cookie = 'g50_tok=' + encodeURIComponent(tok) + '; max-age=34560000; path=/; SameSite=Lax; Secure' } catch {} }
+function g50CookieClr() { try { document.cookie = 'g50_tok=; max-age=0; path=/; SameSite=Lax' } catch {} }
+function applyToken(t) {
+  if (!t) return
+  S.token = t
+  try { localStorage.setItem('g50_token', t) } catch {}
+  g50CookieSet(t)
+  try { IDB.put('kv', 'sess', { token: t, me: S.me || null }) } catch {}
+  try { window.Android50 && window.Android50.setToken && window.Android50.setToken(t) } catch {}
+  sendPrefsToSW()
+}
+function setMe(u) { S.me = { ...(S.me || {}), ...u }; try { localStorage.setItem('g50_me', JSON.stringify(S.me)) } catch {}; try { if (S.token) IDB.put('kv', 'sess', { token: S.token, me: S.me }) } catch {} }
 async function logout(silent, deadTok) {
   // Serverga ham xabar: hisob "chiqdi" → shu raqam endi kod olish uchun OCHIQ (muallif tizimi).
   // v123: deadTok=true → token allaqachon o'lik (401 berildi). Bunday token bilan serverga
@@ -1123,9 +1166,59 @@ async function logout(silent, deadTok) {
   // oxirgi (imzosi to'g'ri) token qolsa, so'rovlar session-darvozada tinch 401 oladi.
   try { if (!deadTok && window.Android50 && window.Android50.setToken) window.Android50.setToken('') } catch {}
   localStorage.removeItem('g50_token'); localStorage.removeItem('g50_me')
+  // v131: barcha NUSXALAR ham tozalanadi — chiqish haqiqiy chiqish bo'lsin (nusxadan
+  // «qayta tirilish» bo'lmasin; server baribir sess aylantirgan, eski nusxa baribir o'lik).
+  g50CookieClr()
+  try { IDB.del('kv', 'sess') } catch {}
   S.token = ''; S.me = null
   try { S.ws && S.ws.close() } catch {}
   if (!silent) location.reload(); else { location.hash = ''; setTimeout(() => location.reload(), 300) }
+}
+
+// v131 SESSIYA TIKLASH («sessiya o'lmas» — 5-qatlam himoya).
+// MUAMMO: foydalanuvchi «tuzatish qilganda qayta ro'yxatdan o'tishga to'g'ri kelib chiqib
+// ketyapti». Jonli eksperiment isbotladi: DEPLOY eski tokenni 401 QILMAYDI (sess_survive_test)
+// — demak sessiya Klient tomonda yo'qoladi: WebView localStorage tozalashi/corrupti, APK
+// yangilanishida origin o'zgarishi (vc12 workers.dev → vc13 50gram.uz), xotira siqilishi.
+// YECHIM: token uch qatlab nusxalangan (IDB 'kv' + cookie + APK SharedPreferences) —
+// ishga tushishda ASOSIY manzil bo'sh bo'lsa, nusxalardan /me bilan TEKSHIRIB JIM
+// tiklaymiz. Tiklandi → foydalanuvchi hech narsa sezmagan holda o'z chatlarida; tiklanmadi
+// → ro'yxatdan o'tish ekrani (real yangi qurilma/real chiqish — o'sha o'rnida).
+// Har tiklanish jurnalga 'sessiya-tiklandi' belgisi bilan yoziladi (egasi tashxisi).
+async function g50SessRestore() {
+  try {
+    if (!S.token) {
+      // HOLAT A: token umuman yo'q — uch nusxadan tiklaymiz
+      let t = '', me = null, manba = ''
+      // 1) IndexedDB nusxa (token + me birga)
+      try { const b = await IDB.get('kv', 'sess'); if (b && b.token) { t = String(b.token); me = b.me || null; manba = 'idb' } } catch {}
+      // 2) Cookie nusxa
+      if (!t) { const m = document.cookie.match(/(?:^|;\s*)g50_tok=([^;]+)/); if (m && m[1]) { try { t = decodeURIComponent(m[1]); manba = 'cookie' } catch {} } }
+      // 3) APK native nusxa (vc14+: APK yangilanishida origin o'zgarganda YAGONA tirik nusxa)
+      if (!t && window.Android50 && typeof window.Android50.getSavedToken === 'function') {
+        try { const nt = String(window.Android50.getSavedToken() || ''); if (nt.length > 20) { t = nt; manba = 'apk' } } catch {}
+      }
+      if (!t) return // nusxa ham yo'q — haqiqiy yangi qurilma/chiqish: ro'yxatdan o'tish ekrani qoladi
+      const r = await fetch(API + '/me', { cache: 'no-store', headers: { authorization: 'Bearer ' + t, 'x-dev': G50DEV } }).catch(() => null)
+      if (!r || r.status !== 200) return // nusxa o'lik (chiqilgan/muddati tugagan) — jim qolamiz
+      const u = await r.json().catch(() => null)
+      if (!u || !u.id || S.token) return // poyga: biror sabab bilan asosiy manzil orqaga kelgan
+      S.me = me || null
+      applyToken(t)
+      setMe(u) // /me javobi bilan nusxani yangilaydi (IDB yozuvi ham)
+      toast('Sessiya tiklandi — davom etamiz')
+      try { g50Beacon('sessiya-tiklandi | manba=' + manba) } catch {}
+      startApp()
+    } else if (!S.me) {
+      // HOLAT B (nodir): token tirik lekin g50_me yo'qolgan — /me bilan to'liq tiklaymiz
+      const r = await fetch(API + '/me', { cache: 'no-store', headers: { authorization: 'Bearer ' + S.token, 'x-dev': G50DEV } }).catch(() => null)
+      if (r && r.status === 200) {
+        const u = await r.json().catch(() => null)
+        if (u && u.id) { setMe(u); startApp(); return }
+      }
+      try { await logout(true, true) } catch {} // token ham o'lik — toza chiqish
+    }
+  } catch {}
 }
 
 // ---------------- REAL-TIME ----------------
@@ -1311,6 +1404,12 @@ async function startApp() {
   $('auth').classList.add('hide'); $('main').classList.remove('hide'); $('dialog').classList.remove('hide')
   renderChats()
   try { setMe(await api('/me')) } catch (e) { if (!S.token) return }
+  // v131 SESSIYA YANGILASH: har ishga tushishda yangi 180-kunlik token olinadi — JWTning
+  // qattiq exp'i faol foydalanuvchini HECH QACHON qayta ro'yxatdan o'tishga majburlamaydi
+  // (sess xuddi shu qoladi — boshqa qurilmalar/zombilar tegilmagan, server tomonda 0 o'zgarish).
+  // Xavfsizlik: /auth/refresh OCHIQ EMAS — sessiya-darvoza avval o'tadi (worker'da).
+  try { const rf = await post('/auth/refresh'); if (rf && rf.token) applyToken(rf.token) } catch {}
+  // v131: nusxadagi me — /me'dan keyingi toza holat bilan yangilanadi (setMe ichida IDB yozuvi bor)
   // WS HAR QANDAY HOLATDA OCHILADI (profil to'liq bo'lmasa ham): avvalgi kod profil
   // to'liq emas yoki /me sekin bo'lsa ERTA qaytardi va WS UMUMAN ochilmasdi — ilova
   // «ochiq ko'rinib» turgan holda HAMMA real-vaqt hodisasi (qo'ng'iroq, signal, xabar)
@@ -1397,7 +1496,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v130'
+window.__50BUILD = 'v131'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
