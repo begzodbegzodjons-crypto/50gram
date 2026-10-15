@@ -991,3 +991,19 @@ Stage Summary:
 - «Kichik oyna qotib qoldi» yopildi: self-view va masofa-video elementlari endi element-darajasida nazorat qilinadi — qotgan element 5-9s ichida o'zi jonlanadi; fon-rejimdan qaytganda hammasi qayta jonlanadi.
 - v128 tezligi (2-5s ulanish) va barcha avvalgi muhrlar saqlangan. Versiya: v130 (worker/core/sw sinxron). Sayt: https://50gram.uz
 - Yangi jurnal belgilari keyingi tashxis uchun: dekoder-oldin-issiq / oyna-qotdi / ekran-qaytdi.
+
+---
+Task ID: 76-b (CI yakuni)
+Agent: Super Z (asosiy agent)
+Task: v130 CI zanjiri kuzatuvi + smoke-flake yopilishi
+
+Work Log:
+- f035a4b (v130) zanjiri: Deploy ✓ / CF Deploy ✓ / MUHR ✓ (3 ketma-ket) / Qo'ng'iroq-MEDIA ✓ (2-brauzer) / XAVFSIZLIK ✓ — lekin smoke «FAIL signal queue: {"signals":[]}"» bilan qatti (1 marta).
+- ILDIZ: v128-6 navbat-INSERT fon rejimida (c.wait) — smoke POST'dan DARHOL keyin navbatni o'qiydi → poyga. v130 KELTIRMAGAN eski flake (xuddi shu server-kodi v128/v129'da bor edi), lekin BUTUNLAY yopildi: smoke.yml 3-bosqichga retry (7 urinish × 400ms = 2.8s) — CI-ONLY, produksiyaga tegishi 0.
+- 45f3ba9 (v130-smoke) to'liq zanjir — 9/9 YASHIL ketma-ket rerun: Deploy ✓ / CF Deploy ✓ / smoke ✓ (retry-bilan) / MUHR ✓ / Qo'ng'iroq-MEDIA ✓ / MEDIA ✓ / XAVFSIZLIK ✓ / DATA ✓ / Jurnal ✓.
+- JONLI ISBOT (curl): 50gram.uz → 200 ✓; core.js __50BUILD='v130' ✓; rtc.js v130 belgilari (dekoder-oldin-issiq/oyna-qotdi/ekran-qaytdi — 5 havola) ✓.
+
+Stage Summary:
+- v130 JONLI: birinchi-qo'ng'iroq dekoderi oldindan isitiladi + qotsa 3-5s da a-reset; kichik-oyna (self-view) va masofa-video elementlari element-darajasida nazoratda (5-9s da o'zi jonlanadi); fon-rejimdan qaytganda elementlar qayta jonlanadi.
+- Smoke signal-queue poygasi butunlay yopildi (retry) — kelgusi CI'larda bu flake qaytmaydi.
+- Sayt: https://50gram.uz — foydalanuvchi sinovi uchun: ilovani ochib-yoqish (yoki 90s kutish — build-check o'zi yangilaydi), keyin BIRINCHI qo'ng'iroqda ham ikkala tomonda ovoz + o'z-oynasi tirik bo'lishi kutiladi.
