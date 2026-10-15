@@ -18,6 +18,9 @@ async function j(path, opt = {}, tries = 4) {
       const r = await fetch(BASE + path, { headers: { 'content-type': 'application/json', 'user-agent': UA, ...(opt.h || {}) }, redirect: 'manual', ...opt, body: opt.body ? JSON.stringify(opt.body) : undefined })
       const t = await r.text()
       let d; try { d = JSON.parse(t) } catch { d = { raw: t } }
+      // SEC-firewall runner-IP'ga vaqtinchalik 404 «Not found» berishi mumkin (ma'lum,
+      // jurnal_read'dagi kabi) — 25s kutib qayta urinamiz
+      if (r.status === 404 && i < tries - 1) { console.log('  404 (firewall?) — 25s kutib qayta urinish ' + (i + 1)); last = new Error('404'); await sleep(25000); continue }
       return { st: r.status, d, txt: t }
     } catch (e) { last = e; await sleep(25000) }
   }
