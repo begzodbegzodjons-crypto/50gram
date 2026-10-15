@@ -1,0 +1,24 @@
+name: Sessiya-tiriklik tashxisi (deploy oldi/keyin)
+on:
+  workflow_dispatch:
+concurrency:
+  group: sess-probe
+  cancel-in-progress: false
+permissions:
+  actions: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Deploy oldi/keyin sessiya tirikligi (998907776655, oddiy kirish)
+        env:
+          E2E_BASE: https://50gram.uz
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PANEL_PASS: ${{ secrets.PANEL_PASS }}
+        run: node scripts/sess_survive_test.mjs
