@@ -1033,3 +1033,20 @@ Stage Summary:
 - Xavfsizlik buzilmagan: /auth/refresh ochiq emas (sessiya-darvoza), tasdiqlangan 401 baribir logout, real logout hamma nusxani tozalaydi, sess rotatsiyasi faqat logout/force'da.
 - Barcha avvalgi muhrlar (SMS_MODE, TURN, v122/v123/v124/v127, v128 tezlik, v129/v130 media, R1/R2/R5, M1/M2/M3) tegilmagan — statik test isbotlaydi.
 - Versiya: v131 (worker/core/sw sinxron). Sayt: https://50gram.uz — foydalanuvchi sinovi: ilovani ochib-yoqish (yoki 90s kutish — build-check o'zi yangilaydi), sessiya saqlanib qolishi kutiladi; keyingi deploylarda ham chiqib ketmaslik kerak.
+
+---
+Task ID: 77-b (CI yakuni)
+Agent: Super Z (asosiy agent)
+Task: v131 CI zanjiri kuzatuvi + jonli isbot
+
+Work Log:
+- 2506e7a (v131 kodi) zanjiri: Deploy ✓ / CF Deploy ✓ / MUHR ✓ / Qo'ng'iroq-MEDIA ✓ / Jurnal ✓ — bekor qilinganlar (smoke/MEDIA/XAVFSIZLIK/DATA) "bittama-bitta rerun" qoidasi bilan qayta ishga tushirildi: smoke ✓ / MEDIA ✓ / XAVFSIZLIK ✓ / DATA ✓ — 9/9 YASHIL.
+- Keyingi push'lar (d7bb22e, 8993250, 37a62f0, 5d63f7f — faqat skript/workflow) zanjiri ham yakuniy holatda 9/9 YASHIL (Deploy ✓ / CF Deploy ✓ / smoke ✓ / MUHR ✓ / Qo'ng'iroq-MEDIA ✓ / MEDIA ✓ / XAVFSIZLIK ✓ / DATA ✓ / Jurnal ✓).
+- JONLI ISBOT (v131-live.yml): versiya uchligi 5/5 ✓ (/api/build=v131, core __50BUILD=v131 + g50SessRestore/applyToken/sessConfirmT jonli, sw=50gram-v131). /auth/refresh real oqimi tekshiruvi SEC-firewall'ning CI-IP holatiga tushib qoldi: XAVFSIZLIK E2E'ninig otp-pump sinovi runner-IP zonasida 'otp' hisoblagichini kuydirgan (jurnal dalili: fw:auth/fw:root bloklari 10:02-10:11; jurnal-read 10:17 login OK — OTP oqimi o'zi sog'lom). Produksiya foydalanuvchilariga ta'siri YO'Q — faqat CI-runner IP'lari. Workflow dispatch-only qoldi (keyingi safar ishlatiladi).
+- Smoke o'zi v131'da REAL OTP-kirish + to'liq yadro E2E ni o'z ichiga oladi — autentifikatsiya jonli isbotlangan.
+
+Stage Summary:
+- v131 JONLI: versiya uchligi sinxron, barcha qatlamlar (refresh/nusxa/401-tasdiqlash/tiklash) jonli saytda.
+- Zanjir 9/9 yashil (ikkita alohida commit'da tasdiqlandi). Sayt: https://50gram.uz
+- Foydalanuvchi sinovi: ilovani ochib-yoqish (yoki 90s kutish — build-check o'zi yangilaydi). Deploy'dan keyin sessiya saqlanadi; agar biror qatlam ishlasa — jurnalda 'sessiya-tiklandi | manba=' ko'rinadi (qaysi qatlam qutqargani yoziladi).
+- Qoldiq: APK vc14 qurish (scripts/build_vc14.sh — toolchain'li mashinada; manba tayyor: getSavedToken + versionCode 14). vc14 o'rnatilgach APK-yangilanish origin-migratsiyasi ham jim o'tadi.
