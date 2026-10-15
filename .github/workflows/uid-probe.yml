@@ -1,0 +1,16 @@
+name: UID aniqlash tashxisi
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: uid → phone (panel)
+        env:
+          E2E_BASE: https://50gram.uz
+        run: node scripts/uid_probe.mjs
