@@ -1050,3 +1050,24 @@ Stage Summary:
 - Zanjir 9/9 yashil (ikkita alohida commit'da tasdiqlandi). Sayt: https://50gram.uz
 - Foydalanuvchi sinovi: ilovani ochib-yoqish (yoki 90s kutish — build-check o'zi yangilaydi). Deploy'dan keyin sessiya saqlanadi; agar biror qatlam ishlasa — jurnalda 'sessiya-tiklandi | manba=' ko'rinadi (qaysi qatlam qutqargani yoziladi).
 - Qoldiq: APK vc14 qurish (scripts/build_vc14.sh — toolchain'li mashinada; manba tayyor: getSavedToken + versionCode 14). vc14 o'rnatilgach APK-yangilanish origin-migratsiyasi ham jim o'tadi.
+
+---
+Task ID: 78
+Agent: Super Z (asosiy agent)
+Task: v132 — CHATLAR RO'YXATIDA BOSIB-TURISH MENYUSI («Tozalash» / «O'chirish»). Foydalanuvchi: "chatlar bo'limida kimlar bilan gaplashgan akkaunt ustiga bosib turganda funksiya chiqib — o'chirish va tozalash degan funksiya yo'q, yozishgan akkaunlarni o'chirish imkoniyati yo'q — shuni joriy qil, bo'ldi boshqa xech qaysi funksiyani o'zgartirma"
+
+Work Log:
+- SINXRONIZATSIYA: lokal repo yana eskirgan edi (v128'da qolgan) — origin/main'ga hard-reset (v131, Task 77 sessiya-ishlari muhrlandi). Navbatdagi bo'sh versiya v132, navbatdagi Task ID 78 aniqlandi.
+- TADQIQOT (0 backend o'zgarish): worker'da HAMMA narsa tayyor edi — deleteChat (index.ts:1181): bevosita suhbatda a'zo O'ZI o'chiradi (`ch.type === "direct"` → faqat a'zolik tekshiruvi), guruh/kanalda faqat egasi; clearChat (:1530, «SUHBATNI TOZALASH» — direct a'zoning o'zi, guruh/kanal admin/owner); route'lar `["DELETE","/chats/:id",deleteChat]` + `["DELETE","/chats/:id/messages",clearChat]` mavjud. Klient clearChatConfirm (chat.js:499) ham tayyor. Yetishmayotgan yagona narsa — chatlar RO'YXATIDA meny UI'si edi.
+- v132 (faqat web/core.js — QO'SHIMCHA blok, mavjud qatorlarga tilim YO'Q): chatCtxMenu(id) — chatlar ro'yxati elementi ustida meny: «🧹 Suhbatni tozalash» + «🗑 O'chirish/Kanalni o'chirish/Guruhni o'chirish» (red). 480ms bosib-turish (touchstart/move/end — xabarlar menyusi ctxMenu bilan bir xil pattern: ghost-click preventDefault, scroll-bekor) + contextmenu (kompyuter o'ng-tugma). Ruxsat-matritsasi server bilan AYNAN mos: direct — ikkala amal; guruh/kanal admin — faqat tozalash; guruh/kanal a'zo — meny umuman ochilmaydi (403 o'lik-tugma yo'q). O'chirish: confirmBox → DELETE /chats/:id → kesh-tozalash (S.chats/S.msgs/Store.remove-medias/IDB — WS 'chat_deleted' xandleri bilan bir xil, idempotent: serverning o'z hodisasi keladigan bo'lsa ikkinchi marta zarar YO'Q). Tozalash: mavjud clearChatConfirm (mavjud tasdiq-matni: «Suhbatdoshingizda ham o'chadi»).
+- ODDIY BOSISH O'ZGARMAGAN: `$('chatlist') click → openChat` handleri to'liq saqlangan (menyu FAQAT bosib-turganda/o'ng-tugmada). renderChats, clearChatConfirm, deleteChat, clearChat, barcha boshqa funksiyalar tegilmagan.
+- VERSIYA UCHLIGI v132: BUILD_V="v132" / __50BUILD='v132' / V='50gram-v132' — sinxron. Sxema o'zgarishi YO'Q (0 migratsiya).
+- SINOV: scripts/test_v132_static.js 62/62 YASHIL (yangi menyü ×16, eski-funksiya-o'zgarmagan ×4, worker-muhrlar ×6, meros v122/v123/v124/v127/SMS/TURN ×7, v128-tezlik ×5, v129/v130-audio ×5, v131-sessiya ×5, versiya-uchlik ×4, node --check ×10). Eski testlar (v128-v131) faqat versiya-uchlik qatorida qotadi (0 regressiya). tsc 14 = BAZAVIY (0 yangi). wrangler dry-run OK.
+- CI (f218bee): push muvaffaqiyatli (872af5a..f218bee) — Deploy zanjiri push'da avtomatik.
+- JONLI ISBOT (curl): 50gram.uz → 200 ✓; jonli core.js __50BUILD='v132' ✓; jonli sw.js '50gram-v132' ✓; jonli koddа funksiya bloki to'liq: chatCtxMenu/data-k="clear"/data-k="del"/clearChatConfirm-yo'li/DELETE-yo'li/«Kanalni o'chirish»/touchend-himoya — 7/7 marker ✓; eski openChat-handler jonli kodda saqlangan ✓. /api/build «Not found» = ma'lum SEC-DO sandbox-IP bloki (Task 73'da hujjatlashtirilgan — CI'dan yashil).
+
+Stage Summary:
+- Chatlar ro'yxatida suhbatlashilgan HAR QANDAY akkaunt/chat ustida BOSIB TURILGANDA (480ms yoki o'ng-tugma) meny chiqadi: «Suhbatni tozalash» (hamma xabarlar, Telegram-uslub) va «O'chirish» (chat ro'yxatdan butunlay ketadi; direct'da suhbatdoshda ham o'chadi — tasdiq oynasida ochiq yozilgan).
+- Foydalanuvchi talabi to'liq bajarildi: BOSHQA HECH QAYSI funksiya o'zgartirilmagan — worker'da 0 bayt mantiqiy o'zgarish (faqat versiya-satri), web'da faqat QO'SHIMCHA blok (core.js'da 1 joyga qo'shildi, hech narsa o'chirilmagan/tahrirlanmagan).
+- Barcha muhrlar jonli tasdiqlandi: SMS_MODE="app", TURN-openrelay, v122-301-yo'q, v123/v124-sessiya, v127-panel-faqat-egasi, v128-tezlik-qanot, v129/v130-audio (birinchi-qo'ng'iroq ovozi + o'z-oyna qotishi), v131-sessiya-o'lmaydi (/auth/refresh + uch nusxa) — deploy sessiyani O'LDIRMAYDI (v131 mexanizmi o'z ishida).
+- Versiya: v132 (worker/core/sw sinxron). Sayt: https://50gram.uz
