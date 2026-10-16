@@ -1360,6 +1360,61 @@ function renderChats() {
 }
 $('chatlist').addEventListener('click', (e) => { const it = e.target.closest('[data-chat]'); if (it) openChat(+it.dataset.chat) })
 
+// v132: CHATLAR RO'YXATI — BOSIB TURIB KO'RSATILADIGAN MENYU («Tozalash» / «O'chirish»)
+// Foydalanuvchi so'rovi: chatlar bo'limida suhbatlashgan akkaunt ustida BOSIB TURGANDA
+// meny chiqsin — suhbatni tozalash va yozishilgan akkauntni (chatni) o'chirish imkoniyati.
+// FAQAT QO'SHIMCHA: oddiy bosish (yuqoridagi openChat handleri) va boshqa hech narsa
+// O'ZGARMAGAN. Ishlash tartibi xabarlar menyusi (chat.js ctxMenu) bilan bir xil:
+// 480ms bosib turish (mobil) + o'ng-tugma/contextmenu (kompyuter).
+let clPress = 0
+function chatCtxMenu(id) {
+  const c = S.chats.get(id)
+  if (!c) return
+  const owner = c.role === 'owner', adm = owner || c.role === 'admin'
+  // Server ruxsati bilan aynan mos: bevosita suhbat — a'zo o'zi; guruh/kanal — tozalash
+  // admin/owner'ga, o'chirish faqat egasiga (deleteChat/clearChat, worker).
+  const canClear = c.type === 'direct' || adm
+  const canDel = c.type === 'direct' || owner
+  if (!canClear && !canDel) return
+  vibrate(10)
+  const nm = esc(chatName(c))
+  const sh = sheet(h3(nm) + `<div class="ctxl">${canClear ? '<div class="it" data-k="clear"><span>🧹</span>Suhbatni tozalash</div>' : ''}${canDel ? `<div class="it red" data-k="del"><span>🗑</span>${c.type === 'channel' ? 'Kanalni o‘chirish' : c.type === 'group' ? 'Guruhni o‘chirish' : 'O‘chirish'}</div>` : ''}</div>`)
+  sh.onclick = async (e) => {
+    const it = e.target.closest('[data-k]')
+    if (!it) return
+    closeSheet(sh)
+    const k = it.dataset.k
+    if (k === 'clear') return clearChatConfirm(c)
+    // O'CHIRISH: DELETE /chats/:id — bevosita suhbatda a'zo o'zi o'chiradi (guruh/kanalda
+    // faqat egasi). Kesh-tozalash WS 'chat_deleted' xandleri bilan bir xil (idempotent —
+    // server yuborgan hodisa keladigan bo'lsa ikkinchi marta hech narsa buzilmaydi).
+    if (k === 'del') {
+      const raw = chatName(c)
+      const q = c.type === 'direct' ? `«${raw}» bilan yozishma o‘chirilsinmi? Chat ro‘yxatdan ham, suhbatdoshingizdan ham o‘chadi.` : `«${raw}» butunlay o‘chirilsinmi? Bu amalni qaytarib bo‘lmaydi.`
+      if (!(await confirmBox(q, 'O‘chirish'))) return
+      try {
+        await del('/chats/' + id)
+        const mids = (S.msgs.get(id) || []).map((m) => m.meta?.media_id).filter(Boolean).map(String)
+        if (mids.length) Store.remove(mids)
+        S.chats.delete(id); S.msgs.delete(id)
+        IDB.del('chats', S.me.id + ':' + id)
+        if (S.cur === id) closeChat()
+        renderChats()
+        toast('🗑 O‘chirildi')
+      } catch (er) { toast('⚠️ ' + er.message) }
+    }
+  }
+}
+$('chatlist').addEventListener('contextmenu', (e) => { const it = e.target.closest('[data-chat]'); if (it) { e.preventDefault(); chatCtxMenu(+it.dataset.chat) } })
+$('chatlist').addEventListener('touchstart', (e) => {
+  const it = e.target.closest('[data-chat]')
+  if (!it) return
+  const t = e.touches[0]
+  clPress = setTimeout(() => { clPress = -1; chatCtxMenu(+it.dataset.chat) }, 480)
+}, { passive: true })
+$('chatlist').addEventListener('touchmove', () => { if (clPress > 0) clearTimeout(clPress) }, { passive: true })
+$('chatlist').addEventListener('touchend', (e) => { if (clPress === -1) e.preventDefault(); else clearTimeout(clPress); clPress = 0 })
+
 // Qidiruv
 let qT = 0
 $('q').addEventListener('input', () => {
@@ -1496,7 +1551,7 @@ window.__appResume = () => { try { if (!S.token) return; g50SoftUpdate(); checkB
 // kelmasa ilova o'zini yangilaydi. Natija: HAR tuzatish HAR QURILMAGA ~1 daqiqada yetadi.
 // Himoyalar: qo'ng'iroq/efir/oyna paytida HECH QACHON yuklanmaydi; 2 marta ketma-ket
 // mos kelmaslik talab qilinadi; 2 daqiqalik loop-himoya (takroriy reload yo'q).
-window.__50BUILD = 'v131'
+window.__50BUILD = 'v132'
 let buildMismatch = 0, buildBusy = false, buildConfT = 0
 window.__50buildCheck = async () => {
   if (buildBusy) return
