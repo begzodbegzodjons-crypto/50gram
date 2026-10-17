@@ -314,6 +314,59 @@ $('chanlist').addEventListener('click', (e) => {
   if (d) chatPreview(d)
 })
 
+// v133: KANALLAR SAHIFASIDA QIDIRUV («kanal va guruhlarni izlash»)
+// Foydalanuvchi: kanal va gruppa sahifasida izlash funksiyasi yo'q — shuni qo'sh, boshqa
+// hech narsaga tegma. FAQAT QO'SHIMCHA:
+//  - input (index.html #chq) — kontaktlar tabidagi .search maydoni bilan bir xil ko'rinish
+//  - natija-qatorlari O'Z belgisida (data-sr) — mavjud data-ch handleri HECH QANDAY ta'sir
+//    ko'rmaydi (ikki alohida listener: eski qatorlar eski handlerda, natijalar yangida)
+//  - renderChannels O'RAMI (chat.js openChat-orami bilan bir xil namuna): qidiruv faol
+//    bo'lsa natijalar ko'rinadi va fon-/discover-yangilanishi ularni BUZMAYDI; input
+//    bo'shatilsa oddiy ko'rinish (mening + trend) qaytadi
+//  - manbalar: MENING kanal/guruhlarim — lokal filtri (yopiq xususiylar ham topiladi);
+//    OMMATI — mavjud /search API (public chatlar, nom/@username bo'yicha — backend TEGILMAGAN)
+let chanQ = '', chanQT = 0, chanQRes = []
+const chanQMatch = (c, q) => (c.title || '').toLowerCase().includes(q) || (c.username || '').toLowerCase().includes(q)
+function chanQDraw() {
+  const q = chanQ, box = $('chanlist')
+  const my = [...S.chats.values()].filter((c) => c.type !== 'direct' && c.joined !== false && chanQMatch(c, q))
+    .sort((a, b) => (b.member_count || 0) - (a.member_count || 0))
+  const seen = new Set(my.map((c) => c.id))
+  const pub = chanQRes.filter((c) => !seen.has(c.id))
+  const it = (c) => `<div class="item" data-sr="${c.id}">${avHTML(c, 50, { chat: true })}<div class="mid"><div class="t1"><b>${c.type === 'channel' ? '📢' : '👥'} ${esc(c.title)}</b>${c.role === 'owner' ? '<span class="tagc">👑 egasi</span>' : c.role === 'admin' ? '<span class="tagc">⭐ admin</span>' : ''}${S.chats.get(c.id) && S.chats.get(c.id).joined !== false ? '' : c.username ? '<span class="tagc">@' + esc(c.username) + '</span>' : ''}</div><div class="t2"><span>${c.member_count || 0} ${c.type === 'channel' ? 'obunachi' : 'a‘zo'}${c.username && (S.chats.get(c.id) && S.chats.get(c.id).joined !== false) ? ' · @' + esc(c.username) : ''}</span></div></div></div>`
+  box.innerHTML = (my.length ? `<div class="sec">Mening kanal va guruhlarim (${my.length})</div>${my.map((c) => it(c)).join('')}` : '') +
+    (pub.length ? `<div class="sec">🔎 Topilgan kanal va guruhlar (${pub.length})</div>${pub.map((c) => it(c)).join('')}` : '') +
+    (!my.length && !pub.length ? `<div class="empty"><span class="big">🔎</span>«${esc(chanQ)}» bo‘yicha hech narsa topilmadi.<br>Kanal/guruh nomi yoki @username yozib ko‘ring.</div>` : '')
+}
+const _renderChannels = renderChannels
+renderChannels = async function () {
+  if (chanQ) return chanQDraw() // qidiruv faol — natijalar saqlanadi
+  return _renderChannels()
+}
+$('chq').addEventListener('input', () => {
+  clearTimeout(chanQT)
+  const v = $('chq').value.trim()
+  chanQT = setTimeout(async () => {
+    chanQ = v
+    if (!chanQ) return renderChannels() // bo'shatildi — oddiy ko'rinish qaytadi
+    chanQDraw() // DARHOL: mening kanallarim lokal filtri (tarmoqni kutmasdan)
+    try {
+      const r = await api('/search?q=' + encodeURIComponent(v))
+      if (chanQ !== v) return // foydalanuvchi boshqa so'rov yozib bo'ldi — eskisini tashla
+      chanQRes = (r.chats || []).filter((c) => c.type !== 'direct')
+      chanQDraw()
+    } catch { /* tarmoq xatosi: lokal natijalar qoladi */ }
+  }, 300)
+})
+$('chanlist').addEventListener('click', (e) => {
+  const it = e.target.closest('[data-sr]'); if (!it) return
+  const id = +it.dataset.sr
+  const c = S.chats.get(id)
+  if (c && c.joined !== false) return openChat(id)
+  const d = (chanQRes || []).find((x) => x.id === id)
+  if (d) chatPreview(d)
+})
+
 // ---------------- Men (profil va keng sozlamalar) — Task 29 «Zamonaviy» ----------------
 // Aksent ranglar — tugmalar/pufaklar/havolalar darhol bo‘yaladi
 const ACCTS = [['Ko‘k', '#2E7BFF', '#1E5FE0'], ['Binafsha', '#7C5CFF', '#6444E8'], ['Moviy', '#00C2E0', '#0099B8'], ['Yashil', '#22C55E', '#16A34A'], ['Oltin', '#FF9F0A', '#E8890A'], ['Pushti', '#FF3B5C', '#E52550']]
