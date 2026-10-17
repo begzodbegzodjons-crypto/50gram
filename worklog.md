@@ -1071,3 +1071,24 @@ Stage Summary:
 - Foydalanuvchi talabi to'liq bajarildi: BOSHQA HECH QAYSI funksiya o'zgartirilmagan — worker'da 0 bayt mantiqiy o'zgarish (faqat versiya-satri), web'da faqat QO'SHIMCHA blok (core.js'da 1 joyga qo'shildi, hech narsa o'chirilmagan/tahrirlanmagan).
 - Barcha muhrlar jonli tasdiqlandi: SMS_MODE="app", TURN-openrelay, v122-301-yo'q, v123/v124-sessiya, v127-panel-faqat-egasi, v128-tezlik-qanot, v129/v130-audio (birinchi-qo'ng'iroq ovozi + o'z-oyna qotishi), v131-sessiya-o'lmaydi (/auth/refresh + uch nusxa) — deploy sessiyani O'LDIRMAYDI (v131 mexanizmi o'z ishida).
 - Versiya: v132 (worker/core/sw sinxron). Sayt: https://50gram.uz
+
+---
+Task ID: 79
+Agent: Super Z (asosiy agent)
+Task: v133 — KANALLAR SAHIFASIDA QIDIRUV («Kanal va guruhlarni izlash»). Foydalanuvchi: "kanal va gruppa sahifasida kanal va gruppalarni izlash funksiyasi yo'q — shuni ham qo'sh, boshqa hech narsaga tegma"
+
+Work Log:
+- SINXRONIZATSIYA: lokal snapshot yana eskirgan edi — origin/main'ga hard-reset (b8f5ad1 = v132, Task 78). Navbatdagi versiya v133, Task ID 79.
+- TADQIQOT (0 backend o'zgarish): /search API (public chatlar, title/@username LIKE, member_count bo'yicha tartib) VA /discover route' allaqachon mavjud; kontaktlar tabidagi .search uslubi (#cq namunasi) va chat.js openChat-orami (const _openChat = openChat; openChat = async function...) — kod bazasining o'rnatilgan namunalari sifatida ishlatildi.
+- v133-1 (web/index.html — FAQAT +1 qator): #t-channels ichida header bilan chanlist orasiga `<div class="search"><input id="chq" placeholder="🔎 Kanal va guruhlarni izlash" autocomplete="off"></div>` — kontaktlar/chats tablaridagi bilan bir xil ko'rinish (0 CSS o'zgarishi).
+- v133-2 (web/manage.js — FAQAT QO'SHIMCHA blok, mavjud qatorlarga tilim YO'Q): chanQDraw() — «Mening kanal va guruhlarim (N)» (lokal filtri: title/@username; YOPIQ xususiy kanallar ham topiladi) + «🔎 Topilgan kanal va guruhlar (N)» (/search javobidan direct chetlatilgan) + bo'sh-holat xabari; 300ms debounce + poyga-himoya (chanQ !== v → eski javob tashlanadi); DARHOL-lokal-chizish (tarmoqni kutmasdan); renderChannels O'RAMI (qidiruv faol → chanQDraw — fon-/discover-yangilanishi natijalarni BUZMAYDI; bo'shatilsa → asl renderChannels to'liq qaytadi); natija-qatorlari data-sr belgisida — asl data-ch handleri HARFMA-HARF saqlangan (ikki ALOHIDA listener: qo'shilgan chat → openChat, qo'shilmagan → chatPreview — kanallar tabidagi mavjud xatti-harakat bilan aynan bir xil).
+- VERSIYA UCHLIGI v133: BUILD_V="v133" / __50BUILD='v133' / V='50gram-v133' — sinxron. Worker'da FAQAT versiya-satri (0 bayt mantiq). Sxema o'zgarishi YO'Q.
+- SINOV: scripts/test_v133_static.js 49/49 YASHIL (yangi qidiruv ×9, orami ×4, handlerlar-0-ta'sir ×6, worker-/search-/discover ×3, meros muhrlar ×8, v128/129/130/132 ×5, versiya-uchlik ×4, node --check ×10). Eski testlar (v129/v130/v131) FAQAT versiya-satrlarida qotadi (0 funksion regressiya). tsc 14 = BAZAVIY (0 yangi). wrangler dry-run OK (477.93 KiB).
+- CI (0389863): push muvaffaqiyatli (b8f5ad1..0389863) — Deploy zanjiri push'da avtomatik.
+- JONLI ISBOT (curl): 50gram.uz → 200 ✓; jonli index.html #chq ✓; jonli core.js __50BUILD='v133' ✓; jonli sw.js '50gram-v133' ✓; jonli manage.js: chanQDraw ✓ / data-sr ×3 ✓ / _renderChannels-orami ✓ / «Topilgan kanal va guruhlar» ✓.
+
+Stage Summary:
+- Kanallar sahifasida endi qidiruv maydoni bor: yozganda DARHOL mening kanal/guruhlarim filtrlanadi (yopiq xususiylar ham), bir vaqtda ommatdagi public kanal/guruhlar topiladi (nom yoki @username bo'yicha). Natijaga bosish: a'zo bo'lsam — chat ochiladi, bo'lmasam — ko'rish/qo'shilish oynasi (chatPreview).
+- Foydalanuvchi talabi to'liq bajarildi: BOSHQA HECH NARSA tegilmagan — worker'da 0 bayt mantiq (faqat versiya-satri), index.html'da 1 qator, manage.js'da faqat QO'SHIMCHA blok (asl data-ch handleri va renderChannels harfma-harf saqlangan).
+- Barcha muhrlar saqlangan: SMS_MODE="app", TURN-openrelay, v122/v123/v124/v127/v131-sessiya, v128-tezlik, v129/v130-audio, v132-chatlar-menyusi.
+- Versiya: v133 (worker/core/sw sinxron). Sayt: https://50gram.uz
